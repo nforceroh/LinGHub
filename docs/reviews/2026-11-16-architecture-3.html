@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Architecture review for LinGHub — third pass</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 4 4; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+
+      <header class="border-b border-slate-300 pb-6">
+        <h1 class="font-serif text-4xl tracking-tight">Architecture review for LinGHub</h1>
+        <p class="text-sm text-slate-500 mt-2">16 November 2026 · third pass · 4 candidates</p>
+        <div class="flex flex-wrap gap-5 mt-5 text-xs uppercase tracking-wider text-slate-600">
+          <span class="flex items-center gap-2"><span class="inline-block w-5 h-3 border border-slate-400 bg-white"></span> module</span>
+          <span class="flex items-center gap-2"><svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" stroke="#64748b" stroke-width="2" class="seam"/></svg> seam</span>
+          <span class="flex items-center gap-2"><svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" stroke="#dc2626" stroke-width="2"/></svg> leakage</span>
+          <span class="flex items-center gap-2"><span class="inline-block w-5 h-3 deep"></span> deep module</span>
+        </div>
+      </header>
+
+      <section class="rounded-lg border border-slate-200 bg-white p-5">
+        <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">The last three candidates</p>
+        <div class="grid sm:grid-cols-3 gap-4 text-sm">
+          <div class="border-l-4 border-emerald-400 pl-3">
+            <p class="font-semibold">Write paths</p>
+            <p class="text-slate-600 text-xs mt-1">All seven route through <span class="font-mono">_apply_and_save</span>. Uniform.</p>
+          </div>
+          <div class="border-l-4 border-emerald-400 pl-3">
+            <p class="font-semibold">D-Bus contract</p>
+            <p class="text-slate-600 text-xs mt-1">No literal member name survives outside <span class="font-mono">dbus_contract.py</span>.</p>
+          </div>
+          <div class="border-l-4 border-amber-400 pl-3">
+            <p class="font-semibold">Daemon access</p>
+            <p class="text-slate-600 text-xs mt-1">Landed, but its error handling contradicts its own docstring.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="candidates" class="space-y-14">
+
+        <!-- ============ 1 ============ -->
+        <article id="c1" class="space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h2 class="font-serif text-2xl">1. Make daemon_access keep its promise</h2>
+            <div class="flex gap-2">
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-emerald-100 text-emerald-800 font-semibold">Strong</span>
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-slate-100 text-slate-600">in-process</span>
+            </div>
+          </div>
+
+          <p class="font-mono text-sm text-slate-600">src/linghub/daemon_access.py:30–45</p>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Before — one error for two causes</p>
+              <div class="space-y-2 text-[11px]">
+                <div class="border border-red-300 bg-red-50 rounded p-2">
+                  <p class="font-mono text-red-800">connect() returns False</p>
+                  <p class="text-slate-600 mt-1">→ DaemonUnavailable</p>
+                </div>
+                <div class="border border-red-300 bg-red-50 rounded p-2">
+                  <p class="font-mono text-red-800">action() raises RuntimeError</p>
+                  <p class="text-slate-600 mt-1">→ DaemonUnavailable</p>
+                </div>
+                <p class="text-[10px] text-red-700 pt-1">The docstring says these are distinguishable. They are not.</p>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">After — two causes, two errors</p>
+              <div class="space-y-2 text-[11px]">
+                <div class="border border-slate-300 bg-slate-50 rounded p-2">
+                  <p class="font-mono">connect() returns False</p>
+                  <p class="text-slate-600 mt-1">→ DaemonUnavailable</p>
+                </div>
+                <div class="border border-emerald-300 bg-emerald-50 rounded p-2">
+                  <p class="font-mono">action() raises</p>
+                  <p class="text-slate-600 mt-1">→ propagates unchanged</p>
+                </div>
+                <p class="text-[10px] text-emerald-700 pt-1">Callers can retry a connection; they cannot retry a bug.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Problem</p>
+              <p>The module's whole reason for existing is telling "no daemon" from "the call failed", and it collapses both into one exception. A genuine bug inside an action is reported as a missing daemon.</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Solution</p>
+              <p>Only the connect failure raises <span class="font-mono text-xs">DaemonUnavailable</span>; anything the action raises propagates as itself.</p>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Wins</p>
+            <ul class="grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm list-disc list-inside text-slate-700">
+              <li>the interface matches its documentation</li>
+              <li>locality: one place decides what "unavailable" means</li>
+              <li>a real bug stops looking like a missing daemon</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ============ 2 ============ -->
+        <article id="c2" class="space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h2 class="font-serif text-2xl">2. Lift the window's decisions out of the widget</h2>
+            <div class="flex gap-2">
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-emerald-100 text-emerald-800 font-semibold">Strong</span>
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-slate-100 text-slate-600">in-process</span>
+            </div>
+          </div>
+
+          <p class="font-mono text-sm text-slate-600">src/linghub/ui/window.py:608–620, 435–438, 384–440</p>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Before — 39 methods, one class</p>
+              <div class="space-y-1 text-[10px]">
+                <div class="bg-slate-100 border-l-4 border-slate-400 px-2 py-1">construction <span class="text-slate-500">6 methods</span></div>
+                <div class="bg-red-50 border-l-4 border-red-400 px-2 py-1">refresh + rebuild <span class="text-slate-500">10 methods</span></div>
+                <div class="bg-red-50 border-l-4 border-red-400 px-2 py-1">DPI/LED writes <span class="text-slate-500">4 methods</span></div>
+                <div class="bg-red-50 border-l-4 border-red-400 px-2 py-1">profile CRUD + dialogs <span class="text-slate-500">9 methods</span></div>
+                <div class="bg-red-50 border-l-4 border-red-400 px-2 py-1">binding writes <span class="text-slate-500">4 methods</span></div>
+                <div class="bg-slate-100 border-l-4 border-slate-400 px-2 py-1">selection + loading <span class="text-slate-500">5 methods</span></div>
+              </div>
+              <p class="text-[10px] text-red-700 mt-2">Tests build it with <span class="font-mono">__new__</span> and set 11 private fields.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">After — decisions behind a seam</p>
+              <div class="space-y-1.5">
+                <div class="deep px-2 py-2 text-[10px] text-slate-200">window <span class="text-slate-500">— widgets only</span></div>
+                <div class="border border-emerald-400 bg-emerald-50 px-2 py-1.5 text-[10px]">edit target <span class="text-slate-500">— which profile, pure</span></div>
+                <div class="border border-emerald-400 bg-emerald-50 px-2 py-1.5 text-[10px]">write requests <span class="text-slate-500">— what to send, pure</span></div>
+                <div class="border border-emerald-400 bg-emerald-50 px-2 py-1.5 text-[10px]">display model <span class="text-slate-500">— state → rows, pure</span></div>
+              </div>
+              <p class="text-[10px] text-emerald-700 mt-2">Tests cross a real interface.</p>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Problem</p>
+              <p>Decisions like "which profile am I editing" and "what does this state look like as rows" are pure functions trapped behind a GTK widget, so the only way to test them is to construct the widget by hand.</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Solution</p>
+              <p>Move the decisions into modules the window calls; leave widget construction, dialogs and idle scheduling where they are.</p>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Wins</p>
+            <ul class="grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm list-disc list-inside text-slate-700">
+              <li>the interface is the test surface</li>
+              <li>no <span class="font-mono text-xs">__new__</span>, no private fields</li>
+              <li>locality: edit-target rules in one module</li>
+              <li>window shrinks toward layout</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ============ 3 ============ -->
+        <article id="c3" class="space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h2 class="font-serif text-2xl">3. A mode table for the binding editor</h2>
+            <div class="flex gap-2">
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-amber-100 text-amber-800 font-semibold">Worth exploring</span>
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-slate-100 text-slate-600">in-process</span>
+            </div>
+          </div>
+
+          <p class="font-mono text-sm text-slate-600">src/linghub/ui/binding_editor.py:189–205, 279–315</p>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Before — four chains, six modes</p>
+              <div class="space-y-1.5 font-mono text-[10px] text-slate-600">
+                <div class="bg-slate-50 px-2 py-1">_select_initial_mode <span class="text-slate-400">dict + special case</span></div>
+                <div class="bg-slate-50 px-2 py-1">_load_initial_value <span class="text-slate-400">if / elif × 4</span></div>
+                <div class="bg-red-50 border-l-2 border-red-400 px-2 py-1">_selected_value <span class="text-slate-400">if × 5 + fallback</span></div>
+                <div class="bg-red-50 border-l-2 border-red-400 px-2 py-1">_current_binding <span class="text-slate-400">if × 5 + fallback</span></div>
+              </div>
+              <p class="text-[10px] text-red-700 mt-2">A seventh mode means four edits, plus a page.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">After — one table</p>
+              <div class="deep rounded px-3 py-6 text-center">
+                <p class="text-xs uppercase tracking-wider text-slate-300">mode → (widget, kind, read)</p>
+                <p class="text-[10px] text-slate-400 mt-2">one row per mode</p>
+                <p class="text-[10px] text-slate-500 mt-3 font-mono">6 rows</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Problem</p>
+              <p>Six modes dispatched by four separate chains. Adding the sixth this week meant editing all four, and one was missed — <span class="font-mono text-xs">_select_initial_mode</span> briefly referenced an undefined name.</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Solution</p>
+              <p>One table mapping each mode to its widget, its stored kind, and how to read its value.</p>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Wins</p>
+            <ul class="grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm list-disc list-inside text-slate-700">
+              <li>adding a mode is one row</li>
+              <li>locality: mode knowledge in one place</li>
+              <li>the round-trip test covers all modes</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ============ 4 ============ -->
+        <article id="c4" class="space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h2 class="font-serif text-2xl">4. Deepen the D-Bus adapter past fifteen callbacks</h2>
+            <div class="flex gap-2">
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-amber-100 text-amber-800 font-semibold">Worth exploring</span>
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-slate-100 text-slate-600">in-process</span>
+            </div>
+          </div>
+
+          <p class="font-mono text-sm text-slate-600">src/linghub/daemon/dbus_service.py:36–53</p>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Before — interface ≈ implementation</p>
+              <div class="flex items-end gap-3 h-40">
+                <div class="flex-1 flex flex-col justify-end">
+                  <div class="bg-red-200 border border-red-400 h-32 flex items-center justify-center">
+                    <span class="text-[10px] uppercase tracking-wider text-red-900 text-center">interface<br/>15 callbacks</span>
+                  </div>
+                </div>
+                <div class="flex-1 flex flex-col justify-end">
+                  <div class="bg-slate-200 border border-slate-400 h-36 flex items-center justify-center">
+                    <span class="text-[10px] uppercase tracking-wider text-slate-700 text-center">implementation<br/>10 pass-throughs</span>
+                  </div>
+                </div>
+              </div>
+              <p class="text-[10px] text-slate-500 mt-2">Ten of sixteen methods just forward.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">After — grouped collaborators</p>
+              <div class="flex items-end gap-3 h-40">
+                <div class="flex-1 flex flex-col justify-end">
+                  <div class="bg-emerald-200 border border-emerald-500 h-10 flex items-center justify-center">
+                    <span class="text-[10px] uppercase tracking-wider text-emerald-900 text-center">interface<br/>3 groups</span>
+                  </div>
+                </div>
+                <div class="flex-1 flex flex-col justify-end">
+                  <div class="deep h-36 flex items-center justify-center">
+                    <span class="text-[10px] uppercase tracking-wider text-slate-300 text-center">implementation<br/>the daemon</span>
+                  </div>
+                </div>
+              </div>
+              <p class="text-[10px] text-slate-500 mt-2">Profile lifecycle · bindings · device settings.</p>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Problem</p>
+              <p>Fifteen constructor callbacks, ten of them pure forwards. Adding a member means editing the constructor, the assignment block, the method, and every test's fake.</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Solution</p>
+              <p>Group the callbacks into the three natural collaborators the methods already fall into, and pass those.</p>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Wins</p>
+            <ul class="grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm list-disc list-inside text-slate-700">
+              <li>interface shrinks from 15 to 3</li>
+              <li>the fake stops mirroring the constructor</li>
+              <li>locality: each group owns its members</li>
+            </ul>
+          </div>
+        </article>
+
+      </section>
+
+      <section id="top-recommendation" class="pt-4">
+        <div class="rounded-xl border-2 border-emerald-500 bg-white p-6">
+          <p class="text-xs uppercase tracking-wider text-emerald-700 font-semibold mb-2">Top recommendation</p>
+          <h2 class="font-serif text-2xl mb-2">
+            <a href="#c1" class="underline decoration-emerald-400 decoration-2 underline-offset-4">Make daemon_access keep its promise</a>
+          </h2>
+          <p class="text-sm text-slate-700">
+            It is a few lines, and it is a correctness bug rather than a tidiness one: the module exists to distinguish
+            "no daemon" from "the call failed", and currently reports both the same way. A real bug inside an action
+            is indistinguishable from a missing daemon, which is exactly the confusion the module was built to remove.
+          </p>
+        </div>
+      </section>
+
+      <section class="pt-2">
+        <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Not proposed, and why</p>
+        <ul class="text-sm text-slate-700 space-y-1 list-disc list-inside">
+          <li><span class="font-mono text-xs">hotspot_editor.py</span> (526 lines) is a one-off authoring tool, not on any hot path.</li>
+          <li><span class="font-mono text-xs">buttonmap.py</span> and <span class="font-mono text-xs">processes.py</span> have no dedicated test file but are covered through <span class="font-mono text-xs">test_ui.py</span> and <span class="font-mono text-xs">test_detection.py</span>. Not a gap.</li>
+          <li>The CLI's dispatch branches are not a problem at seven commands.</li>
+          <li>Validation sitting outside <span class="font-mono text-xs">_apply_and_save</span> is deliberate: a rejected value should not touch the config at all.</li>
+        </ul>
+      </section>
+
+    </main>
+  </body>
+</html>
