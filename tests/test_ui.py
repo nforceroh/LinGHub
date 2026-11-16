@@ -9,7 +9,13 @@ from types import SimpleNamespace
 
 from dbus_fast import MessageType
 
-from linghub.ui.buttonmap import BUTTONS, BY_INDEX, describe
+from linghub.ui.buttonmap import (
+    BUTTONS,
+    BY_INDEX,
+    MANUAL,
+    describe,
+    manual_number,
+)
 from linghub.ui.client import INTERFACE, DaemonClient
 
 
@@ -27,6 +33,24 @@ def _has_cairo() -> bool:
 class ButtonMapTests(unittest.TestCase):
     def test_covers_every_ratbag_index(self):
         self.assertEqual(sorted(BY_INDEX), list(range(11)))
+
+    def test_manual_numbers_are_one_to_eleven(self):
+        self.assertEqual(sorted(MANUAL.values()), list(range(1, 12)))
+
+    def test_manual_numbers_match_the_documented_map(self):
+        """docs/button-map.md is the source of truth for this mapping.
+
+        ratbag and the manual disagree on the tilt wheel and the profile
+        button, which is exactly the sort of thing that silently rots.
+        """
+        self.assertEqual(MANUAL[10], 9)  # scroll left
+        self.assertEqual(MANUAL[9], 10)  # scroll right
+        self.assertEqual(MANUAL[8], 11)  # profile select
+        self.assertEqual(MANUAL[0], 1)  # left click
+        self.assertEqual(MANUAL[7], 8)  # last of the aligned run
+
+    def test_manual_number_of_unknown_index(self):
+        self.assertEqual(manual_number(99), "-")
 
     def test_positions_are_fractions(self):
         for spot in BUTTONS:

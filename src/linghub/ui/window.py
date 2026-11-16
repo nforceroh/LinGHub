@@ -20,7 +20,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk
 
 from .asyncbridge import run_and_report
-from .buttonmap import BUTTONS, describe
+from .buttonmap import BUTTONS, describe, manual_number
 from .client import DaemonClient, DaemonState
 from .diagram import MouseDiagram
 
@@ -115,27 +115,33 @@ class MainWindow(Adw.ApplicationWindow):
         return box
 
     def _build_button_table(self) -> Gtk.Widget:
-        """A table of every button: number, function and ratbag index."""
+        """Every button: manual number, function and ratbag index.
+
+        The diagram labels circles with ratbag indices, so `Ratbag` is the
+        column to read against the picture. `Manual` is only there to help
+        someone holding the printed manual.
+        """
         grid = Gtk.Grid()
         grid.set_column_spacing(18)
         grid.set_row_spacing(6)
         grid.set_margin_top(6)
 
-        for column, title in enumerate(("#", "Function", "Ratbag")):
-            label = Gtk.Label(label=title, xalign=0)
+        titles = ("Manual", "Function", "Ratbag")
+        for column, title in enumerate(titles):
+            label = Gtk.Label(label=title, xalign=0 if column != 2 else 1)
             label.add_css_class("dim-label")
             label.add_css_class("caption")
             grid.attach(label, column, 0, 1, 1)
 
         self._table_rows: dict[int, Gtk.Widget] = {}
         for row, spot in enumerate(BUTTONS, start=1):
-            number = Gtk.Label(label=str(spot.index), xalign=0)
+            manual = Gtk.Label(label=manual_number(spot.index), xalign=0)
+            manual.add_css_class("dim-label")
             function = Gtk.Label(label=describe(spot.index), xalign=0)
             function.set_hexpand(True)
             ratbag = Gtk.Label(label=str(spot.index), xalign=1)
-            ratbag.add_css_class("dim-label")
 
-            for column, widget in enumerate((number, function, ratbag)):
+            for column, widget in enumerate((manual, function, ratbag)):
                 grid.attach(widget, column, row, 1, 1)
             self._table_rows[spot.index] = function
 

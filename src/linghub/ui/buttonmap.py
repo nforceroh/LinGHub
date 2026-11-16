@@ -41,6 +41,17 @@ NAMES: tuple[tuple[int, str, str], ...] = (
     (10, "Scroll left", ""),
 )
 
+
+# The owner's manual numbers the buttons 1-12 in a different order from
+# ratbag, so the UI needs both to be readable. Kept separate from NAMES
+# because it is a display-only lookup: nothing in the config or on the wire
+# uses these numbers.
+_MANUAL_ORDER: tuple[int, ...] = (0, 1, 2, 3, 4, 5, 6, 7, 10, 9, 8)
+
+MANUAL: dict[int, int] = {
+    index: manual for manual, index in enumerate(_MANUAL_ORDER, start=1)
+}
+
 # Used only when hotspots.json is absent. These were measured against
 # images/g502.png, which has a different crop from g502_trans.png, so they are
 # approximate on the base image. Run `linghub hotspots` to place them exactly.
@@ -95,3 +106,8 @@ def describe(index: int) -> str:
     if spot.g_name:
         return f"{spot.name} ({spot.g_name})"
     return spot.name
+
+
+def manual_number(index: int) -> str:
+    """The owner's manual number for a ratbag index, or a dash if unknown."""
+    return str(MANUAL.get(index, "-"))
