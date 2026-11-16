@@ -34,10 +34,32 @@ linghub list          # list hardware profiles
 linghub switch 1      # activate profile 1
 linghub detect        # report which configured game is running
 linghub run           # run the daemon in the foreground
+linghub ui            # open the graphical interface
 ```
 
 `switch` reports that ratbagd has queued a commit. Commits are asynchronous, so
 that message does not confirm the hardware write succeeded.
+
+## Graphical interface
+
+`linghub ui` opens a GTK4 window showing the mouse diagram, the profile list and
+the bindings of the selected profile. Clicking a hotspot on the diagram selects
+that button; activating a profile in the list loads it onto the mouse.
+
+The UI talks to the daemon over D-Bus, so the daemon must be running. It needs
+PyGObject, which on Fedora is the `python3-gobject` package:
+
+```bash
+sudo dnf install python3-gobject
+```
+
+If the virtualenv was created without system packages, enable them so `gi` is
+importable:
+
+```bash
+sed -i 's/include-system-site-packages = false/include-system-site-packages = true/' \
+  .venv/pyvenv.cfg
+```
 
 ## Running as a service
 

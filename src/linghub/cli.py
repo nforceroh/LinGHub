@@ -134,7 +134,14 @@ def main() -> int:
     run_cmd.add_argument("--config", default=config_module.DEFAULT_CONFIG_PATH, help="config file path")
     run_cmd.add_argument("--interval", type=float, default=None, help="override the poll interval")
 
+    commands.add_parser("ui", help="open the graphical interface")
+
     args = parser.parse_args()
+
+    if args.command == "ui":
+        from .ui.app import main as ui_main
+
+        return ui_main()
 
     if args.command == "detect":
         return _detect_watch(args) if args.watch else _detect_once(args)

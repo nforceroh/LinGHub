@@ -9,6 +9,11 @@ description = "Profile manager for the Logitech G502 family on Linux"
 requires-python = ">=3.11"
 dependencies = ["dbus-fast>=5.2,<6"]
 
+[project.optional-dependencies]
+# The UI needs PyGObject, which is a system package on Fedora
+# (python3-gobject) rather than something pip can install reliably.
+ui = ["pygobject>=3.42", "pycairo>=1.20"]
+
 [project.scripts]
 linghub = "linghub.cli:main"
 
