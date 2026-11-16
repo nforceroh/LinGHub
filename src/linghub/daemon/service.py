@@ -20,6 +20,7 @@ from dbus_fast import DBusError as DBusFastError
 
 from ..hardware.ratbag import DeviceNotFound, RatbagClient
 from ..hardware.writer import ProfileWriter, WriteError
+from ..notify import Notifier, profile_message
 from ..domain.profile import Binding
 from .dbus_service import PATH, SERVICE, ManagerInterface
 from .snapshot import StateSnapshot
@@ -58,13 +59,15 @@ class Daemon:
         self._session_bus: MessageBus | None = None
         self._interface: ManagerInterface | None = None
         self._report_rates: list[int] = []
+        self._notifier: Notifier | None = None
         self._manual_override: str | None = None
         self._detected_game: str | None = None
 
     async def _connect(self) -> None:
-        self._bus = await asyncio.wait_for(
-            MessageBus(bus_type=BusType.SYSTEM).connect(), timeout=5
-        )
+        if self._bus is None:
+            self._bus = await asyncio.wait_for(
+                MessageBus(bus_type=BusType.SYSTEM).connect(), timeout=5
+            )
         client = RatbagClient(self._bus)
         device = await client.find_device()
         self._writer = ProfileWriter(client, device)
@@ -76,25 +79,21 @@ class Daemon:
             device.name, device.path, self._report_rates,
         )
 
-    async def _connect_with_retry(self, interval: float) -> None:
-        """Wait for the device to appear rather than exiting.
+    async def _start_notifications(self) -> None:
+        """Attach to the notification daemon, if there is one.
 
-        A missing device is usually transient: the mouse may be unplugged, or
-        a stale Wine process may be holding a deleted hidraw node. Exiting
-        would mean the service stays dead until someone notices, so retry and
-        log the diagnosis once.
+        Failure is not fatal: a headless machine has no notifications and must
+        still switch profiles.
         """
-        reported = False
-        while True:
-            try:
-                await self._connect()
-                return
-            except DeviceNotFound as exc:
-                if not reported:
-                    logger.error("%s", exc)
-                    logger.info("retrying every %ss until the device appears", interval)
-                    reported = True
-                await asyncio.sleep(interval)
+        self._notifier = Notifier()
+        await self._notifier.connect()
+
+    async def _notify_switch(self, profile_name: str) -> None:
+        """Tell the user which profile was loaded."""
+        if self._notifier is None or not self._notifier.available:
+            return
+        summary, body = profile_message(profile_name, self._detected_game)
+        await self._notifier.notify(summary, body, tag="profile")
 
     async def _export_interface(self) -> None:
         """Publish the manager interface on the session bus.
@@ -433,6 +432,7 @@ class Daemon:
 
         if self._interface is not None:
             self._interface.ProfileChanged(target.name)
+        await self._notify_switch(target.name)
 
     async def _tick(self) -> None:
         assert self._state is not None
@@ -475,8 +475,22 @@ class Daemon:
             raise ConfigStartupError("cannot start without a valid config")
 
         interval = self._poll_interval or self._state.config.poll_interval
-        await self._connect_with_retry(interval)
+
+        # Publish the interface before looking for the device. A mouse that is
+        # unplugged, or on the far side of a KVM switch, must not make the
+        # daemon invisible to the UI and the tray: they can still read the
+        # config and see which profile *would* be loaded.
         await self._export_interface()
+        await self._start_notifications()
+
+        # Try once rather than looping here: blocking would stop the tick loop,
+        # so games would go undetected for as long as the mouse was absent.
+        # _apply_target reconnects on each tick until the device appears.
+        try:
+            await self._connect()
+        except DeviceNotFound as exc:
+            logger.warning("%s", exc)
+            logger.info("detection will run without the device until it appears")
 
         # GameMode is an accelerator: when it fires, run a tick immediately
         # instead of waiting for the next poll. When it is absent the poll
@@ -499,6 +513,8 @@ class Daemon:
                     pass
                 self._wakeup.clear()
         finally:
+            if self._notifier is not None:
+                self._notifier.disconnect()
             self._gamemode.disconnect()
             if self._session_bus is not None:
                 self._session_bus.disconnect()

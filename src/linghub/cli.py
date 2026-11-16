@@ -186,6 +186,8 @@ def main() -> int:
         "status", help="report what the running daemon is doing"
     )
 
+    commands.add_parser("tray", help="show a tray icon for switching profiles")
+
     hotspots_cmd = commands.add_parser(
         "hotspots", help="place button hotspots on a mouse image"
     )
@@ -204,6 +206,12 @@ def main() -> int:
 
     if args.command == "status":
         return _run_status()
+
+    if args.command == "tray":
+        # Imported lazily: the tray is GTK3 and the rest of the app is GTK4.
+        from .tray import main as tray_main
+
+        return tray_main()
 
     if args.command == "ui":
         from .ui.app import main as ui_main

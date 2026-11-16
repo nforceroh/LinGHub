@@ -280,6 +280,47 @@ class DeviceLossTests(unittest.TestCase):
         self.assertEqual(attempts["n"], 3)
         self.assertIsNotNone(daemon._writer)
 
+    def test_startup_does_not_require_the_device(self):
+        """The daemon must be visible to the UI and tray with no mouse present.
+
+        Blocking at startup meant it published nothing and detected nothing for
+        as long as the device was away - which is normal on a KVM switch.
+        """
+        import asyncio
+
+        from linghub.daemon.service import Daemon
+        from linghub.hardware.ratbag import DeviceNotFound
+
+        daemon = Daemon()
+        daemon._state = DaemonState(config=make_config(DESKTOP))
+        exported = {"n": 0}
+        notified = {"n": 0}
+
+        async def connect():
+            raise DeviceNotFound("no G502 found")
+
+        async def export():
+            exported["n"] += 1
+
+        async def notify():
+            notified["n"] += 1
+
+        daemon._connect = connect
+        daemon._export_interface = export
+        daemon._start_notifications = notify
+
+        async def stop_soon():
+            await asyncio.sleep(0.05)
+            raise KeyboardInterrupt
+
+        daemon._tick = stop_soon
+        try:
+            asyncio.run(daemon.run())
+        except KeyboardInterrupt:
+            pass
+        self.assertEqual(exported["n"], 1, "the interface was not published")
+        self.assertEqual(notified["n"], 1)
+
     def test_a_tick_with_no_device_does_not_raise(self):
         """After a failed reconnect there is nothing to write to; skip, don't crash."""
         import asyncio
