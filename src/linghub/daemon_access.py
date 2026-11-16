@@ -10,23 +10,31 @@ module handles connecting, running it on a fresh event loop, and disconnecting.
 
 Deliberately not a client wrapper: it takes a callable so it cannot grow an
 interface that mirrors DaemonClient's.
+
+The import of DaemonState at module level is safe for the tray: it pulls in
+dbus_fast but no GTK namespace, so GTK3 and GTK4 still never meet.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Callable
+from typing import Any, Callable, TypeVar
+
+from .ui.client import DaemonState
 
 
 logger = logging.getLogger("linghub.daemon_access")
+
+
+T = TypeVar("T")
 
 
 class DaemonUnavailable(RuntimeError):
     """The daemon is not running, or is not answering on the session bus."""
 
 
-async def run_with_client(action: Callable[[Any], Any]) -> Any:
+async def run_with_client(action: Callable[[Any], T]) -> T:
     """Connect to the daemon, run `action(client)`, then disconnect.
 
     Raises DaemonUnavailable when there is no daemon, so callers can tell
@@ -46,7 +54,7 @@ async def run_with_client(action: Callable[[Any], Any]) -> Any:
         client.disconnect()
 
 
-def call(action: Callable[[Any], Any], timeout: float = 10.0) -> Any:
+def call(action: Callable[[Any], T], timeout: float = 10.0) -> T:
     """Run `action(client)` from synchronous code on a fresh event loop.
 
     One loop per call rather than a shared one: these calls are short, and a
@@ -56,7 +64,7 @@ def call(action: Callable[[Any], Any], timeout: float = 10.0) -> Any:
     return asyncio.run(asyncio.wait_for(run_with_client(action), timeout))
 
 
-def state() -> Any:
+def state() -> DaemonState:
     """The daemon's current state. Convenience for the common case."""
     async def read(client):
         return await client.state()

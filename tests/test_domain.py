@@ -82,5 +82,39 @@ class ProfileTests(unittest.TestCase):
         self.assertFalse(Profile("wot", games=(Game("x.exe"),)).is_desktop)
 
 
+class WithLedsTests(unittest.TestCase):
+    """Every LED zone takes the same settings, and nothing else changes."""
+
+    def _profile(self, leds=({"index": 0, "mode": "on"},)):
+        return Profile("desktop", leds=tuple(leds))
+
+    def test_every_zone_takes_the_settings(self):
+        updated = self._profile().with_leds({"mode": "breathing", "brightness": 100})
+        self.assertEqual(
+            updated.leds,
+            ({"index": 0, "mode": "breathing", "brightness": 100},),
+        )
+
+    def test_zone_specific_facts_are_kept(self):
+        profile = Profile("desktop", leds=(
+            {"index": 0, "mode": "on"},
+            {"index": 1, "mode": "on"},
+        ))
+        updated = profile.with_leds({"mode": "off"})
+        self.assertEqual(
+            [entry["index"] for entry in updated.leds], [0, 1],
+            "the zone indices were lost",
+        )
+
+    def test_a_profile_with_no_zones_is_unchanged(self):
+        profile = Profile("desktop")
+        self.assertEqual(profile.with_leds({"mode": "on"}).leds, ())
+
+    def test_the_original_profile_is_untouched(self):
+        profile = self._profile()
+        profile.with_leds({"mode": "off"})
+        self.assertEqual(profile.leds, ({"index": 0, "mode": "on"},))
+
+
 if __name__ == "__main__":
     unittest.main()

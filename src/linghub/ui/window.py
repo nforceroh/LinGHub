@@ -8,7 +8,6 @@ goes to the daemon over D-Bus, which is the only writer of the config
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from pathlib import Path
 
@@ -310,24 +309,23 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     async def _write_dpi(self, profile: str, slots: list, rate: int) -> None:
-        try:
+        async def change() -> bool:
             for index, (dpi, is_default, disabled) in enumerate(slots):
-                ok = await self._client.set_resolution(
+                if not await self._client.set_resolution(
                     profile, index, dpi,
                     make_default=is_default, disabled=disabled,
-                )
-                if not ok:
+                ):
                     self._status.set_text(f"The daemon rejected DPI slot {index + 1}.")
-                    return
+                    return False
             if rate and not await self._client.set_report_rate(profile, rate):
                 self._status.set_text("The daemon rejected that report rate.")
-                return
-        except (RuntimeError, OSError) as exc:
-            self._status.set_text(f"Could not change the DPI: {exc}")
-            return
-        if self._dpi_panel is not None:
-            self._dpi_panel.mark_saved()
-        self._status.set_text(f"Updated the DPI of {profile}.")
+                return False
+            return True
+
+        if await self._daemon_write("Could not change the DPI", change):
+            if self._dpi_panel is not None:
+                self._dpi_panel.mark_saved()
+            self._status.set_text(f"Updated the DPI of {profile}.")
 
     def _on_led_saved(self, mode: str, brightness: int, duration: int, color) -> None:
         """Persist the panel's staged values when Save is pressed."""
@@ -342,19 +340,55 @@ class MainWindow(Adw.ApplicationWindow):
     async def _write_leds(
         self, profile: str, mode: str, brightness: int, duration: int, color
     ) -> None:
+        async def change() -> bool:
+            return await self._client.set_leds(
+                profile, mode, brightness, duration, color
+            )
+
+        if await self._daemon_write("Could not change the lighting", change):
+            # Only now do the panel's values become the saved baseline, so a
+            # failed write leaves the edits intact and still worth retrying.
+            if self._led_panel is not None:
+                self._led_panel.mark_saved()
+            self._status.set_text(f"Updated the lighting of {profile}.")
+
+    async def _daemon_write(self, failure: str, change) -> bool:
+        """Run one daemon write and report the outcome on the status line.
+
+        Every write path here needs the same shape: run the change, turn a
+        transport error or a `False` return into a status message, and only
+        report success (and refresh) when the daemon accepted it. `change`
+        reports its own rejection reason when it has a more specific one.
+        """
         try:
-            ok = await self._client.set_leds(profile, mode, brightness, duration, color)
+            ok = await change()
         except (RuntimeError, OSError) as exc:
-            self._status.set_text(f"Could not change the lighting: {exc}")
-            return
+            self._status.set_text(f"{failure}: {exc}")
+            return False
         if not ok:
-            self._status.set_text("The daemon rejected that lighting change.")
-            return
-        # Only now do the panel's values become the saved baseline, so a
-        # failed write leaves the edits intact and still worth retrying.
-        if self._led_panel is not None:
-            self._led_panel.mark_saved()
-        self._status.set_text(f"Updated the lighting of {profile}.")
+            return False
+        await self._refresh()
+        return True
+
+    async def _dialog_write(self, dialog, rejected: str, change) -> bool:
+        """The same rule for writes whose failures belong in a dialog.
+
+        Create and rename run from a prompt, so a rejection has to appear
+        where the user typed, not on a status line behind the window.
+        `rejected` is the message for a `False` return; a transport error is
+        shown as its own text.
+        """
+        try:
+            ok = await change()
+        except (RuntimeError, OSError) as exc:
+            dialog.show_error(str(exc))
+            return False
+        if not ok:
+            dialog.show_error(rejected)
+            return False
+        dialog.close()
+        await self._refresh()
+        return True
 
     async def _refresh_bindings(self) -> None:
         """Read the edited profile's bindings and lighting."""
@@ -454,19 +488,26 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     async def _do_create_profile(self, name: str, executable: str, dialog) -> None:
-        try:
-            ok = await self._client.create_profile(name, executable)
-        except (RuntimeError, OSError) as exc:
-            dialog.show_error(str(exc))
+        async def change() -> bool:
+            return await self._client.create_profile(name, executable)
+
+        if await self._dialog_write(
+            dialog, f"Cannot create {name!r}. The name may already be in use.", change
+        ):
+            self._status.set_text(f"Created profile {name}.")
+
+    async def _do_rename_profile(self, old: str, new: str, dialog) -> None:
+        if not new or new == old:
+            dialog.show_error("Enter a different name.")
             return
-        if not ok:
-            dialog.show_error(
-                f"Cannot create {name!r}. The name may already be in use."
-            )
-            return
-        dialog.close()
-        self._status.set_text(f"Created profile {name}.")
-        await self._refresh()
+
+        async def change() -> bool:
+            return await self._client.rename_profile(old, new)
+
+        if await self._dialog_write(
+            dialog, f"Cannot rename to {new!r}. The name may be in use.", change
+        ):
+            self._status.set_text(f"Renamed {old} to {new}.")
 
     def _prompt_rename_profile(self) -> None:
         old = self._selected_profile()
@@ -482,22 +523,6 @@ class MainWindow(Adw.ApplicationWindow):
                 self._on_async_error,
             ),
         )
-
-    async def _do_rename_profile(self, old: str, new: str, dialog) -> None:
-        if not new or new == old:
-            dialog.show_error("Enter a different name.")
-            return
-        try:
-            ok = await self._client.rename_profile(old, new)
-        except (RuntimeError, OSError) as exc:
-            dialog.show_error(str(exc))
-            return
-        if not ok:
-            dialog.show_error(f"Cannot rename to {new!r}. The name may be in use.")
-            return
-        dialog.close()
-        self._status.set_text(f"Renamed {old} to {new}.")
-        await self._refresh()
 
     def _prompt_delete_profile(self) -> None:
         name = self._selected_profile()
@@ -529,16 +554,11 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.present()
 
     async def _do_delete_profile(self, name: str) -> None:
-        try:
-            ok = await self._client.delete_profile(name)
-        except (RuntimeError, OSError) as exc:
-            self._status.set_text(f"Could not delete {name}: {exc}")
-            return
-        if not ok:
-            self._status.set_text(f"The daemon refused to delete {name}.")
-            return
-        self._status.set_text(f"Deleted profile {name}.")
-        await self._refresh()
+        async def change() -> bool:
+            return await self._client.delete_profile(name)
+
+        if await self._daemon_write(f"Could not delete {name}", change):
+            self._status.set_text(f"Deleted profile {name}.")
 
     def _ask_for_text(
         self, *, title: str, label: str, on_accept, initial: str = "",
@@ -616,19 +636,13 @@ class MainWindow(Adw.ApplicationWindow):
         return True
 
     async def _write_binding(self, profile: str, index: int, kind: str, value) -> None:
-        try:
+        async def change() -> bool:
             if kind == "disabled":
-                ok = await self._client.clear_binding(profile, index)
-            else:
-                ok = await self._client.set_binding(profile, index, kind, str(value))
-        except (RuntimeError, OSError) as exc:
-            self._status.set_text(f"Could not change the binding: {exc}")
-            return
-        if not ok:
-            self._status.set_text("The daemon rejected that binding.")
-            return
-        self._status.set_text(f"Updated {describe(index)} in {profile}.")
-        await self._refresh()
+                return await self._client.clear_binding(profile, index)
+            return await self._client.set_binding(profile, index, kind, str(value))
+
+        if await self._daemon_write("Could not change the binding", change):
+            self._status.set_text(f"Updated {describe(index)} in {profile}.")
 
     # --- interaction -----------------------------------------------------
 
@@ -662,12 +676,8 @@ class MainWindow(Adw.ApplicationWindow):
         run_and_report(self._load_profile(name), self._on_async_error)
 
     async def _load_profile(self, name: str) -> None:
-        try:
-            ok = await self._client.load_profile(name)
-        except (RuntimeError, OSError) as exc:
-            self._status.set_text(f"Could not load {name}: {exc}")
-            return
-        if not ok:
-            self._status.set_text(f"Daemon rejected profile {name}")
-            return
-        await self._refresh()
+        async def change() -> bool:
+            return await self._client.load_profile(name)
+
+        if await self._daemon_write(f"Could not load {name}", change):
+            self._status.set_text(f"Loaded {name}.")

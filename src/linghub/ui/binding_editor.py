@@ -16,9 +16,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk
 
 from .binding_labels import (
-    BUTTON_CHOICES,
     COMMON_KEYS,
-    SPECIAL_CHOICES,
     describe_binding,
     describe_chord,
 )
@@ -26,14 +24,13 @@ from .buttonmap import describe
 
 
 from .binding_modes import (
+    CHORD,
+    DROPDOWN,
     LABELS as MODE_LABELS,
-    MODE_BUTTON,
+    MODES,
     MODE_CHORD,
-    MODE_KEY,
     MODE_KEY_MACRO,
-    MODE_NOTHING,
-    MODE_SPECIAL,
-    is_single_key_macro,
+    STATIC,
     mode_for,
     single_key_of,
     stored_binding,
@@ -79,26 +76,21 @@ class BindingEditor(Adw.Window):
         self._modes.connect("notify::selected", lambda *_a: self._sync_mode())
         box.append(self._modes)
 
-        # One stacked page per mode; only the selected one is shown.
+        # One stacked page per mode; only the selected one is shown. The pages
+        # come from the mode table, so adding a mode is one row there.
         self._stack = Gtk.Stack()
         self._stack.set_transition_type(Gtk.StackTransitionType.NONE)
         self._stack.set_margin_top(6)
         box.append(self._stack)
 
-        self._key_dropdown = self._build_choice_page(
-            MODE_KEY, [(name, label) for name, label in COMMON_KEYS]
-        )
-        self._key_macro_dropdown = self._build_choice_page(
-            MODE_KEY_MACRO, [(name, label) for name, label in COMMON_KEYS]
-        )
-        self._special_dropdown = self._build_choice_page(
-            MODE_SPECIAL, list(SPECIAL_CHOICES)
-        )
-        self._button_dropdown = self._build_choice_page(
-            MODE_BUTTON, [(str(number), label) for number, label in BUTTON_CHOICES]
-        )
-        self._build_chord_page()
-        self._build_nothing_page()
+        self._dropdowns: dict[str, Gtk.DropDown] = {}
+        for mode in MODES:
+            if mode.page == DROPDOWN:
+                self._dropdowns[mode.name] = self._build_choice_page(mode)
+            elif mode.page == CHORD:
+                self._build_chord_page(mode.name)
+            elif mode.page == STATIC:
+                self._build_nothing_page(mode.name)
 
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         actions.set_halign(Gtk.Align.END)
@@ -118,44 +110,44 @@ class BindingEditor(Adw.Window):
 
         toolbar.set_content(box)
         self.set_content(toolbar)
-        self._builder = box
         self._select_initial_mode(kind, value)
         self._load_initial_value(kind, value)
         self._sync_mode()
 
     # --- construction ----------------------------------------------------
 
-    def _build_choice_page(self, mode: str, choices) -> Gtk.DropDown:
+    def _build_choice_page(self, mode) -> Gtk.DropDown:
+        choices = mode.dropdown_choices()
         dropdown = Gtk.DropDown.new_from_strings([label for _value, label in choices])
         dropdown._choices = [value for value, _label in choices]
         wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         wrapper.append(dropdown)
-        self._stack.add_named(wrapper, mode)
+        self._stack.add_named(wrapper, mode.name)
         return dropdown
 
-    def _build_chord_page(self) -> None:
+    def _build_chord_page(self, name: str) -> None:
         wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
 
         self._modifier_checks: dict[str, Gtk.CheckButton] = {}
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        for name, label in (
+        for name_, label in (
             ("KEY_LEFTCTRL", "Ctrl"),
             ("KEY_LEFTSHIFT", "Shift"),
             ("KEY_LEFTALT", "Alt"),
         ):
             check = Gtk.CheckButton(label=label)
-            self._modifier_checks[name] = check
+            self._modifier_checks[name_] = check
             row.append(check)
         wrapper.append(row)
 
         self._chord_labels = [label for _name, label in COMMON_KEYS]
         self._chord_key = Gtk.DropDown.new_from_strings(self._chord_labels)
-        self._chord_key._choices = [name for name, _label in COMMON_KEYS]
+        self._chord_key._choices = [name_ for name_, _label in COMMON_KEYS]
         wrapper.append(self._chord_key)
 
-        self._stack.add_named(wrapper, MODE_CHORD)
+        self._stack.add_named(wrapper, name)
 
-    def _build_nothing_page(self) -> None:
+    def _build_nothing_page(self, name: str) -> None:
         label = Gtk.Label(
             xalign=0,
             wrap=True,
@@ -166,7 +158,7 @@ class BindingEditor(Adw.Window):
             ),
         )
         label.add_css_class("dim-label")
-        self._stack.add_named(label, MODE_NOTHING)
+        self._stack.add_named(label, name)
 
     def _select_initial_mode(self, kind: str, value: object = None) -> None:
         wanted = mode_for(kind, value)
@@ -188,20 +180,11 @@ class BindingEditor(Adw.Window):
             # The chord page is a set of checkboxes plus a key, not a dropdown.
             self.load_chord(str(value))
             return
-        dropdown = self._dropdowns().get(mode)
+        dropdown = self._dropdowns.get(mode)
         if dropdown is None:
             return
         text = single_key_of(str(value)) if mode == MODE_KEY_MACRO else str(value)
         self._select_in(dropdown, text)
-
-    def _dropdowns(self) -> dict:
-        """The modes whose value is a single dropdown choice."""
-        return {
-            MODE_KEY: self._key_dropdown,
-            MODE_KEY_MACRO: self._key_macro_dropdown,
-            MODE_SPECIAL: self._special_dropdown,
-            MODE_BUTTON: self._button_dropdown,
-        }
 
     @staticmethod
     def _select_in(dropdown: Gtk.DropDown, value: str) -> None:
@@ -258,7 +241,7 @@ class BindingEditor(Adw.Window):
     def _selected_value(self) -> str:
         """The value for the current mode, as the config should store it."""
         mode = self.mode
-        dropdown = self._dropdowns().get(mode)
+        dropdown = self._dropdowns.get(mode)
         if dropdown is not None:
             return dropdown._choices[dropdown.get_selected()]
         if mode == MODE_CHORD:

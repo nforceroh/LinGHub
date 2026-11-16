@@ -2,151 +2,117 @@
 
 The interface is a thin translation layer, so these tests check that it
 routes calls to the daemon and reports state faithfully, without a bus.
+
+The interface takes the real collaborators from `writes.py`, backed by a
+fake state and save. Testing the adapter against the real collaborators
+rather than fakes of them means a change to the collaborators shows up here
+as a routing difference, not as a silently stale fake.
 """
 
 import unittest
 
+from linghub.config import Config
 from linghub.daemon.dbus_service import INTERFACE, ManagerInterface
 from linghub.daemon.snapshot import StateSnapshot
+from linghub.daemon.state import DaemonState
+from linghub.daemon.writes import (
+    Bindings,
+    ConfigWrites,
+    DeviceSettings,
+    ProfileLifecycle,
+)
+from linghub.domain.profile import Binding, Game, Profile
+
+
+def make_config(bindings: dict | None = None) -> Config:
+    return Config(
+        profiles=[
+            Profile(name="desktop"),
+            Profile(
+                name="wot", games=(Game("x.exe"),),
+                bindings={
+                    int(index): Binding(kind, value)
+                    for index, (kind, value) in (bindings or {}).items()
+                },
+                resolutions=({"dpi": 800}, {"dpi": 1600}),
+                leds=({"index": 0, "mode": "on"},),
+            ),
+        ],
+        desktop_profile="desktop",
+        poll_interval=2.0,
+    )
 
 
 class FakeDaemon:
+    """A state provider plus the hooks only the daemon can answer.
+
+    The collaborators read and edit the config through it, so the adapter's
+    routing is tested against the real write rule, not a copy of it.
+    """
+
     def __init__(self, snapshot=None, accept=True, bindings=None):
         self.snapshot = snapshot or StateSnapshot()
         self.accept = accept
         self.loaded: list[str] = []
         self.reloads = 0
-        self.bindings = bindings or {}
-        self.set_calls: list[tuple] = []
+        self.state: DaemonState | None = DaemonState(config=make_config(bindings))
 
-    def on_load_profile(self, name):
+    # --- the hooks the collaborators call back into ---
+
+    def request_load(self, name: str) -> bool:
         self.loaded.append(name)
         return self.accept
 
-    def on_reload(self):
+    def request_reload(self) -> bool:
         self.reloads += 1
         return True
+
+    def save(self) -> bool:
+        return self.accept
+
+    def wake(self) -> None:
+        self.woken = getattr(self, "woken", 0) + 1
+
+    def report_rates(self) -> tuple[int, ...]:
+        return (125, 250, 500, 1000)
+
+    # --- the collaborators, built on this fake ---
+
+    @property
+    def profiles(self) -> ProfileLifecycle:
+        return ProfileLifecycle(
+            state=lambda: self.state,
+            writes=self._writes(),
+            request_load=self.request_load,
+            request_reload=self.request_reload,
+        )
+
+    @property
+    def bindings(self) -> Bindings:
+        return Bindings(state=lambda: self.state, writes=self._writes())
+
+    @property
+    def settings(self) -> DeviceSettings:
+        return DeviceSettings(
+            state=lambda: self.state,
+            writes=self._writes(),
+            report_rates=self.report_rates,
+        )
+
+    def _writes(self) -> ConfigWrites:
+        return ConfigWrites(
+            state=lambda: self.state, save=self.save, wake=self.wake,
+        )
 
     def get_state(self):
         return self.snapshot
 
-    def get_bindings(self, profile):
-        return self.bindings
-
-    def on_set_binding(self, profile, index, kind, value):
-        self.set_calls.append((profile, index, kind, value))
-        return self.accept
-
-    def get_leds(self, profile):
-        return getattr(self, "leds", {})
-
-    def on_set_leds(self, profile, settings):
-        self.led_calls = getattr(self, "led_calls", [])
-        self.led_calls.append((profile, settings))
-        return self.accept
-
-    def get_resolutions(self, profile):
-        return getattr(self, "resolutions", ())
-
-    def get_report_rate(self, profile):
-        return getattr(self, "report_rate", 0)
-
-    def get_report_rates(self, profile):
-        return getattr(self, "report_rates", (125, 250, 500, 1000))
-
-    def on_set_resolution(self, profile, index, dpi, make_default, disabled):
-        self.res_calls = getattr(self, "res_calls", [])
-        self.res_calls.append((profile, index, dpi, make_default, disabled))
-        return self.accept
-
-    def on_create_profile(self, name, executable):
-        self.created = getattr(self, "created", [])
-        self.created.append((name, executable))
-        return self.accept
-
-    def on_rename_profile(self, old, new):
-        self.renamed = getattr(self, "renamed", [])
-        self.renamed.append((old, new))
-        return self.accept
-
-    def on_delete_profile(self, name):
-        self.deleted = getattr(self, "deleted", [])
-        self.deleted.append(name)
-        return self.accept
-
-    def on_set_report_rate(self, profile, rate):
-        self.rate_calls = getattr(self, "rate_calls", [])
-        self.rate_calls.append((profile, rate))
-        return self.accept
-
-
-class FakeProfiles:
-    """The profile-lifecycle collaborator, backed by FakeDaemon."""
-
-    def __init__(self, daemon):
-        self._daemon = daemon
-
-    def load(self, name):
-        return self._daemon.on_load_profile(name)
-
-    def reload(self):
-        return self._daemon.on_reload()
-
-    def create(self, name, executable):
-        return self._daemon.on_create_profile(name, executable)
-
-    def rename(self, old, new):
-        return self._daemon.on_rename_profile(old, new)
-
-    def delete(self, name):
-        return self._daemon.on_delete_profile(name)
-
-
-class FakeBindings:
-    def __init__(self, daemon):
-        self._daemon = daemon
-
-    def get(self, profile):
-        return self._daemon.get_bindings(profile)
-
-    def set(self, profile, index, kind, value):
-        return self._daemon.on_set_binding(profile, index, kind, value)
-
-    def clear(self, profile, index):
-        return self._daemon.on_set_binding(profile, index, "disabled", None)
-
-
-class FakeSettings:
-    def __init__(self, daemon):
-        self._daemon = daemon
-
-    def get_resolutions(self, profile):
-        return self._daemon.get_resolutions(profile)
-
-    def set_resolution(self, profile, index, dpi, make_default, disabled):
-        return self._daemon.on_set_resolution(profile, index, dpi, make_default, disabled)
-
-    def get_report_rate(self, profile):
-        return self._daemon.get_report_rate(profile)
-
-    def get_report_rates(self, profile):
-        return self._daemon.get_report_rates(profile)
-
-    def set_report_rate(self, profile, rate):
-        return self._daemon.on_set_report_rate(profile, rate)
-
-    def get_leds(self, profile):
-        return self._daemon.get_leds(profile)
-
-    def set_leds(self, profile, settings):
-        return self._daemon.on_set_leds(profile, settings)
-
 
 def make_interface(daemon):
     return ManagerInterface(
-        profiles=FakeProfiles(daemon),
-        bindings=FakeBindings(daemon),
-        settings=FakeSettings(daemon),
+        profiles=daemon.profiles,
+        bindings=daemon.bindings,
+        settings=daemon.settings,
         get_state=daemon.get_state,
     )
 
@@ -167,8 +133,8 @@ class MethodTests(unittest.TestCase):
     def test_load_profile_routes_to_daemon(self):
         daemon = FakeDaemon()
         interface = make_interface(daemon)
-        self.assertTrue(call(interface, "LoadProfile", "world-of-tanks"))
-        self.assertEqual(daemon.loaded, ["world-of-tanks"])
+        self.assertTrue(call(interface, "LoadProfile", "wot"))
+        self.assertEqual(daemon.loaded, ["wot"])
 
     def test_load_profile_reports_rejection(self):
         daemon = FakeDaemon(accept=False)
@@ -197,14 +163,15 @@ class BindingMethodTests(unittest.TestCase):
         )
 
     def test_get_bindings_returns_empty_for_an_unknown_profile(self):
-        daemon = FakeDaemon(bindings={})
+        daemon = FakeDaemon()
         self.assertEqual(call(make_interface(daemon), "GetBindings", "nope"), [])
 
     def test_set_binding_routes_to_the_daemon(self):
         daemon = FakeDaemon()
         interface = make_interface(daemon)
         self.assertTrue(call(interface, "SetBinding", "wot", 3, "key", "KEY_F"))
-        self.assertEqual(daemon.set_calls, [("wot", 3, "key", "KEY_F")])
+        binding = daemon.state.config.profile_named("wot").bindings[3]
+        self.assertEqual((binding.type, binding.value), ("key", "KEY_F"))
 
     def test_set_binding_reports_rejection(self):
         daemon = FakeDaemon(accept=False)
@@ -212,21 +179,21 @@ class BindingMethodTests(unittest.TestCase):
         self.assertFalse(call(interface, "SetBinding", "wot", 3, "key", "KEY_F"))
 
     def test_clear_binding_routes_a_disabled_binding(self):
-        """ADR-0003: never write NONE, so "clear" means a harmless special."""
+        """ADR-0003: never write NONE, so "clear" records a disabled binding."""
         daemon = FakeDaemon()
         interface = make_interface(daemon)
         self.assertTrue(call(interface, "ClearBinding", "wot", 3))
-        self.assertEqual(daemon.set_calls, [("wot", 3, "disabled", None)])
+        binding = daemon.state.config.profile_named("wot").bindings.get(3)
+        self.assertEqual(binding, Binding("disabled", None))
 
 
 class LedMethodTests(unittest.TestCase):
     def test_get_leds_returns_settings(self):
         daemon = FakeDaemon()
-        daemon.leds = {0: {"mode": "on", "color": (255, 0, 0), "brightness": 128}}
         interface = make_interface(daemon)
         self.assertEqual(
             call(interface, "GetLeds", "wot"),
-            [(0, "on", (255, 0, 0), 128, 0)],
+            [(0, "on", (0, 0, 0), 255, 0)],
         )
 
     def test_get_leds_empty_for_unknown_profile(self):
@@ -237,10 +204,11 @@ class LedMethodTests(unittest.TestCase):
         interface = make_interface(daemon)
         ok = call(interface, "SetLeds", "wot", "breathing", 128, 3000, 10, 20, 30)
         self.assertTrue(ok)
+        entry = daemon.state.config.profile_named("wot").leds[0]
         self.assertEqual(
-            daemon.led_calls,
-            [("wot", {"mode": "breathing", "brightness": 128, "duration": 3000,
-                      "color": (10, 20, 30)})],
+            {key: entry[key] for key in ("mode", "brightness", "duration", "color")},
+            {"mode": "breathing", "brightness": 128, "duration": 3000,
+             "color": (10, 20, 30)},
         )
 
     def test_set_leds_reports_rejection(self):
@@ -252,15 +220,10 @@ class LedMethodTests(unittest.TestCase):
 class DpiMethodTests(unittest.TestCase):
     def test_get_resolutions_returns_slots(self):
         daemon = FakeDaemon()
-        daemon.resolutions = (
-            (400, False, False),
-            (800, True, False),
-            (100, False, True),
-        )
         interface = make_interface(daemon)
         self.assertEqual(
             call(interface, "GetResolutions", "wot"),
-            [(0, 400, 0, 0), (1, 800, 1, 0), (2, 100, 0, 1)],
+            [(0, 800, 0, 0), (1, 1600, 0, 0)],
         )
 
     def test_get_resolutions_empty_for_unknown_profile(self):
@@ -268,35 +231,39 @@ class DpiMethodTests(unittest.TestCase):
 
     def test_report_rate_is_exposed(self):
         daemon = FakeDaemon()
-        daemon.report_rate = 500
-        self.assertEqual(call(make_interface(daemon), "GetReportRate", "wot"), 500)
+        self.assertEqual(call(make_interface(daemon), "GetReportRate", "wot"), 0)
 
     def test_report_rates_are_exposed(self):
         daemon = FakeDaemon()
-        daemon.report_rates = (125, 250)
-        self.assertEqual(call(make_interface(daemon), "GetReportRates", "wot"), [125, 250])
+        self.assertEqual(
+            call(make_interface(daemon), "GetReportRates", "wot"),
+            [125, 250, 500, 1000],
+        )
 
     def test_set_resolution_routes_to_the_daemon(self):
         daemon = FakeDaemon()
-        ok = call(make_interface(daemon), "SetResolution", "wot", 1, 1600, True, False)
-        self.assertTrue(ok)
-        self.assertEqual(daemon.res_calls, [("wot", 1, 1600, True, False)])
+        interface = make_interface(daemon)
+        self.assertTrue(call(interface, "SetResolution", "wot", 1, 1600, True, False))
+        slot = daemon.state.config.profile_named("wot").resolutions[1]
+        self.assertEqual((slot["dpi"], slot.get("default")), (1600, True))
 
     def test_set_resolution_reports_rejection(self):
         daemon = FakeDaemon(accept=False)
-        self.assertFalse(call(make_interface(daemon), "SetResolution", "wot", 1, 1600, False, False))
+        self.assertFalse(
+            call(make_interface(daemon), "SetResolution", "wot", 1, 1600, False, False)
+        )
 
     def test_set_report_rate_routes_to_the_daemon(self):
         daemon = FakeDaemon()
         self.assertTrue(call(make_interface(daemon), "SetReportRate", "wot", 500))
-        self.assertEqual(daemon.rate_calls, [("wot", 500)])
+        self.assertEqual(daemon.state.config.profile_named("wot").report_rate, 500)
 
 
 class ProfileManagementMethodTests(unittest.TestCase):
     def test_create_routes_to_the_daemon(self):
         daemon = FakeDaemon()
         self.assertTrue(call(make_interface(daemon), "CreateProfile", "new", "New.exe"))
-        self.assertEqual(daemon.created, [("new", "New.exe")])
+        self.assertIsNotNone(daemon.state.config.profile_named("new"))
 
     def test_create_reports_rejection(self):
         self.assertFalse(call(make_interface(FakeDaemon(accept=False)),
@@ -304,13 +271,13 @@ class ProfileManagementMethodTests(unittest.TestCase):
 
     def test_rename_routes_to_the_daemon(self):
         daemon = FakeDaemon()
-        self.assertTrue(call(make_interface(daemon), "RenameProfile", "old", "new"))
-        self.assertEqual(daemon.renamed, [("old", "new")])
+        self.assertTrue(call(make_interface(daemon), "RenameProfile", "wot", "wot2"))
+        self.assertIsNotNone(daemon.state.config.profile_named("wot2"))
 
     def test_delete_routes_to_the_daemon(self):
         daemon = FakeDaemon()
-        self.assertTrue(call(make_interface(daemon), "DeleteProfile", "old"))
-        self.assertEqual(daemon.deleted, ["old"])
+        self.assertTrue(call(make_interface(daemon), "DeleteProfile", "wot"))
+        self.assertIsNone(daemon.state.config.profile_named("wot"))
 
     def test_delete_reports_rejection(self):
         self.assertFalse(call(make_interface(FakeDaemon(accept=False)),

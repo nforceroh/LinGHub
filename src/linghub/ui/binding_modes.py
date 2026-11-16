@@ -6,13 +6,16 @@ editing all four, and one was missed - `_select_initial_mode` briefly
 referenced an undefined name.
 
 This module holds the mode facts that do not need a widget: which config kind
-each mode stores, and how to recognise a stored binding as belonging to a mode.
-The editor keeps the widget wiring, which is the part that genuinely needs GTK.
+each mode stores, how to recognise a stored binding as belonging to a mode,
+and how the mode's page is built and read. The editor keeps only the GTK
+wiring itself: building the named widgets and putting them on the stack.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+from .binding_labels import BUTTON_CHOICES, COMMON_KEYS, SPECIAL_CHOICES
 
 
 MODE_KEY = "key"
@@ -23,6 +26,12 @@ MODE_BUTTON = "button"
 MODE_NOTHING = "nothing"
 
 
+# How a mode's value is read and written on its page.
+DROPDOWN = "dropdown"
+CHORD = "chord"
+STATIC = "static"
+
+
 @dataclass(frozen=True)
 class Mode:
     """One way of expressing a binding."""
@@ -31,17 +40,32 @@ class Mode:
     label: str
     # The `type` this mode writes to the config.
     kind: str
-    # True when the mode's value is a macro spec rather than a plain string.
-    is_macro: bool = False
+    # The kind of page the mode's editor is: a dropdown of choices, the
+    # modifier-chord page, or a static label with nothing to edit.
+    page: str
+    # The choices a dropdown page offers, as (stored value, label) pairs.
+    # None for the chord and static pages, which are not dropdowns.
+    choices: tuple[tuple[str, str], ...] | None = None
+
+    def dropdown_choices(self) -> tuple[tuple[str, str], ...]:
+        """The mode's dropdown choices. Only meaningful for dropdown pages."""
+        assert self.choices is not None, f"{self.name} has no choices"
+        return self.choices
 
 
 MODES: tuple[Mode, ...] = (
-    Mode(MODE_KEY, "A single key", "key"),
-    Mode(MODE_KEY_MACRO, "A single key, as a macro", "macro", is_macro=True),
-    Mode(MODE_CHORD, "A modifier chord", "macro", is_macro=True),
-    Mode(MODE_SPECIAL, "A mouse function", "special"),
-    Mode(MODE_BUTTON, "Another mouse button", "button"),
-    Mode(MODE_NOTHING, "Nothing", "disabled"),
+    Mode(MODE_KEY, "A single key", "key", DROPDOWN, tuple(COMMON_KEYS)),
+    Mode(
+        MODE_KEY_MACRO, "A single key, as a macro", "macro",
+        DROPDOWN, tuple(COMMON_KEYS),
+    ),
+    Mode(MODE_CHORD, "A modifier chord", "macro", CHORD),
+    Mode(MODE_SPECIAL, "A mouse function", "special", DROPDOWN, tuple(SPECIAL_CHOICES)),
+    Mode(
+        MODE_BUTTON, "Another mouse button", "button",
+        DROPDOWN, tuple((str(n), label) for n, label in BUTTON_CHOICES),
+    ),
+    Mode(MODE_NOTHING, "Nothing", "disabled", STATIC),
 )
 
 BY_NAME = {mode.name: mode for mode in MODES}

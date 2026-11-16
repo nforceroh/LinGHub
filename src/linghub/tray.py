@@ -72,7 +72,6 @@ class Tray:
     def start(self) -> None:
         """Begin polling the daemon, then run the GTK main loop."""
         GLib.timeout_add_seconds(2, self._refresh)
-        GLib.timeout_add_seconds(1, self._refresh)
         Gtk.main()
 
     # --- daemon access ---------------------------------------------------

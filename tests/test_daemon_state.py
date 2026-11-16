@@ -456,7 +456,7 @@ class ResolutionTests(unittest.TestCase):
             DESKTOP,
             Profile(name="wot", resolutions=(
                 {"dpi": 400}, {"dpi": 800, "default": True}, {"dpi": 1600},
-            )),
+            ), leds=({"index": 0, "mode": "on"},)),
         ))
 
     def test_set_resolution_updates_one_slot(self):
@@ -508,6 +508,27 @@ class ResolutionTests(unittest.TestCase):
         state.stack = ["wot"]
         state.mark_loaded("wot")
         state.set_report_rate("wot", 125)
+        self.assertTrue(state.needs_write)
+
+    def test_set_leds_updates_every_zone(self):
+        state = self._state()
+        self.assertTrue(state.set_leds("wot", {"mode": "breathing", "brightness": 100}))
+        leds = state.config.profile_named("wot").leds
+        self.assertTrue(leds)
+        for entry in leds:
+            self.assertEqual(entry["mode"], "breathing")
+            self.assertEqual(entry["brightness"], 100)
+
+    def test_set_leds_rejects_an_unknown_profile(self):
+        state = self._state()
+        self.assertFalse(state.set_leds("nope", {"mode": "on"}))
+
+    def test_changing_leds_makes_the_profile_stale(self):
+        state = self._state()
+        state.stack = ["wot"]
+        state.mark_loaded("wot")
+        self.assertFalse(state.needs_write)
+        state.set_leds("wot", {"mode": "off"})
         self.assertTrue(state.needs_write)
 
 
