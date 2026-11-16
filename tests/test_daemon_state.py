@@ -353,6 +353,47 @@ class DeviceLossTests(unittest.TestCase):
         self.assertIsNone(daemon._writer)
 
 
+class ApplyTargetSlotTests(unittest.TestCase):
+    """ADR-0001, at the point where it actually reaches the hardware.
+
+    `slots.slot_for` says which slot a profile belongs in; this pins that the
+    daemon passes that answer to the writer rather than deciding again itself.
+    A wrong slot here would overwrite the desktop profile with a game's, which
+    is the one write that cannot be recovered from by reloading.
+    """
+
+    def _daemon(self, target: str):
+        from linghub.daemon.service import Daemon
+
+        daemon = Daemon()
+        daemon._state = DaemonState(config=make_config(DESKTOP, WOT))
+        if target == "world-of-tanks":
+            daemon._state.stack = ["world-of-tanks"]
+        written = []
+
+        class Writer:
+            async def apply(self, profile, slot):
+                written.append((profile.name, slot))
+                return type("Result", (), {"changed": ()})()
+
+        daemon._writer = Writer()
+        return daemon, written
+
+    def test_a_gaming_profile_goes_to_slot_1(self):
+        import asyncio
+
+        daemon, written = self._daemon("world-of-tanks")
+        asyncio.run(daemon._apply_target())
+        self.assertEqual(written, [("world-of-tanks", 1)])
+
+    def test_the_desktop_profile_goes_to_slot_0(self):
+        import asyncio
+
+        daemon, written = self._daemon("desktop")
+        asyncio.run(daemon._apply_target())
+        self.assertEqual(written, [("desktop", 0)])
+
+
 class ResolutionTests(unittest.TestCase):
     """DPI slots and the report rate are part of the profile, like bindings."""
 
