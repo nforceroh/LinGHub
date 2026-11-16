@@ -21,9 +21,7 @@ from dbus_fast.service import (
 )
 
 
-SERVICE = "org.linghub.Manager"
-PATH = "/org/linghub/Manager"
-INTERFACE = "org.linghub.Manager"
+from ..dbus_contract import INTERFACE, PATH, SERVICE
 
 logger = logging.getLogger("linghub.dbus")
 

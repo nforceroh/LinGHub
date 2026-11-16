@@ -14,9 +14,12 @@ from dbus_fast import BusType, Message, MessageType, Variant
 from dbus_fast.aio import MessageBus
 
 
-SERVICE = "org.linghub.Manager"
-PATH = "/org/linghub/Manager"
-INTERFACE = "org.linghub.Manager"
+from .. import dbus_contract as contract
+
+
+SERVICE = contract.SERVICE
+PATH = contract.PATH
+INTERFACE = contract.INTERFACE
 
 logger = logging.getLogger("linghub.ui.client")
 
@@ -70,6 +73,14 @@ class DaemonClient:
         if self._on_change is not None:
             self._on_change()
 
+    async def _invoke(self, member, *args):
+        """Call a D-Bus member declared in the contract.
+
+        Going through the contract means the name and signature have one
+        owner, and the argument count is checked before anything is sent.
+        """
+        return await self._call(member.name, member.input, member.call_body(*args))
+
     async def _call(self, member: str, signature: str = "", body=None):
         if self._bus is None:
             raise RuntimeError("not connected to the daemon")
@@ -105,41 +116,41 @@ class DaemonClient:
             active_profile=await self._property("ActiveProfile"),
             detected_game=await self._property("DetectedGame"),
             desktop_profile=await self._property("DesktopProfile"),
-            profiles=tuple(await self._call("ListProfiles") or ()),
+            profiles=tuple(await self._invoke(contract.LIST_PROFILES) or ()),
         )
 
     async def load_profile(self, name: str) -> bool:
-        return bool(await self._call("LoadProfile", "s", [name]))
+        return bool(await self._invoke(contract.LOAD_PROFILE, name))
 
     async def reload(self) -> bool:
-        return bool(await self._call("Reload"))
+        return bool(await self._invoke(contract.RELOAD))
 
     async def get_bindings(self, profile: str) -> dict[int, tuple[str, str]]:
         """Every binding in a profile, as {button index: (type, value)}."""
-        raw = await self._call("GetBindings", "s", [profile]) or ()
+        raw = await self._invoke(contract.GET_BINDINGS, profile) or ()
         return {
             int(index): (str(kind), str(value))
             for index, kind, value in raw
         }
 
     async def set_binding(self, profile: str, index: int, kind: str, value: str | None) -> bool:
-        return bool(await self._call("SetBinding", "siss", [profile, index, kind, value or ""]))
+        return bool(await self._invoke(contract.SET_BINDING, profile, index, kind, value or ""))
 
     async def clear_binding(self, profile: str, index: int) -> bool:
-        return bool(await self._call("ClearBinding", "si", [profile, index]))
+        return bool(await self._invoke(contract.CLEAR_BINDING, profile, index))
 
     async def create_profile(self, name: str, executable: str = "") -> bool:
-        return bool(await self._call("CreateProfile", "ss", [name, executable]))
+        return bool(await self._invoke(contract.CREATE_PROFILE, name, executable))
 
     async def rename_profile(self, old: str, new: str) -> bool:
-        return bool(await self._call("RenameProfile", "ss", [old, new]))
+        return bool(await self._invoke(contract.RENAME_PROFILE, old, new))
 
     async def delete_profile(self, name: str) -> bool:
-        return bool(await self._call("DeleteProfile", "s", [name]))
+        return bool(await self._invoke(contract.DELETE_PROFILE, name))
 
     async def get_resolutions(self, profile: str) -> list[dict]:
         """A profile's DPI slots in order."""
-        raw = await self._call("GetResolutions", "s", [profile]) or ()
+        raw = await self._invoke(contract.GET_RESOLUTIONS, profile) or ()
         return [
             {
                 "index": int(index),
@@ -154,23 +165,22 @@ class DaemonClient:
         self, profile: str, index: int, dpi: int, *,
         make_default: bool = False, disabled: bool = False,
     ) -> bool:
-        return bool(await self._call(
-            "SetResolution", "siubb",
-            [profile, index, dpi, make_default, disabled],
+        return bool(await self._invoke(
+            contract.SET_RESOLUTION, profile, index, dpi, make_default, disabled
         ))
 
     async def get_report_rate(self, profile: str) -> int:
-        return int(await self._call("GetReportRate", "s", [profile]) or 0)
+        return int(await self._invoke(contract.GET_REPORT_RATE, profile) or 0)
 
     async def get_report_rates(self, profile: str) -> tuple[int, ...]:
-        return tuple(int(r) for r in await self._call("GetReportRates", "s", [profile]) or ())
+        return tuple(int(r) for r in await self._invoke(contract.GET_REPORT_RATES, profile) or ())
 
     async def set_report_rate(self, profile: str, rate: int) -> bool:
-        return bool(await self._call("SetReportRate", "su", [profile, rate]))
+        return bool(await self._invoke(contract.SET_REPORT_RATE, profile, rate))
 
     async def get_leds(self, profile: str) -> dict[int, dict]:
         """A profile's LED zones, as {index: {mode, color, brightness, duration}}."""
-        raw = await self._call("GetLeds", "s", [profile]) or ()
+        raw = await self._invoke(contract.GET_LEDS, profile) or ()
         return {
             int(index): {
                 "mode": str(mode),
@@ -190,9 +200,8 @@ class DaemonClient:
         color: tuple[int, int, int],
     ) -> bool:
         red, green, blue = color
-        return bool(await self._call(
-            "SetLeds", "ssuuuuu",
-            [profile, mode, brightness, duration, red, green, blue],
+        return bool(await self._invoke(
+            contract.SET_LEDS, profile, mode, brightness, duration, red, green, blue
         ))
 
     def disconnect(self) -> None:
