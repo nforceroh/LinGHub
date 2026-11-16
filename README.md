@@ -11,8 +11,12 @@ hardware events.
 
 ## Status
 
-Early. The hardware client and CLI work; game detection and the UI are in
-progress.
+Usable. Game detection, automatic profile switching, and a UI that edits
+bindings, DPI, report rate and lighting all work and have been exercised
+against a G502 Lightspeed on Fedora with World of Tanks and Star Citizen.
+
+Not done yet: packaging (it installs from a clone), a desktop notification when
+a profile switches, and testing on the other six G502 variants.
 
 ## Requirements
 
@@ -35,6 +39,7 @@ linghub switch 1      # activate profile 1
 linghub detect        # report which configured game is running
 linghub run           # run the daemon in the foreground
 linghub ui            # open the graphical interface
+linghub status        # report what the running daemon is doing
 ```
 
 `switch` reports that ratbagd has queued a commit. Commits are asynchronous, so
@@ -61,6 +66,15 @@ reaches the mouse until Save; Revert throws away unsaved edits. The G502 has two
 as one strip, so the panel drives them together; the daemon writes the same
 values to each. Effects are `off`, `fixed colour`, `cycle` and `breathing`, and
 only the looping ones have a speed.
+
+Between them, the DPI and lighting panels cover the whole profile. Both are
+staged rather than live: nothing reaches the mouse until Save, and Revert throws
+away unsaved edits. A poll never overwrites unsaved edits, so the two-second
+refresh cannot discard what you are in the middle of choosing.
+
+Profiles can be created, renamed and deleted from the buttons above the profile
+list. The desktop profile cannot be deleted, and neither can the last remaining
+one; the daemon refuses both rather than relying on the UI to check.
 
 The dialog only offers bindings the hardware can actually encode. `second-mode`
 is deliberately absent because libratbag rejects it on the G502 (issue #1798); if
@@ -120,6 +134,19 @@ editing the config file.
 | `ListProfiles` | method → `as` | Every profile name in the config |
 | `LoadProfile(s)` | method → `b` | Load a profile now; false if it does not exist |
 | `Reload` | method → `b` | Re-read the config file |
+| `GetBindings(s)` | method → `a(iss)` | Every binding as (index, type, value) |
+| `SetBinding(s,i,s,s)` → `siss` | method → `b` | Assign one button's binding |
+| `ClearBinding(s,i)` → `si` | method → `b` | Record a button as doing nothing |
+| `GetLeds(s)` | method → `a(us(uuu)uu)` | LED zones as (index, mode, colour, brightness, duration) |
+| `SetLeds(s,s,u,u,u,u,u)` → `ssuuuuu` | method → `b` | Set every LED zone to one effect |
+| `GetResolutions(s)` | method → `a(uuuu)` | DPI slots as (index, dpi, is_default, is_disabled) |
+| `SetResolution(s,i,u,b,b)` → `siubb` | method → `b` | Change one DPI slot |
+| `GetReportRate(s)` | method → `u` | The profile's report rate in Hz |
+| `GetReportRates(s)` | method → `au` | The rates the device accepts |
+| `SetReportRate(s,u)` | method → `b` | Change the report rate |
+| `CreateProfile(s,s)` | method → `b` | Add a profile; second argument is a game executable or empty |
+| `RenameProfile(s,s)` | method → `b` | Rename a profile and every reference to it |
+| `DeleteProfile(s)` | method → `b` | Remove a profile; refused for the desktop one |
 | `ActiveProfile` | property `s` | Profile currently on the mouse, empty if unknown |
 | `DetectedGame` | property `s` | Game currently detected, empty if none |
 | `DesktopProfile` | property `s` | Profile used when no game is running |
@@ -139,7 +166,12 @@ busctl --user call org.linghub.Manager /org/linghub/Manager \
 
 The daemon reads `~/.config/linghub/config.json`. See
 [config.example.json](config.example.json) for the shape. One file holds every
-profile plus application settings (ADR-0004).
+profile plus application settings (ADR-0004). The daemon is its only writer: the
+UI edits over D-Bus and hand edits are picked up by watching the file.
+
+Keys the daemon does not model are preserved when it writes, so a hand-written
+comment or an extra field survives an edit from the UI. A config that fails to
+validate is never written over.
 
 ## Documentation
 

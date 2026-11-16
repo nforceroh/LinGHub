@@ -288,6 +288,48 @@ class PropertyTests(unittest.TestCase):
         self.assertEqual(make_interface(daemon).DesktopProfile, "desktop")
 
 
+class ReadmeTests(unittest.TestCase):
+    """The README documents every member; this keeps it from drifting.
+
+    The table listed three wrong signatures once, which is exactly the sort of
+    thing that silently sends a reader down the wrong path.
+    """
+
+    def test_readme_documents_every_member(self):
+        from pathlib import Path
+
+        interface = make_interface(FakeDaemon())
+        introspected = interface.introspect()
+        names = (
+            {m.name for m in introspected.methods}
+            | {p.name for p in introspected.properties}
+            | {s.name for s in introspected.signals}
+        )
+        readme = (Path(__file__).resolve().parent.parent / "README.md").read_text()
+        missing = sorted(name for name in names if f"`{name}" not in readme)
+        self.assertEqual(missing, [], f"undocumented D-Bus members: {missing}")
+
+    def test_readme_signatures_match_introspection(self):
+        import re
+        from pathlib import Path
+
+        interface = make_interface(FakeDaemon())
+        readme = (Path(__file__).resolve().parent.parent / "README.md").read_text()
+        for m in interface.introspect().methods:
+            in_sig = "".join(a.signature for a in m.in_args)
+            if not in_sig:
+                continue
+            # The table writes `Name(args) -> signature` for methods with inputs.
+            pattern = rf"`{m.name}\([^`]*\)`\s*→\s*`([^`]+)`"
+            match = re.search(pattern, readme)
+            if match is None:
+                continue
+            self.assertEqual(
+                match.group(1), in_sig,
+                f"README signature for {m.name} is {match.group(1)}, actual {in_sig}",
+            )
+
+
 class IntrospectionTests(unittest.TestCase):
     def test_interface_exposes_expected_members(self):
         interface = make_interface(FakeDaemon())
