@@ -16,7 +16,7 @@ from dbus_fast.aio import MessageBus
 from .. import config as config_module
 from ..discovery.detector import detect
 from ..discovery.gamemode import GameModeClient
-from ..hardware.ratbag import RatbagClient
+from ..hardware.ratbag import DeviceNotFound, RatbagClient
 from ..hardware.writer import ProfileWriter, WriteError
 from .dbus_service import PATH, SERVICE, ManagerInterface
 from .snapshot import StateSnapshot
@@ -65,6 +65,26 @@ class Daemon:
         device = await client.find_device()
         self._writer = ProfileWriter(client, device)
         logger.info("using device %s at %s", device.name, device.path)
+
+    async def _connect_with_retry(self, interval: float) -> None:
+        """Wait for the device to appear rather than exiting.
+
+        A missing device is usually transient: the mouse may be unplugged, or
+        a stale Wine process may be holding a deleted hidraw node. Exiting
+        would mean the service stays dead until someone notices, so retry and
+        log the diagnosis once.
+        """
+        reported = False
+        while True:
+            try:
+                await self._connect()
+                return
+            except DeviceNotFound as exc:
+                if not reported:
+                    logger.error("%s", exc)
+                    logger.info("retrying every %ss until the device appears", interval)
+                    reported = True
+                await asyncio.sleep(interval)
 
     async def _export_interface(self) -> None:
         """Publish the manager interface on the session bus.
@@ -204,9 +224,9 @@ class Daemon:
             # the unit rather than looping.
             raise ConfigStartupError("cannot start without a valid config")
 
-        await self._connect()
-        await self._export_interface()
         interval = self._poll_interval or self._state.config.poll_interval
+        await self._connect_with_retry(interval)
+        await self._export_interface()
 
         # GameMode is an accelerator: when it fires, run a tick immediately
         # instead of waiting for the next poll. When it is absent the poll

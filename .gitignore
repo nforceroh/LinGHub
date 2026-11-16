@@ -22,3 +22,7 @@ htmlcov/
 .idea/
 *.swp
 .DS_Store
+
+# Logitech G HUB reference material, kept locally for protocol research.
+# Proprietary binaries; never commit them.
+LGHUB/

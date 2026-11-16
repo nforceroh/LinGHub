@@ -26,6 +26,15 @@ class Device:
     path: str
 
 
+class DeviceNotFound(RuntimeError):
+    """No matching device is visible to ratbagd.
+
+    Distinct from other failures because it is usually transient: the device
+    may be unplugged, or a stale process may be holding a deleted hidraw node.
+    The daemon retries rather than exiting.
+    """
+
+
 class RatbagClient:
     """Use an already-connected system bus to manage a single G502."""
 
@@ -71,7 +80,9 @@ class RatbagClient:
             if "G502" in name:
                 matches.append(Device(name, path))
         if not matches:
-            raise RuntimeError("no G502 found")
+            from .diagnose import describe_failure
+
+            raise DeviceNotFound(describe_failure())
         if len(matches) > 1:
             raise RuntimeError("multiple G502 devices found; cannot choose safely")
         return matches[0]
