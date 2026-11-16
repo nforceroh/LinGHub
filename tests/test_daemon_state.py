@@ -6,7 +6,7 @@ from linghub.config import Config
 from linghub.daemon.state import DaemonState
 from linghub.discovery.detector import Detection, Match, Rejection
 from linghub.discovery.processes import ProcessInfo
-from linghub.domain.profile import Game, Profile
+from linghub.domain.profile import Binding, Game, Profile
 
 
 def make_config(*profiles: Profile, desktop: str = "desktop") -> Config:
@@ -111,3 +111,43 @@ class NeedsWriteTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FingerprintTests(unittest.TestCase):
+    """Editing a profile's contents must trigger a rewrite, not just a rename."""
+
+    def _config(self, bindings):
+        profile = Profile(name="desktop", bindings=bindings)
+        return make_config(profile)
+
+    def test_editing_bindings_triggers_rewrite(self):
+        state = DaemonState(config=self._config({0: Binding("button", 1)}))
+        state.mark_loaded("desktop")
+        self.assertFalse(state.needs_write)
+
+        state.config = self._config({0: Binding("button", 2)})
+        self.assertTrue(state.needs_write)
+
+    def test_editing_report_rate_triggers_rewrite(self):
+        state = DaemonState(config=make_config(Profile(name="desktop", report_rate=1000)))
+        state.mark_loaded("desktop")
+        state.config = make_config(Profile(name="desktop", report_rate=500))
+        self.assertTrue(state.needs_write)
+
+    def test_editing_leds_triggers_rewrite(self):
+        state = DaemonState(config=make_config(Profile(name="desktop", leds=({"index": 0, "mode": "on"},))))
+        state.mark_loaded("desktop")
+        state.config = make_config(Profile(name="desktop", leds=({"index": 0, "mode": "off"},)))
+        self.assertTrue(state.needs_write)
+
+    def test_identical_config_does_not_trigger_rewrite(self):
+        state = DaemonState(config=self._config({0: Binding("button", 1)}))
+        state.mark_loaded("desktop")
+        state.config = self._config({0: Binding("button", 1)})
+        self.assertFalse(state.needs_write)
+
+    def test_binding_order_does_not_trigger_rewrite(self):
+        state = DaemonState(config=self._config({0: Binding("button", 1), 1: Binding("button", 2)}))
+        state.mark_loaded("desktop")
+        state.config = self._config({1: Binding("button", 2), 0: Binding("button", 1)})
+        self.assertFalse(state.needs_write)

@@ -18,6 +18,7 @@ from ..discovery.detector import detect
 from ..hardware.ratbag import RatbagClient
 from ..hardware.writer import ProfileWriter, WriteError
 from .state import DaemonState
+from .watcher import ConfigWatcher
 
 
 GAMING_SLOT = 1
@@ -45,6 +46,7 @@ class Daemon:
         self._writer: ProfileWriter | None = None
         self._bus: MessageBus | None = None
         self._pending: str | None = None
+        self._watcher = ConfigWatcher(self._config_path)
 
     async def _connect(self) -> None:
         self._bus = await asyncio.wait_for(
@@ -66,6 +68,26 @@ class Daemon:
         else:
             self._state.config = config
         return True
+
+    def _reload_if_changed(self) -> None:
+        """Reload the config when the file changes, keeping the old one on error.
+
+        A broken edit must not take the daemon down: the previous config stays
+        in force and the error is logged, so the user can fix the file and the
+        next change is picked up.
+        """
+        if not self._watcher.changed():
+            return
+
+        try:
+            config = config_module.load(self._config_path)
+        except config_module.ConfigError as exc:
+            logger.error("config reload failed, keeping the previous config: %s", exc)
+            return
+
+        assert self._state is not None
+        self._state.config = config
+        logger.info("reloaded config: %d profile(s)", len(config.profiles))
 
     async def _apply_target(self) -> None:
         """Load the target profile if it differs from what is loaded."""
@@ -90,6 +112,7 @@ class Daemon:
 
     async def _tick(self) -> None:
         assert self._state is not None
+        self._reload_if_changed()
         detection = detect(self._state.config.profiles)
         self._state.observe(detection)
         await self._apply_target()

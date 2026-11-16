@@ -15,6 +15,28 @@ from ..discovery.detector import Detection
 from ..domain.profile import Profile
 
 
+def fingerprint(profile: Profile) -> str:
+    """A stable digest of everything that affects what gets written.
+
+    Used to notice that a profile's contents changed even though its name did
+    not. Bindings are sorted so dict ordering cannot cause a spurious rewrite.
+    """
+    import hashlib
+    import json
+
+    payload = {
+        "report_rate": profile.report_rate,
+        "resolutions": list(profile.resolutions),
+        "bindings": {
+            str(index): [binding.type, binding.value]
+            for index, binding in sorted(profile.bindings.items())
+        },
+        "leds": list(profile.leds),
+    }
+    encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 @dataclass
 class DaemonState:
     """What the daemon currently believes, and what it should do next."""
@@ -22,6 +44,7 @@ class DaemonState:
     config: Config
     stack: list[str] = field(default_factory=list)
     loaded_profile: str | None = None
+    loaded_fingerprint: str | None = None
 
     @property
     def target_profile(self) -> Profile:
@@ -37,7 +60,17 @@ class DaemonState:
 
     @property
     def needs_write(self) -> bool:
-        return self.loaded_profile != self.target_profile.name
+        """True when the target differs from what is loaded.
+
+        Compares a fingerprint rather than just the name, so editing a
+        profile's bindings in the config causes a rewrite even though the
+        profile is still called the same thing.
+        """
+        target = self.target_profile
+        return (
+            self.loaded_profile != target.name
+            or self.loaded_fingerprint != fingerprint(target)
+        )
 
     def observe(self, detection: Detection) -> None:
         """Update the stack from one detection pass.
@@ -57,3 +90,5 @@ class DaemonState:
 
     def mark_loaded(self, profile_name: str) -> None:
         self.loaded_profile = profile_name
+        profile = self.config.profile_named(profile_name)
+        self.loaded_fingerprint = fingerprint(profile) if profile else None
