@@ -15,6 +15,7 @@ from dbus_fast.aio import MessageBus
 
 from .. import config as config_module
 from ..discovery.detector import detect
+from ..discovery.gamemode import GameModeClient
 from ..hardware.ratbag import RatbagClient
 from ..hardware.writer import ProfileWriter, WriteError
 from .state import DaemonState
@@ -47,6 +48,8 @@ class Daemon:
         self._bus: MessageBus | None = None
         self._pending: str | None = None
         self._watcher = ConfigWatcher(self._config_path)
+        self._wakeup = asyncio.Event()
+        self._gamemode: GameModeClient | None = None
 
     async def _connect(self) -> None:
         self._bus = await asyncio.wait_for(
@@ -126,12 +129,32 @@ class Daemon:
 
         await self._connect()
         interval = self._poll_interval or self._state.config.poll_interval
-        logger.info("watching for games every %ss", interval)
+
+        # GameMode is an accelerator: when it fires, run a tick immediately
+        # instead of waiting for the next poll. When it is absent the poll
+        # loop still detects every game, just less promptly.
+        self._gamemode = GameModeClient(on_change=self._wake)
+        if await self._gamemode.connect():
+            if self._gamemode.available:
+                logger.info("watching for games every %ss, with GameMode signals", interval)
+            else:
+                logger.info("watching for games every %ss (GameMode not running)", interval)
+        else:
+            logger.info("watching for games every %ss (GameMode not available)", interval)
 
         try:
             while True:
                 await self._tick()
-                await asyncio.sleep(interval)
+                try:
+                    await asyncio.wait_for(self._wakeup.wait(), timeout=interval)
+                except asyncio.TimeoutError:
+                    pass
+                self._wakeup.clear()
         finally:
+            self._gamemode.disconnect()
             if self._bus is not None:
                 self._bus.disconnect()
+
+    def _wake(self) -> None:
+        """Ask the run loop to tick now rather than at the next interval."""
+        self._wakeup.set()

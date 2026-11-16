@@ -51,6 +51,12 @@ restoring the desktop profile into slot 0 when the last game exits. It reloads
 its config when the file changes, and keeps the previous config if an edit is
 invalid rather than exiting.
 
+Detection polls `/proc` every couple of seconds. When
+[Feral GameMode](https://github.com/FeralInteractive/gamemode) is running, its
+registration signals also trigger an immediate check, so games launched through
+`gamemoderun` switch without waiting for the next poll. GameMode is optional:
+games that do not register with it are still detected by polling.
+
 ```bash
 systemctl --user status linghub.service
 journalctl --user -u linghub.service -f
