@@ -19,6 +19,11 @@ from .buttonmap import BUTTONS, ButtonSpot
 
 HOTSPOT_RADIUS = 13.0
 
+# The click target, deliberately much bigger than the drawn circle. Several
+# G502 buttons sit close together at typical window sizes, so a tight target
+# makes them feel broken rather than precise.
+HIT_RADIUS = 24.0
+
 
 class MouseDiagram(Gtk.DrawingArea):
     """A clickable picture of the mouse.
@@ -56,16 +61,40 @@ class MouseDiagram(Gtk.DrawingArea):
         self._selected = index
         self.queue_draw()
 
+    def _layout(self, width: float, height: float) -> tuple[float, float, float, float]:
+        """Where the image actually lands inside the widget.
+
+        The image is letterboxed to preserve its aspect ratio, so it does not
+        fill the widget. Both drawing and hit-testing must use this, or the
+        hotspots end up somewhere other than where they are painted.
+        """
+        tex_w = self._surface.get_width()
+        tex_h = self._surface.get_height()
+        scale = min(width / tex_w, height / tex_h)
+        draw_w, draw_h = tex_w * scale, tex_h * scale
+        offset_x = (width - draw_w) / 2
+        offset_y = (height - draw_h) / 2
+        return offset_x, offset_y, draw_w, draw_h
+
+    def _centre(self, spot: ButtonSpot, width: float, height: float) -> tuple[float, float]:
+        offset_x, offset_y, draw_w, draw_h = self._layout(width, height)
+        return offset_x + spot.x * draw_w, offset_y + spot.y * draw_h
+
     def _spot_at(self, x: float, y: float) -> ButtonSpot | None:
         width = self.get_width()
         height = self.get_height()
         if width <= 0 or height <= 0:
             return None
+        # Nearest wins, not first match: the hit radius is deliberately larger
+        # than the drawn circle and several G502 buttons sit close together.
+        best: ButtonSpot | None = None
+        best_distance = HIT_RADIUS ** 2
         for spot in BUTTONS:
-            cx, cy = spot.x * width, spot.y * height
-            if (x - cx) ** 2 + (y - cy) ** 2 <= HOTSPOT_RADIUS ** 2:
-                return spot
-        return None
+            cx, cy = self._centre(spot, width, height)
+            distance = (x - cx) ** 2 + (y - cy) ** 2
+            if distance <= best_distance:
+                best, best_distance = spot, distance
+        return best
 
     def _on_motion(self, _controller, x, y) -> None:
         spot = self._spot_at(x, y)
@@ -107,13 +136,7 @@ class MouseDiagram(Gtk.DrawingArea):
         return surface, data
 
     def _draw(self, _area, cr, width, height) -> None:
-        # Fit the image while preserving its aspect ratio.
-        tex_w = self._surface.get_width()
-        tex_h = self._surface.get_height()
-        scale = min(width / tex_w, height / tex_h)
-        draw_w, draw_h = tex_w * scale, tex_h * scale
-        offset_x = (width - draw_w) / 2
-        offset_y = (height - draw_h) / 2
+        offset_x, offset_y, draw_w, draw_h = self._layout(width, height)
 
         # The image has a transparent background, so give it a subtle plate to
         # sit on. Without it the dark mouse disappears into a dark window.
@@ -124,8 +147,7 @@ class MouseDiagram(Gtk.DrawingArea):
         self._draw_texture(cr, offset_x, offset_y, draw_w, draw_h)
 
         for spot in BUTTONS:
-            cx = offset_x + spot.x * draw_w
-            cy = offset_y + spot.y * draw_h
+            cx, cy = self._centre(spot, width, height)
             self._draw_hotspot(cr, cx, cy, spot)
 
     def _draw_texture(self, cr, x: float, y: float, w: float, h: float) -> None:

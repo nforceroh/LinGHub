@@ -160,5 +160,98 @@ class HotspotDrawingTests(unittest.TestCase):
         self.assertEqual(self._stray_between_circles(), 0)
 
 
+@unittest.skipUnless(_has_cairo(), "needs pycairo and Gtk 4")
+class HitTestGeometryTests(unittest.TestCase):
+    """The click target must sit where the circle is painted.
+
+    The image is letterboxed to keep its aspect ratio, so it does not fill the
+    widget. Drawing used the letterbox offsets while hit-testing used raw
+    fractions of the widget, which put the targets up to 52 px away from the
+    circles on a real window size - some buttons could not be clicked at all.
+    """
+
+    def _diagram(self, image_width: int, image_height: int):
+        from linghub.ui.diagram import MouseDiagram
+
+        diagram = MouseDiagram.__new__(MouseDiagram)
+        diagram._selected = None
+        diagram._hovered = None
+
+        class Surface:
+            def get_width(self):
+                return image_width
+
+            def get_height(self):
+                return image_height
+
+        diagram._surface = Surface()
+        return diagram
+
+    def test_centre_matches_the_letterboxed_draw_position(self):
+        from linghub.ui.buttonmap import BUTTONS
+        from linghub.ui.diagram import MouseDiagram
+
+        # Deliberately taller than the image's aspect ratio, so there is
+        # letterboxing to get wrong.
+        width, height = 566, 486
+        diagram = self._diagram(1024, 555)
+        offset_x, offset_y, draw_w, draw_h = diagram._layout(width, height)
+
+        for spot in BUTTONS:
+            cx, cy = diagram._centre(spot, width, height)
+            self.assertAlmostEqual(cx, offset_x + spot.x * draw_w)
+            self.assertAlmostEqual(cy, offset_y + spot.y * draw_h)
+
+        # The offsets must be real, otherwise this test proves nothing.
+        self.assertGreater(offset_y, 0)
+
+    def test_click_at_the_circle_selects_the_button(self):
+        """Clicking exactly on a painted circle must select it."""
+        from linghub.ui import diagram as diagram_module
+        from linghub.ui.buttonmap import BUTTONS
+
+        width, height = 566, 486
+        widget = self._diagram(1024, 555)
+        widget.get_width = lambda: width
+        widget.get_height = lambda: height
+
+        for spot in BUTTONS:
+            cx, cy = widget._centre(spot, width, height)
+            found = widget._spot_at(cx, cy)
+            self.assertIsNotNone(found, f"button {spot.index} is not clickable")
+            self.assertEqual(found.index, spot.index)
+        self.assertTrue(hasattr(diagram_module, "HIT_RADIUS"))
+
+    def test_click_just_off_the_circle_still_selects(self):
+        """The target is larger than the drawn circle, within reason."""
+        from linghub.ui.buttonmap import BUTTONS
+        from linghub.ui.diagram import HOTSPOT_RADIUS
+
+        width, height = 566, 486
+        widget = self._diagram(1024, 555)
+        widget.get_width = lambda: width
+        widget.get_height = lambda: height
+
+        spot = BUTTONS[0]
+        cx, cy = widget._centre(spot, width, height)
+        beyond = cx + HOTSPOT_RADIUS + 4
+        found = widget._spot_at(beyond, cy)
+        self.assertIsNotNone(found)
+        self.assertEqual(found.index, spot.index)
+
+    def test_click_far_away_selects_nothing(self):
+        width, height = 566, 486
+        widget = self._diagram(1024, 555)
+        widget.get_width = lambda: width
+        widget.get_height = lambda: height
+        self.assertIsNone(widget._spot_at(1, 1))
+
+    def test_no_size_is_safe(self):
+        widget = self._diagram(1024, 555)
+        widget.get_width = lambda: 0
+        widget.get_height = lambda: 0
+        self.assertIsNone(widget._spot_at(0, 0))
+
+
 if __name__ == "__main__":
     unittest.main()
