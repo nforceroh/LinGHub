@@ -27,7 +27,7 @@ from .diagram import MouseDiagram
 
 logger = logging.getLogger("linghub.ui.window")
 
-IMAGE = Path(__file__).resolve().parents[3] / "images" / "g502.png"
+IMAGE = Path(__file__).resolve().parents[3] / "images" / "g502_trans.png"
 
 
 class MainWindow(Adw.ApplicationWindow):
@@ -106,15 +106,40 @@ class MainWindow(Adw.ApplicationWindow):
         scroller.set_min_content_height(160)
         box.append(scroller)
 
-        box.append(self._section_label("Bindings"))
-        self._binding_list = Gtk.ListBox()
-        self._binding_list.set_selection_mode(Gtk.SelectionMode.NONE)
-        binding_scroller = Gtk.ScrolledWindow()
-        binding_scroller.set_child(self._binding_list)
-        binding_scroller.set_vexpand(True)
-        box.append(binding_scroller)
+        box.append(self._section_label("Buttons"))
+        table_scroller = Gtk.ScrolledWindow()
+        table_scroller.set_child(self._build_button_table())
+        table_scroller.set_vexpand(True)
+        box.append(table_scroller)
 
         return box
+
+    def _build_button_table(self) -> Gtk.Widget:
+        """A table of every button: number, function and ratbag index."""
+        grid = Gtk.Grid()
+        grid.set_column_spacing(18)
+        grid.set_row_spacing(6)
+        grid.set_margin_top(6)
+
+        for column, title in enumerate(("#", "Function", "Ratbag")):
+            label = Gtk.Label(label=title, xalign=0)
+            label.add_css_class("dim-label")
+            label.add_css_class("caption")
+            grid.attach(label, column, 0, 1, 1)
+
+        self._table_rows: dict[int, Gtk.Widget] = {}
+        for row, spot in enumerate(BUTTONS, start=1):
+            number = Gtk.Label(label=str(spot.index), xalign=0)
+            function = Gtk.Label(label=describe(spot.index), xalign=0)
+            function.set_hexpand(True)
+            ratbag = Gtk.Label(label=str(spot.index), xalign=1)
+            ratbag.add_css_class("dim-label")
+
+            for column, widget in enumerate((number, function, ratbag)):
+                grid.attach(widget, column, row, 1, 1)
+            self._table_rows[spot.index] = function
+
+        return grid
 
     def _section_label(self, text: str) -> Gtk.Label:
         label = Gtk.Label(label=text, xalign=0)
@@ -179,18 +204,12 @@ class MainWindow(Adw.ApplicationWindow):
             self._profile_list.append(row)
 
     def _rebuild_bindings(self) -> None:
-        child = self._binding_list.get_first_child()
-        while child is not None:
-            nxt = child.get_next_sibling()
-            self._binding_list.remove(child)
-            child = nxt
-
-        for spot in BUTTONS:
-            row = Adw.ActionRow(title=describe(spot.index))
-            row.set_subtitle(f"ratbag index {spot.index}")
-            if spot.index == self._selected_button:
-                row.add_prefix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
-            self._binding_list.append(row)
+        """Highlight the selected row in the button table."""
+        for index, widget in self._table_rows.items():
+            if index == self._selected_button:
+                widget.add_css_class("accent")
+            else:
+                widget.remove_css_class("accent")
 
     # --- interaction -----------------------------------------------------
 

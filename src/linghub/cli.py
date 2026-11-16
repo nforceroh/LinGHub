@@ -136,7 +136,21 @@ def main() -> int:
 
     commands.add_parser("ui", help="open the graphical interface")
 
+    hotspots_cmd = commands.add_parser(
+        "hotspots", help="place button hotspots on a mouse image"
+    )
+    hotspots_cmd.add_argument("--image", default="images/g502_trans.png", help="image to annotate")
+    hotspots_cmd.add_argument("--out", default=None, help="where to write the hotspots")
+
     args = parser.parse_args()
+
+    if args.command == "hotspots":
+        from .ui.hotspot_editor import DEFAULT_OUTPUT, main as editor_main
+
+        argv = ["--image", args.image]
+        if args.out is not None:
+            argv += ["--out", args.out]
+        return editor_main(argv)
 
     if args.command == "ui":
         from .ui.app import main as ui_main

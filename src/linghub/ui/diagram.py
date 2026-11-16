@@ -101,7 +101,7 @@ class MouseDiagram(Gtk.DrawingArea):
         stride = pixbuf.get_rowstride()
         data = bytearray(pixbuf.get_pixels())
         surface = cairo.ImageSurface.create_for_data(
-            data, cairo.FORMAT_RGB24, width, height, stride
+            data, cairo.FORMAT_ARGB32, width, height, stride
         )
         # cairo does not own the buffer, so the caller keeps a reference.
         return surface, data
@@ -115,14 +115,12 @@ class MouseDiagram(Gtk.DrawingArea):
         offset_x = (width - draw_w) / 2
         offset_y = (height - draw_h) / 2
 
-        cr.save()
-        cr.translate(offset_x, offset_y)
-        cr.scale(scale, scale)
-        # Gdk.Texture is a GdkPaintable, not a cairo surface, so it must be
-        # drawn through Gtk's snapshot API rather than cr.set_source_*.
-        cr.restore()
+        # The image has a transparent background, so give it a subtle plate to
+        # sit on. Without it the dark mouse disappears into a dark window.
+        cr.set_source_rgba(0.5, 0.5, 0.55, 0.10)
+        cr.rectangle(offset_x, offset_y, draw_w, draw_h)
+        cr.fill()
 
-        # Draw the image with a snapshot, then overlay hotspots in cairo.
         self._draw_texture(cr, offset_x, offset_y, draw_w, draw_h)
 
         for spot in BUTTONS:
