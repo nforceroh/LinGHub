@@ -13,6 +13,17 @@ from linghub.ui.buttonmap import BUTTONS, BY_INDEX, describe
 from linghub.ui.client import INTERFACE, DaemonClient
 
 
+def _has_cairo() -> bool:
+    try:
+        import cairo  # noqa: F401
+        import gi
+
+        gi.require_version("Gtk", "4.0")
+    except (ImportError, ValueError):
+        return False
+    return True
+
+
 class ButtonMapTests(unittest.TestCase):
     def test_covers_every_ratbag_index(self):
         self.assertEqual(sorted(BY_INDEX), list(range(11)))
@@ -75,6 +86,54 @@ class SignalHandlingTests(unittest.TestCase):
     def test_no_handler_is_safe(self):
         client = DaemonClient()
         client._handle_signal(self._signal())  # must not raise
+
+
+@unittest.skipUnless(_has_cairo(), "needs pycairo and Gtk 4")
+class HotspotDrawingTests(unittest.TestCase):
+    """Guards against stray ink between the hotspots.
+
+    cairo's show_text() leaves a current point, so the next arc() draws a line
+    from the previous label to the new circle. On screen that looked like lines
+    tying the buttons together.
+    """
+
+    def _stray_between_circles(self) -> int:
+        import cairo
+
+        from linghub.ui.buttonmap import ButtonSpot
+        from linghub.ui.diagram import HOTSPOT_RADIUS, MouseDiagram
+
+        # _draw_hotspot touches no widget state, so build the object without
+        # GTK: DrawingArea wants a display and this should run headless.
+        diagram = MouseDiagram.__new__(MouseDiagram)
+        diagram._selected = None
+        diagram._hovered = None
+
+        width = height = 300
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, width, height)
+        cr = cairo.Context(surface)
+        cr.set_source_rgba(0, 0, 0, 0)
+        cr.paint()
+        for cx, cy, index in ((60, 150, 0), (240, 150, 1)):
+            spot = ButtonSpot(index, "x", "", cx / width, cy / height)
+            diagram._draw_hotspot(cr, cx, cy, spot)
+        surface.flush()
+
+        data = bytes(surface.get_data())
+        stride = surface.get_stride()
+
+        # Sample the gap between the two circles, skipping the circles.
+        low = 60 + int(HOTSPOT_RADIUS) + 3
+        high = 240 - int(HOTSPOT_RADIUS) - 3
+        return sum(
+            1
+            for x in range(low, high)
+            for y in (149, 150, 151)
+            if data[y * stride + x * 4 + 3] > 20
+        )
+
+    def test_no_stray_ink_between_hotspots(self):
+        self.assertEqual(self._stray_between_circles(), 0)
 
 
 if __name__ == "__main__":

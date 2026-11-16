@@ -154,6 +154,9 @@ class MouseDiagram(Gtk.DrawingArea):
             ring = (1.0, 1.0, 1.0, 0.55)
 
         cr.set_source_rgba(*fill)
+        # new_sub_path() is required: show_text() below leaves a current
+        # point, and arc() would otherwise draw a line from it to this circle.
+        cr.new_sub_path()
         cr.arc(cx, cy, HOTSPOT_RADIUS, 0, 6.2832)
         cr.fill_preserve()
         cr.set_source_rgba(*ring)

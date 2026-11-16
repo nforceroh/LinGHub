@@ -135,6 +135,9 @@ class HotspotEditor(Gtk.DrawingArea):
         else:
             cr.set_source_rgba(0.13, 0.66, 0.88, 0.95)
             cr.set_line_width(2.5)
+        # new_sub_path() is required: show_text() below leaves a current
+        # point, and arc() would otherwise draw a line from it to this circle.
+        cr.new_sub_path()
         cr.arc(cx, cy, RADIUS, 0, 6.2832)
         cr.fill_preserve()
         cr.set_source_rgba(1, 1, 1, 0.95)
