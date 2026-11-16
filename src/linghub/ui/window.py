@@ -21,10 +21,10 @@ from gi.repository import Adw, GLib, Gtk
 
 from .asyncbridge import run_and_report
 from .binding_editor import BindingEditor
-from .binding_labels import describe_binding
 from .buttonmap import BUTTONS, describe, manual_number
 from .client import DaemonClient, DaemonState
 from .diagram import MouseDiagram
+from . import presentation
 from .dpi_panel import DpiPanel
 from .led_panel import LedPanel
 
@@ -388,14 +388,16 @@ class MainWindow(Adw.ApplicationWindow):
         on every two-second poll destroyed the user's selection, so clicking a
         profile appeared to bounce back to the first row.
         """
-        names = self._state.profiles
+        rows = presentation.profile_rows(self._state, self._editing)
+        names = [display.name for display in rows]
 
         # Drop rows for profiles that went away.
         existing = self._profile_rows
         for name in [name for name in existing if name not in names]:
             self._profile_list.remove(existing.pop(name))
 
-        for position, name in enumerate(names):
+        for position, display in enumerate(rows):
+            name = display.name
             row = existing.get(name)
             if row is None:
                 row = Adw.ActionRow(title=name)
@@ -407,17 +409,9 @@ class MainWindow(Adw.ApplicationWindow):
                 existing[name] = row
                 self._profile_list.insert(row, position)
 
-            # Two different facts, so two different markers: the tick means
-            # "on the mouse", the subtitle means "shown in the panels".
-            is_active = name == self._state.active_profile
-            row._check.set_visible(is_active)
-            parts = []
-            if is_active:
-                parts.append("on the mouse")
-            if name == self._editing_profile():
-                parts.append("editing")
-            row.set_subtitle(" · ".join(parts))
-            row._desktop.set_visible(name == self._state.desktop_profile)
+            row._check.set_visible(display.on_the_mouse)
+            row.set_subtitle(display.subtitle)
+            row._desktop.set_visible(display.is_desktop)
 
     def _rebuild_bindings(self) -> None:
         """Fill in what each button does, and highlight the selected row."""
@@ -427,10 +421,9 @@ class MainWindow(Adw.ApplicationWindow):
             else:
                 widget.remove_css_class("accent")
 
-            kind, value = self._bindings.get(index, ("", None))
             label = self._binding_rows.get(index)
             if label is not None:
-                label.set_text(describe_binding(kind, value) if kind else "—")
+                label.set_text(presentation.binding_label(self._bindings, index))
 
     def _apply_bindings(self, bindings: dict[int, tuple[str, str]]) -> None:
         self._bindings = dict(bindings)
@@ -606,18 +599,8 @@ class MainWindow(Adw.ApplicationWindow):
         ).present()
 
     def _editing_profile(self) -> str | None:
-        """The profile the panels show and edit.
-
-        The selection wins, so a gaming profile can be edited without being
-        loaded. Falls back to what is loaded, then the desktop profile.
-        """
-        if self._editing and self._editing in self._state.profiles:
-            return self._editing
-        return (
-            self._state.active_profile
-            or self._state.desktop_profile
-            or (self._state.profiles[0] if self._state.profiles else None)
-        )
+        """The profile the panels show and edit."""
+        return presentation.editing_profile(self._state, self._editing)
 
     def _start_binding_write(self, profile: str, index: int, kind: str, value) -> bool:
         """Kick off the write and report whether it was accepted.
