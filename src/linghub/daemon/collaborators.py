@@ -1,0 +1,75 @@
+"""The three things the D-Bus adapter needs from the daemon.
+
+The adapter used to take fifteen callbacks, one per method, and forward each
+one. That made its interface as wide as its implementation: adding a member
+meant editing the constructor, the assignment block, the method, and every
+test's fake.
+
+The methods fall into three groups by what they act on, so the adapter takes
+three collaborators instead. Each is a Protocol, so the daemon does not have to
+inherit anything and a test can pass a plain object.
+"""
+
+from __future__ import annotations
+
+from typing import Protocol
+
+
+class ProfileLifecycle(Protocol):
+    """Which profile is loaded, and the set of profiles that exist."""
+
+    def load(self, name: str) -> bool:
+        """Load a profile now, overriding detection until it changes."""
+
+    def reload(self) -> bool:
+        """Re-read the config file."""
+
+    def create(self, name: str, executable: str) -> bool:
+        """Add a profile, optionally bound to a game executable."""
+
+    def rename(self, old: str, new: str) -> bool:
+        """Rename a profile and every reference to it."""
+
+    def delete(self, name: str) -> bool:
+        """Remove a profile. Refused for the desktop one."""
+
+
+class Bindings(Protocol):
+    """What each button does in a profile."""
+
+    def get(self, profile: str) -> dict[int, tuple[str, object]]:
+        """Every binding, keyed by ratbag index."""
+
+    def set(self, profile: str, index: int, kind: str, value: object) -> bool:
+        """Assign one button's binding."""
+
+    def clear(self, profile: str, index: int) -> bool:
+        """Record a button as doing nothing."""
+
+
+class DeviceSettings(Protocol):
+    """DPI, report rate and lighting for a profile."""
+
+    def get_resolutions(self, profile: str) -> tuple:
+        """DPI slots as (dpi, is_default, is_disabled), in order."""
+
+    def set_resolution(
+        self, profile: str, index: int, dpi: int,
+        make_default: bool, disabled: bool,
+    ) -> bool:
+        """Change one DPI slot."""
+
+    def get_report_rate(self, profile: str) -> int:
+        """The profile's report rate in Hz, or 0 if unset."""
+
+    def get_report_rates(self, profile: str) -> tuple[int, ...]:
+        """The rates the device accepts."""
+
+    def set_report_rate(self, profile: str, rate: int) -> bool:
+        """Change the report rate."""
+
+    def get_leds(self, profile: str) -> dict[int, dict]:
+        """LED zones, keyed by index."""
+
+    def set_leds(self, profile: str, settings: dict) -> bool:
+        """Set every LED zone to one effect."""

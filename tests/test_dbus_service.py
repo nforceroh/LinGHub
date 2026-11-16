@@ -80,23 +80,74 @@ class FakeDaemon:
         return self.accept
 
 
+class FakeProfiles:
+    """The profile-lifecycle collaborator, backed by FakeDaemon."""
+
+    def __init__(self, daemon):
+        self._daemon = daemon
+
+    def load(self, name):
+        return self._daemon.on_load_profile(name)
+
+    def reload(self):
+        return self._daemon.on_reload()
+
+    def create(self, name, executable):
+        return self._daemon.on_create_profile(name, executable)
+
+    def rename(self, old, new):
+        return self._daemon.on_rename_profile(old, new)
+
+    def delete(self, name):
+        return self._daemon.on_delete_profile(name)
+
+
+class FakeBindings:
+    def __init__(self, daemon):
+        self._daemon = daemon
+
+    def get(self, profile):
+        return self._daemon.get_bindings(profile)
+
+    def set(self, profile, index, kind, value):
+        return self._daemon.on_set_binding(profile, index, kind, value)
+
+    def clear(self, profile, index):
+        return self._daemon.on_set_binding(profile, index, "disabled", None)
+
+
+class FakeSettings:
+    def __init__(self, daemon):
+        self._daemon = daemon
+
+    def get_resolutions(self, profile):
+        return self._daemon.get_resolutions(profile)
+
+    def set_resolution(self, profile, index, dpi, make_default, disabled):
+        return self._daemon.on_set_resolution(profile, index, dpi, make_default, disabled)
+
+    def get_report_rate(self, profile):
+        return self._daemon.get_report_rate(profile)
+
+    def get_report_rates(self, profile):
+        return self._daemon.get_report_rates(profile)
+
+    def set_report_rate(self, profile, rate):
+        return self._daemon.on_set_report_rate(profile, rate)
+
+    def get_leds(self, profile):
+        return self._daemon.get_leds(profile)
+
+    def set_leds(self, profile, settings):
+        return self._daemon.on_set_leds(profile, settings)
+
+
 def make_interface(daemon):
     return ManagerInterface(
-        on_load_profile=daemon.on_load_profile,
-        on_reload=daemon.on_reload,
+        profiles=FakeProfiles(daemon),
+        bindings=FakeBindings(daemon),
+        settings=FakeSettings(daemon),
         get_state=daemon.get_state,
-        get_bindings=daemon.get_bindings,
-        on_set_binding=daemon.on_set_binding,
-        get_leds=daemon.get_leds,
-        on_set_leds=daemon.on_set_leds,
-        get_resolutions=daemon.get_resolutions,
-        get_report_rate=daemon.get_report_rate,
-        get_report_rates=daemon.get_report_rates,
-        on_set_resolution=daemon.on_set_resolution,
-        on_set_report_rate=daemon.on_set_report_rate,
-        on_create_profile=daemon.on_create_profile,
-        on_rename_profile=daemon.on_rename_profile,
-        on_delete_profile=daemon.on_delete_profile,
     )
 
 

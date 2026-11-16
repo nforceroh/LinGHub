@@ -33,52 +33,30 @@ class ManagerInterface(ServiceInterface):
     the callbacks it is given, so it can be tested without a bus.
     """
 
-    def __init__(
-        self,
-        on_load_profile,
-        on_reload,
-        get_state,
-        get_bindings=None,
-        on_set_binding=None,
-        get_leds=None,
-        on_set_leds=None,
-        get_resolutions=None,
-        get_report_rate=None,
-        get_report_rates=None,
-        on_set_resolution=None,
-        on_set_report_rate=None,
-        on_create_profile=None,
-        on_rename_profile=None,
-        on_delete_profile=None,
-    ):
+    def __init__(self, profiles, bindings, settings, get_state):
+        """Take the three collaborators the methods act on, plus a state reader.
+
+        Grouping by what each method acts on keeps the interface small: adding
+        a member means adding it to one collaborator, not to a fifteen-argument
+        constructor.
+        """
         super().__init__(INTERFACE)
-        self._on_load_profile = on_load_profile
-        self._on_reload = on_reload
+        self._profiles = profiles
+        self._bindings = bindings
+        self._settings = settings
         self._get_state = get_state
-        self._get_bindings = get_bindings
-        self._on_set_binding = on_set_binding
-        self._get_leds = get_leds
-        self._on_set_leds = on_set_leds
-        self._get_resolutions = get_resolutions
-        self._get_report_rate = get_report_rate
-        self._get_report_rates = get_report_rates
-        self._on_set_resolution = on_set_resolution
-        self._on_set_report_rate = on_set_report_rate
-        self._on_create_profile = on_create_profile
-        self._on_rename_profile = on_rename_profile
-        self._on_delete_profile = on_delete_profile
 
     @method()
     def LoadProfile(self, name: "s") -> "b":
         """Load a named profile now, overriding game detection until it changes."""
         logger.info("LoadProfile(%r) requested over D-Bus", name)
-        return bool(self._on_load_profile(name))
+        return bool(self._profiles.load(name))
 
     @method()
     def Reload(self) -> "b":
         """Re-read the config file from disk."""
         logger.info("Reload requested over D-Bus")
-        return bool(self._on_reload())
+        return bool(self._profiles.reload())
 
     @method()
     def ListProfiles(self) -> "as":
@@ -93,9 +71,7 @@ class ManagerInterface(ServiceInterface):
         integer-keyed map, and the value's type depends on the binding type,
         so it is always a string here and decoded by the caller.
         """
-        if self._get_bindings is None:
-            return []
-        bindings = self._get_bindings(profile) or {}
+        bindings = self._bindings.get(profile) or {}
         return [
             (int(index), str(kind), "" if value is None else str(value))
             for index, (kind, value) in sorted(bindings.items())
@@ -108,12 +84,10 @@ class ManagerInterface(ServiceInterface):
         The daemon is the single writer (ADR-0004), so the UI edits through
         here rather than touching the file.
         """
-        if self._on_set_binding is None:
-            return False
         logger.info(
             "SetBinding(%r, %d, %r, %r) requested over D-Bus", profile, index, kind, value
         )
-        return bool(self._on_set_binding(profile, index, kind, value or None))
+        return bool(self._bindings.set(profile, index, kind, value or None))
 
     @method()
     def ClearBinding(self, profile: "s", index: "i") -> "b":
@@ -122,10 +96,8 @@ class ManagerInterface(ServiceInterface):
         Recorded as `disabled` rather than an empty mapping: ADR-0003 says
         never to write ACTION_NONE, which corrupts G502 Hero buttons.
         """
-        if self._on_set_binding is None:
-            return False
         logger.info("ClearBinding(%r, %d) requested over D-Bus", profile, index)
-        return bool(self._on_set_binding(profile, index, "disabled", None))
+        return bool(self._bindings.clear(profile, index))
 
     @method()
     def CreateProfile(self, name: "s", executable: "s") -> "b":
@@ -134,26 +106,20 @@ class ManagerInterface(ServiceInterface):
         An empty executable makes a desktop-style profile: one that is never
         matched to a game.
         """
-        if self._on_create_profile is None:
-            return False
         logger.info("CreateProfile(%r, %r) requested over D-Bus", name, executable)
-        return bool(self._on_create_profile(name, executable))
+        return bool(self._profiles.create(name, executable))
 
     @method()
     def RenameProfile(self, old: "s", new: "s") -> "b":
         """Rename a profile and every reference to it."""
-        if self._on_rename_profile is None:
-            return False
         logger.info("RenameProfile(%r, %r) requested over D-Bus", old, new)
-        return bool(self._on_rename_profile(old, new))
+        return bool(self._profiles.rename(old, new))
 
     @method()
     def DeleteProfile(self, name: "s") -> "b":
         """Remove a profile. Refused for the desktop profile."""
-        if self._on_delete_profile is None:
-            return False
         logger.info("DeleteProfile(%r) requested over D-Bus", name)
-        return bool(self._on_delete_profile(name))
+        return bool(self._profiles.delete(name))
 
     @method()
     def GetResolutions(self, profile: "s") -> "a(uuuu)":
@@ -163,9 +129,7 @@ class ManagerInterface(ServiceInterface):
         inside a struct when the value came from a Python int, and the caller
         only needs to know whether each is set.
         """
-        if self._get_resolutions is None:
-            return []
-        slots = self._get_resolutions(profile) or ()
+        slots = self._settings.get_resolutions(profile) or ()
         return [
             (
                 int(index),
@@ -181,20 +145,16 @@ class ManagerInterface(ServiceInterface):
         self, profile: "s", index: "i", dpi: "u", make_default: "b", disabled: "b"
     ) -> "b":
         """Change one DPI slot."""
-        if self._on_set_resolution is None:
-            return False
         logger.info(
             "SetResolution(%r, %d, dpi=%d, default=%s, disabled=%s) requested over D-Bus",
             profile, index, dpi, make_default, disabled,
         )
-        return bool(self._on_set_resolution(profile, index, dpi, make_default, disabled))
+        return bool(self._settings.set_resolution(profile, index, dpi, make_default, disabled))
 
     @method()
     def GetReportRate(self, profile: "s") -> "u":
         """The profile's report rate in Hz, or 0 if unset."""
-        if self._get_report_rate is None:
-            return 0
-        return int(self._get_report_rate(profile) or 0)
+        return int(self._settings.get_report_rate(profile) or 0)
 
     @method()
     def GetReportRates(self, profile: "s") -> "au":
@@ -203,17 +163,13 @@ class ManagerInterface(ServiceInterface):
         Read from hardware rather than hard-coded, so a device that offers a
         different set is not presented with the wrong choices.
         """
-        if self._get_report_rates is None:
-            return []
-        return [int(rate) for rate in (self._get_report_rates(profile) or ())]
+        return [int(rate) for rate in (self._settings.get_report_rates(profile) or ())]
 
     @method()
     def SetReportRate(self, profile: "s", rate: "u") -> "b":
         """Change the profile's report rate."""
-        if self._on_set_report_rate is None:
-            return False
         logger.info("SetReportRate(%r, %d) requested over D-Bus", profile, rate)
-        return bool(self._on_set_report_rate(profile, rate))
+        return bool(self._settings.set_report_rate(profile, rate))
 
     @method()
     def GetLeds(self, profile: "s") -> "a(us(uuu)uu)":
@@ -223,9 +179,7 @@ class ManagerInterface(ServiceInterface):
         separate in the hardware even when the UI drives them together, so the
         shape stays honest about that.
         """
-        if self._get_leds is None:
-            return []
-        leds = self._get_leds(profile) or {}
+        leds = self._settings.get_leds(profile) or {}
         result = []
         for index, settings in sorted(leds.items()):
             color = settings.get("color") or (0, 0, 0)
@@ -255,13 +209,11 @@ class ManagerInterface(ServiceInterface):
         values rather than a list. Splitting them later means adding a method
         that takes a per-zone list, not changing this one's meaning.
         """
-        if self._on_set_leds is None:
-            return False
         logger.info(
             "SetLeds(%r, %r, brightness=%d, duration=%d, rgb=(%d,%d,%d)) requested over D-Bus",
             profile, mode, brightness, duration, red, green, blue,
         )
-        return bool(self._on_set_leds(profile, {
+        return bool(self._settings.set_leds(profile, {
             "mode": mode,
             "brightness": brightness,
             "duration": duration,

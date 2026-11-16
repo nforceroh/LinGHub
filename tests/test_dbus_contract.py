@@ -12,10 +12,18 @@ from linghub import dbus_contract
 from linghub.daemon.dbus_service import ManagerInterface
 
 
+class _Stub:
+    """Answers every collaborator call with a harmless value."""
+
+    def __getattr__(self, _name):
+        return lambda *args, **kwargs: True
+
+
 def make_interface():
     return ManagerInterface(
-        on_load_profile=lambda name: True,
-        on_reload=lambda: True,
+        profiles=_Stub(),
+        bindings=_Stub(),
+        settings=_Stub(),
         get_state=lambda: None,
     )
 

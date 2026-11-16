@@ -34,6 +34,77 @@ DESKTOP_SLOT = 0
 logger = logging.getLogger("linghub.daemon")
 
 
+class _ProfileLifecycle:
+    """The daemon's profile-lifecycle operations, as one collaborator."""
+
+    def __init__(self, daemon: "Daemon"):
+        self._daemon = daemon
+
+    def load(self, name: str) -> bool:
+        return self._daemon._request_profile(name)
+
+    def reload(self) -> bool:
+        return self._daemon._request_reload()
+
+    def create(self, name: str, executable: str) -> bool:
+        return self._daemon._request_create_profile(name, executable)
+
+    def rename(self, old: str, new: str) -> bool:
+        return self._daemon._request_rename_profile(old, new)
+
+    def delete(self, name: str) -> bool:
+        return self._daemon._request_delete_profile(name)
+
+
+class _Bindings:
+    """The daemon's binding operations, as one collaborator."""
+
+    def __init__(self, daemon: "Daemon"):
+        self._daemon = daemon
+
+    def get(self, profile: str) -> dict[int, tuple[str, object]]:
+        return self._daemon._get_bindings(profile)
+
+    def set(self, profile: str, index: int, kind: str, value: object) -> bool:
+        return self._daemon._request_set_binding(profile, index, kind, value)
+
+    def clear(self, profile: str, index: int) -> bool:
+        return self._daemon._request_set_binding(profile, index, "disabled", None)
+
+
+class _DeviceSettings:
+    """The daemon's DPI, report-rate and lighting operations."""
+
+    def __init__(self, daemon: "Daemon"):
+        self._daemon = daemon
+
+    def get_resolutions(self, profile: str) -> tuple:
+        return self._daemon._get_resolutions(profile)
+
+    def set_resolution(
+        self, profile: str, index: int, dpi: int,
+        make_default: bool, disabled: bool,
+    ) -> bool:
+        return self._daemon._request_set_resolution(
+            profile, index, dpi, make_default, disabled
+        )
+
+    def get_report_rate(self, profile: str) -> int:
+        return self._daemon._get_report_rate(profile)
+
+    def get_report_rates(self, profile: str) -> tuple[int, ...]:
+        return self._daemon._get_report_rates(profile)
+
+    def set_report_rate(self, profile: str, rate: int) -> bool:
+        return self._daemon._request_set_report_rate(profile, rate)
+
+    def get_leds(self, profile: str) -> dict[int, dict]:
+        return self._daemon._get_leds(profile)
+
+    def set_leds(self, profile: str, settings: dict) -> bool:
+        return self._daemon._request_set_leds(profile, settings)
+
+
 class ConfigStartupError(RuntimeError):
     """The config is missing or invalid, so the daemon cannot start.
 
@@ -110,21 +181,10 @@ class Daemon:
             return
 
         self._interface = ManagerInterface(
-            on_load_profile=self._request_profile,
-            on_reload=self._request_reload,
+            profiles=_ProfileLifecycle(self),
+            bindings=_Bindings(self),
+            settings=_DeviceSettings(self),
             get_state=self._snapshot,
-            get_bindings=self._get_bindings,
-            on_set_binding=self._request_set_binding,
-            get_leds=self._get_leds,
-            on_set_leds=self._request_set_leds,
-            get_resolutions=self._get_resolutions,
-            get_report_rate=self._get_report_rate,
-            get_report_rates=self._get_report_rates,
-            on_set_resolution=self._request_set_resolution,
-            on_set_report_rate=self._request_set_report_rate,
-            on_create_profile=self._request_create_profile,
-            on_rename_profile=self._request_rename_profile,
-            on_delete_profile=self._request_delete_profile,
         )
         self._session_bus.export(PATH, self._interface)
         await self._session_bus.request_name(SERVICE)
