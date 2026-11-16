@@ -214,6 +214,7 @@ validate is never written over.
   every button, plus the supported variants
 - [Glossary](GLOSSARY.md) — the vocabulary this project uses
 - [Architecture decisions](docs/adr/) — why the design is the way it is
+- [Architecture reviews](docs/reviews/) — deepening opportunities, dated
 
 ## Development
 

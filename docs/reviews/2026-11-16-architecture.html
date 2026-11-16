@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Architecture review for LinGHub — 16 November 2026</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 4 4; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+
+      <header class="border-b border-slate-300 pb-6">
+        <h1 class="font-serif text-4xl tracking-tight">Architecture review for LinGHub</h1>
+        <p class="text-sm text-slate-500 mt-2">16 November 2026 · second review · 5 candidates</p>
+        <div class="flex flex-wrap gap-5 mt-5 text-xs uppercase tracking-wider text-slate-600">
+          <span class="flex items-center gap-2"><span class="inline-block w-5 h-3 border border-slate-400 bg-white"></span> module</span>
+          <span class="flex items-center gap-2"><svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" stroke="#64748b" stroke-width="2" class="seam"/></svg> seam</span>
+          <span class="flex items-center gap-2"><svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" stroke="#dc2626" stroke-width="2"/></svg> leakage</span>
+          <span class="flex items-center gap-2"><span class="inline-block w-5 h-3 deep"></span> deep module</span>
+        </div>
+      </header>
+
+      <section class="rounded-lg border border-slate-200 bg-white p-5">
+        <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Since the last review</p>
+        <div class="grid sm:grid-cols-2 gap-x-8 gap-y-2 text-sm">
+          <p><span class="text-emerald-700 font-semibold">Fixed</span> — five of the eight write paths now share <span class="font-mono text-xs">_apply_and_save</span></p>
+          <p><span class="text-emerald-700 font-semibold">Fixed</span> — the window separates editing from loading</p>
+          <p><span class="text-amber-700 font-semibold">Still open</span> — two write paths bypass the helper</p>
+          <p><span class="text-amber-700 font-semibold">Still open</span> — D-Bus signatures duplicated</p>
+          <p><span class="text-amber-700 font-semibold">Still open</span> — 15 constructor callbacks</p>
+          <p><span class="text-amber-700 font-semibold">Still open</span> — window mixes four responsibilities</p>
+          <p><span class="text-red-700 font-semibold">New</span> — the tray duplicates daemon access</p>
+          <p><span class="text-red-700 font-semibold">New</span> — the binding editor dispatches by if-chain</p>
+        </div>
+      </section>
+
+      <section id="candidates" class="space-y-14">
+
+        <!-- ============ 1 ============ -->
+        <article id="c1" class="space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h2 class="font-serif text-2xl">1. Finish collapsing the write paths</h2>
+            <div class="flex gap-2">
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-emerald-100 text-emerald-800 font-semibold">Strong</span>
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-slate-100 text-slate-600">in-process</span>
+            </div>
+          </div>
+
+          <p class="font-mono text-sm text-slate-600">src/linghub/daemon/service.py:173–245, 312–328</p>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Before — 5 through the seam, 2 around it</p>
+              <div class="space-y-1.5 text-[11px]">
+                <div class="flex items-center gap-2"><span class="w-24 font-mono">resolution</span><span class="flex-1 h-2 bg-emerald-300 rounded"></span><span class="text-emerald-700">helper</span></div>
+                <div class="flex items-center gap-2"><span class="w-24 font-mono">report rate</span><span class="flex-1 h-2 bg-emerald-300 rounded"></span><span class="text-emerald-700">helper</span></div>
+                <div class="flex items-center gap-2"><span class="w-24 font-mono">create</span><span class="flex-1 h-2 bg-emerald-300 rounded"></span><span class="text-emerald-700">helper</span></div>
+                <div class="flex items-center gap-2"><span class="w-24 font-mono">rename</span><span class="flex-1 h-2 bg-emerald-300 rounded"></span><span class="text-emerald-700">helper</span></div>
+                <div class="flex items-center gap-2"><span class="w-24 font-mono">delete</span><span class="flex-1 h-2 bg-emerald-300 rounded"></span><span class="text-emerald-700">helper</span></div>
+                <div class="flex items-center gap-2"><span class="w-24 font-mono text-red-700">binding</span><span class="flex-1 h-2 bg-red-400 rounded"></span><span class="text-red-700">own copy</span></div>
+                <div class="flex items-center gap-2"><span class="w-24 font-mono text-red-700">leds</span><span class="flex-1 h-2 bg-red-400 rounded"></span><span class="text-red-700">own copy</span></div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">After — one seam</p>
+              <div class="deep rounded px-3 py-8 text-center">
+                <p class="text-xs uppercase tracking-wider text-slate-300">_apply_and_save</p>
+                <p class="text-[10px] text-slate-400 mt-2">validate → apply → save → rollback</p>
+                <p class="text-[10px] text-slate-500 mt-3 font-mono">7 callers</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Problem</p>
+              <p>Five of seven write paths go through the helper; binding and LED still carry their own snapshot/save/rollback, so the rule lives in three places and only two of them validate first.</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Solution</p>
+              <p>Move the binding and LED validation into the change callable and route both through <span class="font-mono text-xs">_apply_and_save</span>.</p>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Wins</p>
+            <ul class="grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm list-disc list-inside text-slate-700">
+              <li>locality: rollback in one module</li>
+              <li>leverage: one interface, seven call sites</li>
+              <li>the drift already happened once</li>
+              <li>tests cover the rule once</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ============ 2 ============ -->
+        <article id="c2" class="space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h2 class="font-serif text-2xl">2. One owner for the D-Bus contract</h2>
+            <div class="flex gap-2">
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-emerald-100 text-emerald-800 font-semibold">Strong</span>
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-slate-100 text-slate-600">ports &amp; adapters</span>
+            </div>
+          </div>
+
+          <p class="font-mono text-sm text-slate-600">src/linghub/ui/client.py:108–196 · src/linghub/daemon/dbus_service.py:74–299</p>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-4">
+            <pre class="mermaid">
+flowchart LR
+  subgraph client["DaemonClient"]
+    C1["_call('SetBinding', 'siss')"]
+    C2["_call('SetResolution', 'siubb')"]
+    C3["_call('SetLeds', 'ssuuuuu')"]
+  end
+  subgraph daemon["ManagerInterface"]
+    D1["SetBinding(s, i, s, s)"]
+    D2["SetResolution(s, i, u, b, b)"]
+    D3["SetLeds(s, s, u, u, u, u, u)"]
+  end
+  C1 -.signature literal.-> D1
+  C2 -.signature literal.-> D2
+  C3 -.signature literal.-> D3
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class C1,C2,C3 leak
+            </pre>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Problem</p>
+              <p>Seventeen call sites hand-write a member name and signature. Nothing checks them against the daemon, and three were wrong during this project's own work.</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Solution</p>
+              <p>One module declares each member with its signature and argument order; client and interface both read from it.</p>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Wins</p>
+            <ul class="grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm list-disc list-inside text-slate-700">
+              <li>locality: the contract is one file</li>
+              <li>signature drift fails at import</li>
+              <li>leverage: 17 call sites, one declaration</li>
+              <li>the README test already proves the shape</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ============ 3 ============ -->
+        <article id="c3" class="space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h2 class="font-serif text-2xl">3. One daemon-access module for the tray</h2>
+            <div class="flex gap-2">
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-emerald-100 text-emerald-800 font-semibold">Strong</span>
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-slate-100 text-slate-600">in-process</span>
+            </div>
+          </div>
+
+          <p class="font-mono text-sm text-slate-600">src/linghub/tray.py:86–106, 176–196 · src/linghub/ui/asyncbridge.py</p>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Before — the pattern, twice</p>
+              <div class="space-y-2 font-mono text-[10px]">
+                <div class="border border-red-300 bg-red-50 p-2 rounded">
+                  <p class="text-red-800">_query()</p>
+                  <p class="text-slate-600 mt-1">DaemonClient() → connect → state → disconnect</p>
+                  <p class="text-slate-500 mt-1">wrapped in asyncio.run inside a thread</p>
+                </div>
+                <div class="border border-red-300 bg-red-50 p-2 rounded">
+                  <p class="text-red-800">_load_thread()</p>
+                  <p class="text-slate-600 mt-1">DaemonClient() → connect → load → disconnect</p>
+                  <p class="text-slate-500 mt-1">wrapped in asyncio.run inside a thread</p>
+                </div>
+                <p class="text-[10px] text-slate-500 pt-1">The window keeps one injected client instead.</p>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">After — one seam</p>
+              <div class="deep rounded px-3 py-8 text-center">
+                <p class="text-xs uppercase tracking-wider text-slate-300">daemon access</p>
+                <p class="text-[10px] text-slate-400 mt-2">connect once · run off-thread · report back</p>
+                <p class="text-[10px] text-slate-500 mt-3 font-mono">tray · window · status</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Problem</p>
+              <p>The tray builds a client, connects, queries and disconnects in two separate places, each with its own <span class="font-mono text-xs">asyncio.run</span> inside a thread. The window does the same job differently.</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Solution</p>
+              <p>One module owns the connect/query/disconnect lifecycle and the off-thread asyncio setup; the tray and the window both call it.</p>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Wins</p>
+            <ul class="grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm list-disc list-inside text-slate-700">
+              <li>locality: connection lifecycle in one module</li>
+              <li>leverage: three callers, one interface</li>
+              <li>the tray stops re-implementing asyncio setup</li>
+              <li>testable without a GTK loop</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ============ 4 ============ -->
+        <article id="c4" class="space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h2 class="font-serif text-2xl">4. A mode table for the binding editor</h2>
+            <div class="flex gap-2">
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-amber-100 text-amber-800 font-semibold">Worth exploring</span>
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-slate-100 text-slate-600">in-process</span>
+            </div>
+          </div>
+
+          <p class="font-mono text-sm text-slate-600">src/linghub/ui/binding_editor.py:189–225, 278–315</p>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Before — four chains over six modes</p>
+              <div class="space-y-1.5 font-mono text-[10px] text-slate-600">
+                <div class="bg-slate-50 px-2 py-1">_select_initial_mode: dict + special case</div>
+                <div class="bg-slate-50 px-2 py-1">_load_initial_value: if / elif × 4</div>
+                <div class="bg-red-50 border-l-2 border-red-400 px-2 py-1">_selected_value: if × 5 + fallback</div>
+                <div class="bg-red-50 border-l-2 border-red-400 px-2 py-1">_current_binding: if × 5 + fallback</div>
+              </div>
+              <p class="text-[10px] text-red-700 mt-2">Adding a mode means editing four chains.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">After — one table</p>
+              <div class="deep rounded px-3 py-6 text-center">
+                <p class="text-xs uppercase tracking-wider text-slate-300">mode → (widget, kind, read)</p>
+                <p class="text-[10px] text-slate-400 mt-2">one row per mode</p>
+                <p class="text-[10px] text-slate-500 mt-3 font-mono">6 rows</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Problem</p>
+              <p>Six modes are dispatched by four separate conditional chains. Adding the sixth mode this week meant editing all four, and the compiler cannot tell you if you missed one.</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Solution</p>
+              <p>One table mapping each mode to its widget, its stored kind, and how to read its value.</p>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Wins</p>
+            <ul class="grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm list-disc list-inside text-slate-700">
+              <li>adding a mode is one row</li>
+              <li>locality: mode knowledge in one place</li>
+              <li>the round-trip test covers all modes</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ============ 5 ============ -->
+        <article id="c5" class="space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h2 class="font-serif text-2xl">5. Deepen the D-Bus adapter past fifteen callbacks</h2>
+            <div class="flex gap-2">
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-amber-100 text-amber-800 font-semibold">Worth exploring</span>
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-slate-100 text-slate-600">in-process</span>
+            </div>
+          </div>
+
+          <p class="font-mono text-sm text-slate-600">src/linghub/daemon/dbus_service.py:38–54 · src/linghub/daemon/service.py:112–128</p>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Before — interface ≈ implementation</p>
+              <div class="flex items-end gap-3 h-40">
+                <div class="flex-1 flex flex-col justify-end">
+                  <div class="bg-red-200 border border-red-400 h-32 flex items-center justify-center">
+                    <span class="text-[10px] uppercase tracking-wider text-red-900 text-center">interface<br/>15 callbacks</span>
+                  </div>
+                </div>
+                <div class="flex-1 flex flex-col justify-end">
+                  <div class="bg-slate-200 border border-slate-400 h-36 flex items-center justify-center">
+                    <span class="text-[10px] uppercase tracking-wider text-slate-700 text-center">implementation<br/>forwarding</span>
+                  </div>
+                </div>
+              </div>
+              <p class="text-[10px] text-slate-500 mt-2">Every method is a one-line forward.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">After — one collaborator</p>
+              <div class="flex items-end gap-3 h-40">
+                <div class="flex-1 flex flex-col justify-end">
+                  <div class="bg-emerald-200 border border-emerald-500 h-8 flex items-center justify-center">
+                    <span class="text-[10px] uppercase tracking-wider text-emerald-900 text-center">interface<br/>1 object</span>
+                  </div>
+                </div>
+                <div class="flex-1 flex flex-col justify-end">
+                  <div class="deep h-36 flex items-center justify-center">
+                    <span class="text-[10px] uppercase tracking-wider text-slate-300 text-center">implementation<br/>the daemon</span>
+                  </div>
+                </div>
+              </div>
+              <p class="text-[10px] text-slate-500 mt-2">The adapter translates; it does not enumerate.</p>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Problem</p>
+              <p>Fifteen constructor callbacks, each stored and forwarded. Adding a member means editing the constructor, the assignment block, the method, and every test's fake.</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Solution</p>
+              <p>Pass one collaborator that answers the operations, so the adapter's interface is the D-Bus surface and nothing else.</p>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Wins</p>
+            <ul class="grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm list-disc list-inside text-slate-700">
+              <li>interface shrinks to the D-Bus surface</li>
+              <li>adding a member touches one place</li>
+              <li>the fake stops mirroring the constructor</li>
+            </ul>
+          </div>
+        </article>
+
+      </section>
+
+      <section id="top-recommendation" class="pt-4">
+        <div class="rounded-xl border-2 border-emerald-500 bg-white p-6">
+          <p class="text-xs uppercase tracking-wider text-emerald-700 font-semibold mb-2">Top recommendation</p>
+          <h2 class="font-serif text-2xl mb-2">
+            <a href="#c1" class="underline decoration-emerald-400 decoration-2 underline-offset-4">Finish collapsing the write paths</a>
+          </h2>
+          <p class="text-sm text-slate-700">
+            Five of seven paths already use the helper, so this is finishing a job rather than starting one.
+            The two that bypass it are the two that have already drifted — only the LED path validates before applying.
+            Smallest change here, and it removes a rule from three places to one.
+          </p>
+        </div>
+      </section>
+
+      <section class="pt-2">
+        <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Not proposed, and why</p>
+        <ul class="text-sm text-slate-700 space-y-1 list-disc list-inside">
+          <li><span class="font-mono text-xs">hotspot_editor.py</span> (526 lines) is a one-off authoring tool, not on any hot path. Deepening it buys nothing.</li>
+          <li>Splitting <span class="font-mono text-xs">window.py</span> by responsibility is real, but the decoupling this week removed the worst symptom. Revisit if it grows again.</li>
+          <li>The CLI's seven dispatch branches are not a problem at seven commands.</li>
+        </ul>
+      </section>
+
+    </main>
+  </body>
+</html>
