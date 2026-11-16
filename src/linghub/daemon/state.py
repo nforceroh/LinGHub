@@ -8,11 +8,11 @@ registrations (launcher then game) without special cases.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from ..config import Config
 from ..discovery.detector import Detection
-from ..domain.profile import Profile
+from ..domain.profile import Binding, Profile
 
 
 def fingerprint(profile: Profile) -> str:
@@ -92,3 +92,30 @@ class DaemonState:
         self.loaded_profile = profile_name
         profile = self.config.profile_named(profile_name)
         self.loaded_fingerprint = fingerprint(profile) if profile else None
+
+    def set_binding(
+        self, profile_name: str, index: int, binding: Binding | None
+    ) -> bool:
+        """Change one button's binding in the running config.
+
+        Applied to a copy that replaces the old config in one step, so a
+        failed save cannot leave the config half-edited. The loaded
+        fingerprint is deliberately left alone, which makes `needs_write`
+        true and gets the daemon to push the change to the mouse.
+
+        Returns False when the profile does not exist, so the UI can tell a
+        typo from a write that is genuinely queued.
+        """
+        profile = self.config.profile_named(profile_name)
+        if profile is None:
+            return False
+
+        updated = profile.with_binding(index, binding)
+        self.config = replace(
+            self.config,
+            profiles=[
+                updated if candidate.name == profile_name else candidate
+                for candidate in self.config.profiles
+            ],
+        )
+        return True

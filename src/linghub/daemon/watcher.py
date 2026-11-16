@@ -43,3 +43,12 @@ class ConfigWatcher:
     def reset(self) -> None:
         """Forget the observed state, so the next check reports a change."""
         self._signature = None
+
+    def resync(self) -> None:
+        """Accept the current file state without reporting a change.
+
+        Used after the daemon writes the file itself: the contents on disk are
+        already what it has in memory, so treating the write as an external
+        edit would cause a pointless reload.
+        """
+        self._signature = self._current_signature()

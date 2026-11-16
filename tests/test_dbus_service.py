@@ -11,11 +11,13 @@ from linghub.daemon.snapshot import StateSnapshot
 
 
 class FakeDaemon:
-    def __init__(self, snapshot=None, accept=True):
+    def __init__(self, snapshot=None, accept=True, bindings=None):
         self.snapshot = snapshot or StateSnapshot()
         self.accept = accept
         self.loaded: list[str] = []
         self.reloads = 0
+        self.bindings = bindings or {}
+        self.set_calls: list[tuple] = []
 
     def on_load_profile(self, name):
         self.loaded.append(name)
@@ -28,12 +30,21 @@ class FakeDaemon:
     def get_state(self):
         return self.snapshot
 
+    def get_bindings(self, profile):
+        return self.bindings
+
+    def on_set_binding(self, profile, index, kind, value):
+        self.set_calls.append((profile, index, kind, value))
+        return self.accept
+
 
 def make_interface(daemon):
     return ManagerInterface(
         on_load_profile=daemon.on_load_profile,
         on_reload=daemon.on_reload,
         get_state=daemon.get_state,
+        get_bindings=daemon.get_bindings,
+        on_set_binding=daemon.on_set_binding,
     )
 
 
@@ -73,6 +84,38 @@ class MethodTests(unittest.TestCase):
         self.assertEqual(call(interface, "ListProfiles"), ["desktop", "wot"])
 
 
+class BindingMethodTests(unittest.TestCase):
+    def test_get_bindings_returns_pairs(self):
+        daemon = FakeDaemon(bindings={0: ("key", "KEY_F"), 3: ("special", "resolution-up")})
+        interface = make_interface(daemon)
+        self.assertEqual(
+            sorted(call(interface, "GetBindings", "wot")),
+            [(0, "key", "KEY_F"), (3, "special", "resolution-up")],
+        )
+
+    def test_get_bindings_returns_empty_for_an_unknown_profile(self):
+        daemon = FakeDaemon(bindings={})
+        self.assertEqual(call(make_interface(daemon), "GetBindings", "nope"), [])
+
+    def test_set_binding_routes_to_the_daemon(self):
+        daemon = FakeDaemon()
+        interface = make_interface(daemon)
+        self.assertTrue(call(interface, "SetBinding", "wot", 3, "key", "KEY_F"))
+        self.assertEqual(daemon.set_calls, [("wot", 3, "key", "KEY_F")])
+
+    def test_set_binding_reports_rejection(self):
+        daemon = FakeDaemon(accept=False)
+        interface = make_interface(daemon)
+        self.assertFalse(call(interface, "SetBinding", "wot", 3, "key", "KEY_F"))
+
+    def test_clear_binding_routes_a_disabled_binding(self):
+        """ADR-0003: never write NONE, so "clear" means a harmless special."""
+        daemon = FakeDaemon()
+        interface = make_interface(daemon)
+        self.assertTrue(call(interface, "ClearBinding", "wot", 3))
+        self.assertEqual(daemon.set_calls, [("wot", 3, "disabled", None)])
+
+
 class PropertyTests(unittest.TestCase):
     def test_active_profile_reports_loaded(self):
         daemon = FakeDaemon(StateSnapshot(loaded_profile="world-of-tanks"))
@@ -106,6 +149,7 @@ class IntrospectionTests(unittest.TestCase):
         )
         for member in (
             "LoadProfile", "Reload", "ListProfiles",
+            "GetBindings", "SetBinding", "ClearBinding",
             "ActiveProfile", "DetectedGame", "DesktopProfile",
             "ProfileChanged", "GameDetected", "GameExited",
         ):

@@ -64,5 +64,63 @@ class WatcherTests(unittest.TestCase):
         self.assertTrue(watcher.changed())
 
 
+class ResyncTests(unittest.TestCase):
+    """resync() must accept a write without reporting it as a change.
+
+    The daemon writes the config itself when a binding is edited. Treating
+    that write as an external edit caused a redundant reload on every change.
+    """
+
+    def test_resync_is_not_reported_as_a_change(self):
+        import tempfile
+        from pathlib import Path
+
+        from linghub.daemon.watcher import ConfigWatcher
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            path.write_text("{}", encoding="utf-8")
+            watcher = ConfigWatcher(path)
+            self.assertTrue(watcher.changed())  # first check always reports
+
+            path.write_text('{"a": 1}', encoding="utf-8")
+            watcher.resync()
+            self.assertFalse(watcher.changed())
+
+    def test_reset_still_forces_a_reload(self):
+        import tempfile
+        from pathlib import Path
+
+        from linghub.daemon.watcher import ConfigWatcher
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            path.write_text("{}", encoding="utf-8")
+            watcher = ConfigWatcher(path)
+            watcher.changed()
+            watcher.reset()
+            self.assertTrue(watcher.changed())
+
+    def test_resync_then_an_external_edit_is_still_noticed(self):
+        import tempfile
+        from pathlib import Path
+
+        from linghub.daemon.watcher import ConfigWatcher
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            path.write_text("{}", encoding="utf-8")
+            watcher = ConfigWatcher(path)
+            watcher.changed()
+            watcher.resync()
+            self.assertFalse(watcher.changed())
+
+            import time
+
+            time.sleep(0.01)
+            path.write_text('{"external": true}', encoding="utf-8")
+            self.assertTrue(watcher.changed())
+
+
 if __name__ == "__main__":
     unittest.main()

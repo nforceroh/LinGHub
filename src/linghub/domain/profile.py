@@ -6,7 +6,7 @@ filesystem. See GLOSSARY.md for the vocabulary.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 
 @dataclass(frozen=True)
@@ -63,3 +63,17 @@ class Profile:
     @property
     def is_desktop(self) -> bool:
         return not self.games
+
+    def with_binding(self, index: int, binding: Binding | None) -> "Profile":
+        """A copy with one button's binding replaced, or removed if None.
+
+        The dataclass is frozen but `bindings` is a dict, so mutating it in
+        place would edit a "frozen" value. Going through a copy keeps every
+        profile value immutable and makes a change easy to reason about.
+        """
+        updated = dict(self.bindings)
+        if binding is None:
+            updated.pop(index, None)
+        else:
+            updated[index] = binding
+        return replace(self, bindings=updated)

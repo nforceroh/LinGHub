@@ -92,3 +92,99 @@ def load(path: Path | str = DEFAULT_CONFIG_PATH) -> Config:
         desktop_profile=desktop_profile,
         poll_interval=float(settings.get("poll_interval", 2)),
     )
+
+
+def _binding_to_raw(binding: Binding) -> dict:
+    raw = {"type": binding.type}
+    if binding.value is not None:
+        raw["value"] = binding.value
+    return raw
+
+
+def _profile_to_raw(profile: Profile) -> dict:
+    """Serialize the parts of a profile the model understands."""
+    raw: dict = {}
+    if profile.games:
+        raw["games"] = [game.executable for game in profile.games]
+    if profile.report_rate is not None:
+        raw["report_rate"] = profile.report_rate
+    if profile.resolutions:
+        raw["resolutions"] = list(profile.resolutions)
+    if profile.bindings:
+        raw["bindings"] = {
+            str(index): _binding_to_raw(binding)
+            for index, binding in sorted(profile.bindings.items())
+        }
+    if profile.leds:
+        raw["leds"] = list(profile.leds)
+    return raw
+
+
+def save(path: Path | str, config: Config) -> None:
+    """Write the config back, then validate it by loading it again.
+
+    Unknown keys in the file are preserved: this module only models the parts
+    it understands, and silently dropping a hand-written key would be worse
+    than refusing to save. The new file is validated before it replaces the
+    old one, so a bug here cannot leave the user without a working config.
+    """
+    path = Path(path)
+    try:
+        original = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        original = {}
+    except json.JSONDecodeError as exc:
+        raise ConfigError(f"refusing to overwrite a corrupt config: {exc}") from exc
+
+    if not isinstance(original, dict):
+        raise ConfigError("config root must be an object")
+
+    raw_profiles = original.get("profiles")
+    if not isinstance(raw_profiles, dict):
+        raw_profiles = {}
+
+    rebuilt: dict = dict(original)
+    rebuilt["version"] = SUPPORTED_VERSION
+
+    settings = dict(original.get("settings") or {})
+    settings["desktop_profile"] = config.desktop_profile
+    if config.poll_interval is not None:
+        settings["poll_interval"] = config.poll_interval
+    rebuilt["settings"] = settings
+
+    profiles: dict = {}
+    for profile in config.profiles:
+        # Start from what was already there so keys this model does not know
+        # about (and hand-written comments-as-keys) survive.
+        existing = raw_profiles.get(profile.name)
+        entry = dict(existing) if isinstance(existing, dict) else {}
+        fresh = _profile_to_raw(profile)
+        # Drop keys the model owns but no longer has a value for.
+        for owned in ("games", "report_rate", "resolutions", "bindings", "leds"):
+            if owned not in fresh:
+                entry.pop(owned, None)
+        entry.update(fresh)
+        profiles[profile.name] = entry
+    rebuilt["profiles"] = profiles
+
+    serialized = json.dumps(rebuilt, indent=2) + "\n"
+    _validate_text(serialized, path)
+
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(serialized, encoding="utf-8")
+    tmp.replace(path)
+
+
+def _validate_text(serialized: str, path: Path) -> None:
+    """Parse the bytes we are about to write, so a bug cannot land on disk."""
+    import tempfile
+
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as handle:
+        handle.write(serialized)
+        probe = Path(handle.name)
+    try:
+        load(probe)
+    except ConfigError as exc:
+        raise ConfigError(f"refusing to write an invalid config: {exc}") from exc
+    finally:
+        probe.unlink(missing_ok=True)

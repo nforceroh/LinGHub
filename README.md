@@ -43,8 +43,19 @@ that message does not confirm the hardware write succeeded.
 ## Graphical interface
 
 `linghub ui` opens a GTK4 window showing the mouse diagram, the profile list and
-the bindings of the selected profile. Clicking a hotspot on the diagram selects
-that button; activating a profile in the list loads it onto the mouse.
+a table of every button with what it currently does. Clicking a hotspot on the
+diagram selects that button; activating a profile in the list loads it onto the
+mouse.
+
+Clicking a row in the button table opens a dialog for changing that button's
+binding: a single key, a modifier chord, a mouse function such as DPI up,
+another mouse button, or nothing. The change goes to the daemon, which writes the
+config and pushes it to the mouse. The daemon recognises its own write and does
+not mistake it for a hand edit.
+
+The dialog only offers bindings the hardware can actually encode. `second-mode`
+is deliberately absent because libratbag rejects it on the G502 (issue #1798); if
+a config already contains it, the table shows the raw name so it can be replaced.
 
 The UI talks to the daemon over D-Bus, so the daemon must be running. It needs
 PyGObject, which on Fedora is the `python3-gobject` package:

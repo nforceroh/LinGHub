@@ -445,6 +445,68 @@ class HotspotEditorTests(unittest.TestCase):
         return ox + fx * dw, oy + fy * dh
 
 
+@unittest.skipUnless(_has_cairo(), "needs pycairo and Gtk 4")
+class BindingEditorTests(unittest.TestCase):
+    """Opening the dialog on an existing binding must not change it.
+
+    If the initial value is not pre-selected, pressing Apply replaces the
+    binding with whatever happened to be listed first - silently, and with no
+    way to tell it happened.
+    """
+
+    CASES = [
+        ("key", "KEY_SPACE"),
+        ("key", "KEY_F"),
+        ("special", "resolution-up"),
+        ("special", "wheel-down"),
+        ("button", "4"),
+        ("button", "1"),
+        ("macro", "+KEY_LEFTCTRL +KEY_C -KEY_C -KEY_LEFTCTRL"),
+        ("macro", "KEY_M"),
+        ("disabled", None),
+    ]
+
+    def _open(self, kind, value):
+        from linghub.ui.binding_editor import BindingEditor
+
+        # Adw.Window needs an application, but the widget tree can be built
+        # with a plain Gtk.Window parent.
+        return BindingEditor(
+            parent=None, button_index=3, kind=kind, value=value,
+            on_apply=lambda i, k, v: True,
+        )
+
+    def test_every_type_round_trips_unchanged(self):
+        for kind, value in self.CASES:
+            with self.subTest(kind=kind, value=value):
+                editor = self._open(kind, value)
+                got_kind, got_value = editor._current_binding()
+                self.assertEqual(got_kind, kind)
+                if kind == "disabled":
+                    self.assertIsNone(got_value)
+                elif kind == "button":
+                    self.assertEqual(int(got_value), int(value))
+                else:
+                    self.assertEqual(got_value, value)
+
+    def test_mode_matches_the_binding_type(self):
+        expected = {
+            "key": "key", "special": "special", "button": "button",
+            "macro": "chord", "disabled": "nothing",
+        }
+        for kind, value in self.CASES:
+            with self.subTest(kind=kind):
+                self.assertEqual(self._open(kind, value).mode, expected[kind])
+
+    def test_unknown_macro_key_is_kept(self):
+        """A key outside the common list must not be silently dropped."""
+        editor = self._open("macro", "+KEY_LEFTCTRL +KEY_KPENTER -KEY_KPENTER -KEY_LEFTCTRL")
+        kind, value = editor._current_binding()
+        self.assertEqual(kind, "macro")
+        self.assertIn("KEY_KPENTER", value)
+        self.assertIn("KEY_LEFTCTRL", value)
+
+
 class _FakeGesture:
     def __init__(self, button):
         self._button = button

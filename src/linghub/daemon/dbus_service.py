@@ -35,11 +35,20 @@ class ManagerInterface(ServiceInterface):
     the callbacks it is given, so it can be tested without a bus.
     """
 
-    def __init__(self, on_load_profile, on_reload, get_state):
+    def __init__(
+        self,
+        on_load_profile,
+        on_reload,
+        get_state,
+        get_bindings=None,
+        on_set_binding=None,
+    ):
         super().__init__(INTERFACE)
         self._on_load_profile = on_load_profile
         self._on_reload = on_reload
         self._get_state = get_state
+        self._get_bindings = get_bindings
+        self._on_set_binding = on_set_binding
 
     @method()
     def LoadProfile(self, name: "s") -> "b":
@@ -57,6 +66,48 @@ class ManagerInterface(ServiceInterface):
     def ListProfiles(self) -> "as":
         """Every profile name in the config."""
         return list(self._get_state().profile_names)
+
+    @method()
+    def GetBindings(self, profile: "s") -> "a(iss)":
+        """Every binding in a profile, as (button index, type, value).
+
+        Returned as a flat list rather than a dict because D-Bus has no
+        integer-keyed map, and the value's type depends on the binding type,
+        so it is always a string here and decoded by the caller.
+        """
+        if self._get_bindings is None:
+            return []
+        bindings = self._get_bindings(profile) or {}
+        return [
+            (int(index), str(kind), "" if value is None else str(value))
+            for index, (kind, value) in sorted(bindings.items())
+        ]
+
+    @method()
+    def SetBinding(self, profile: "s", index: "i", kind: "s", value: "s") -> "b":
+        """Assign one button's binding and write it to the config.
+
+        The daemon is the single writer (ADR-0004), so the UI edits through
+        here rather than touching the file.
+        """
+        if self._on_set_binding is None:
+            return False
+        logger.info(
+            "SetBinding(%r, %d, %r, %r) requested over D-Bus", profile, index, kind, value
+        )
+        return bool(self._on_set_binding(profile, index, kind, value or None))
+
+    @method()
+    def ClearBinding(self, profile: "s", index: "i") -> "b":
+        """Remove a button's binding.
+
+        Recorded as `disabled` rather than an empty mapping: ADR-0003 says
+        never to write ACTION_NONE, which corrupts G502 Hero buttons.
+        """
+        if self._on_set_binding is None:
+            return False
+        logger.info("ClearBinding(%r, %d) requested over D-Bus", profile, index)
+        return bool(self._on_set_binding(profile, index, "disabled", None))
 
     @dbus_property(access=PropertyAccess.READ)
     def ActiveProfile(self) -> "s":

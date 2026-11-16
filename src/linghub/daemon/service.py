@@ -18,6 +18,7 @@ from ..discovery.detector import detect
 from ..discovery.gamemode import GameModeClient
 from ..hardware.ratbag import DeviceNotFound, RatbagClient
 from ..hardware.writer import ProfileWriter, WriteError
+from ..domain.profile import Binding
 from .dbus_service import PATH, SERVICE, ManagerInterface
 from .snapshot import StateSnapshot
 from .state import DaemonState
@@ -104,6 +105,8 @@ class Daemon:
             on_load_profile=self._request_profile,
             on_reload=self._request_reload,
             get_state=self._snapshot,
+            get_bindings=self._get_bindings,
+            on_set_binding=self._request_set_binding,
         )
         self._session_bus.export(PATH, self._interface)
         await self._session_bus.request_name(SERVICE)
@@ -135,6 +138,66 @@ class Daemon:
     def _request_reload(self) -> bool:
         self._watcher.reset()
         self._wake()
+        return True
+
+    def _get_bindings(self, profile_name: str) -> dict[int, tuple[str, object]]:
+        """Every binding in a profile, as plain values for D-Bus."""
+        if self._state is None:
+            return {}
+        profile = self._state.config.profile_named(profile_name)
+        if profile is None:
+            return {}
+        return {
+            index: (binding.type, binding.value)
+            for index, binding in profile.bindings.items()
+        }
+
+    def _request_set_binding(
+        self, profile_name: str, index: int, kind: str, value: object
+    ) -> bool:
+        """Change one binding, persist it, and let the next tick push it.
+
+        The config is updated in memory first so the UI sees the change
+        immediately; if saving fails the in-memory change is rolled back, so
+        the running state never disagrees with the file.
+        """
+        assert self._state is not None
+
+        if kind not in Binding.VALID_TYPES:
+            logger.warning("SetBinding: unknown binding type %r", kind)
+            return False
+        try:
+            binding = Binding(type=kind, value=value)
+        except ValueError as exc:
+            logger.warning("SetBinding: %s", exc)
+            return False
+
+        previous = self._state.config
+        if not self._state.set_binding(profile_name, index, binding):
+            logger.warning("SetBinding(%r): no such profile", profile_name)
+            return False
+
+        if not self._save_config():
+            self._state.config = previous
+            return False
+
+        logger.info(
+            "binding %d of %r is now %s(%r)", index, profile_name, kind, value
+        )
+        self._wake()
+        return True
+
+    def _save_config(self) -> bool:
+        assert self._state is not None
+        try:
+            config_module.save(self._config_path, self._state.config)
+        except (config_module.ConfigError, OSError) as exc:
+            logger.error("cannot save config: %s", exc)
+            return False
+        # The file we just wrote is the daemon's own change, not an external
+        # edit. resync() accepts the new stat signature without reporting a
+        # change; reset() would do the opposite and force a reload.
+        self._watcher.resync()
         return True
 
     def _reload_config(self) -> bool:

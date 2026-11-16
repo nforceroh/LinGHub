@@ -105,5 +105,96 @@ class LoadTests(unittest.TestCase):
         self.assertIsNotNone(config.profile_named("world-of-tanks"))
 
 
+class SaveTests(unittest.TestCase):
+    """Round-trip: what is written must load back identically.
+
+    The daemon is the only writer (ADR-0004), so saving has to preserve the
+    parts of the file it does not understand rather than dropping them.
+    """
+
+    def _roundtrip(self, body):
+        from linghub.config import save
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_config(Path(tmp), body)
+            config = load(path)
+            from linghub.domain.profile import Binding
+
+            profile = config.profile_named("wot")
+            if profile is not None:
+                profile.bindings[3] = Binding(type="special", value="resolution-up")
+            save(path, config)
+            return load(path)
+
+    def test_binding_survives_a_save(self):
+        body = {
+            "version": 1,
+            "settings": {"desktop_profile": "desktop"},
+            "profiles": {
+                "desktop": {"games": []},
+                "wot": {"games": ["WorldOfTanks.exe"],
+                        "bindings": {"3": {"type": "key", "value": "KEY_F"}}},
+            },
+        }
+        reloaded = self._roundtrip(body)
+        wot = reloaded.profile_named("wot")
+        self.assertEqual(wot.bindings[3].type, "special")
+        self.assertEqual(wot.bindings[3].value, "resolution-up")
+
+    def test_untouched_parts_are_preserved(self):
+        """Keys the daemon does not model must not be dropped."""
+        body = {
+            "version": 1,
+            "settings": {"desktop_profile": "desktop", "poll_interval": 3},
+            "profiles": {
+                "desktop": {"games": []},
+                "wot": {"games": ["WorldOfTanks.exe"],
+                        "report_rate": 500,
+                        "bindings": {"3": {"type": "key", "value": "KEY_F"}}},
+            },
+            "x-custom": {"keep": "me"},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_config(Path(tmp), body)
+            config = load(path)
+            from linghub.config import save
+            save(path, config)
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(raw["x-custom"], {"keep": "me"})
+        self.assertEqual(raw["profiles"]["wot"]["report_rate"], 500)
+        self.assertEqual(raw["settings"]["poll_interval"], 3)
+
+    def test_save_is_validated_before_replacing(self):
+        """A bad config must not clobber the file on disk."""
+        body = {
+            "version": 1,
+            "settings": {"desktop_profile": "desktop"},
+            "profiles": {"desktop": {"games": []}},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_config(Path(tmp), body)
+            original = path.read_text(encoding="utf-8")
+            config = load(path)
+            config.profiles.clear()  # now invalid: no profiles at all
+            from linghub.config import save
+            from linghub.config import ConfigError
+            with self.assertRaises(ConfigError):
+                save(path, config)
+            self.assertEqual(path.read_text(encoding="utf-8"), original)
+
+    def test_save_preserves_desktop_settings(self):
+        body = {
+            "version": 1,
+            "settings": {"desktop_profile": "desktop"},
+            "profiles": {"desktop": {"games": []}},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_config(Path(tmp), body)
+            from linghub.config import save
+            save(path, load(path))
+            reloaded = load(path)
+        self.assertEqual(reloaded.desktop_profile, "desktop")
+
+
 if __name__ == "__main__":
     unittest.main()

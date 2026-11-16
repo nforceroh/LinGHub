@@ -1,9 +1,9 @@
 """The LinGHub main window.
 
 Shows the mouse diagram, the profile list, and the bindings of the selected
-profile. Editing is not wired up yet: this milestone is read-only plus manual
-profile switching, so the UI can be verified against the daemon before adding
-write paths.
+profile. Clicking a button in the table opens the binding editor; the change
+goes to the daemon over D-Bus, which is the only writer of the config
+(ADR-0004).
 """
 
 from __future__ import annotations
@@ -20,6 +20,8 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk
 
 from .asyncbridge import run_and_report
+from .binding_editor import BindingEditor
+from .binding_labels import describe_binding
 from .buttonmap import BUTTONS, describe, manual_number
 from .client import DaemonClient, DaemonState
 from .diagram import MouseDiagram
@@ -36,6 +38,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._client = client
         self._state = DaemonState()
         self._selected_button: int | None = None
+        self._bindings: dict[int, tuple[str, str]] = {}
 
         self.set_default_size(980, 620)
 
@@ -126,24 +129,42 @@ class MainWindow(Adw.ApplicationWindow):
         grid.set_row_spacing(6)
         grid.set_margin_top(6)
 
-        titles = ("Manual", "Function", "Ratbag")
+        titles = ("Manual", "Function", "Does", "Ratbag")
         for column, title in enumerate(titles):
-            label = Gtk.Label(label=title, xalign=0 if column != 2 else 1)
+            label = Gtk.Label(label=title, xalign=0 if column != 3 else 1)
             label.add_css_class("dim-label")
             label.add_css_class("caption")
             grid.attach(label, column, 0, 1, 1)
 
         self._table_rows: dict[int, Gtk.Widget] = {}
+        self._binding_rows: dict[int, Gtk.Widget] = {}
+
         for row, spot in enumerate(BUTTONS, start=1):
             manual = Gtk.Label(label=manual_number(spot.index), xalign=0)
             manual.add_css_class("dim-label")
             function = Gtk.Label(label=describe(spot.index), xalign=0)
             function.set_hexpand(True)
+            does = Gtk.Label(label="—", xalign=0)
             ratbag = Gtk.Label(label=str(spot.index), xalign=1)
+            ratbag.add_css_class("dim-label")
 
-            for column, widget in enumerate((manual, function, ratbag)):
+            widgets = (manual, function, does, ratbag)
+            for column, widget in enumerate(widgets):
                 grid.attach(widget, column, row, 1, 1)
+
+            # The whole row is the click target, so a narrow label is not the
+            # only way to open the editor. A controller can only belong to one
+            # widget, so each label gets its own.
+            for widget in widgets:
+                click = Gtk.GestureClick()
+                click.connect(
+                    "released",
+                    lambda _g, _n, _x, _y, i=spot.index: self._open_editor(i),
+                )
+                widget.add_controller(click)
+
             self._table_rows[spot.index] = function
+            self._binding_rows[spot.index] = does
 
         return grid
 
@@ -174,6 +195,7 @@ class MainWindow(Adw.ApplicationWindow):
         except (RuntimeError, OSError) as exc:
             self._status.set_text(f"Daemon unavailable: {exc}")
             return
+        await self._refresh_bindings()
         self._apply_state(state)
 
     def _apply_state(self, state: DaemonState) -> None:
@@ -191,6 +213,18 @@ class MainWindow(Adw.ApplicationWindow):
 
         self._rebuild_profiles()
         self._rebuild_bindings()
+
+    async def _refresh_bindings(self) -> None:
+        """Read the edited profile's bindings so the table can show them."""
+        profile = self._editing_profile()
+        if profile is None:
+            self._bindings = {}
+            return
+        try:
+            self._bindings = await self._client.get_bindings(profile)
+        except (RuntimeError, OSError) as exc:
+            logger.warning("cannot read bindings: %s", exc)
+            self._bindings = {}
 
     def _rebuild_profiles(self) -> None:
         child = self._profile_list.get_first_child()
@@ -210,12 +244,77 @@ class MainWindow(Adw.ApplicationWindow):
             self._profile_list.append(row)
 
     def _rebuild_bindings(self) -> None:
-        """Highlight the selected row in the button table."""
+        """Fill in what each button does, and highlight the selected row."""
         for index, widget in self._table_rows.items():
             if index == self._selected_button:
                 widget.add_css_class("accent")
             else:
                 widget.remove_css_class("accent")
+
+            kind, value = self._bindings.get(index, ("", None))
+            label = self._binding_rows.get(index)
+            if label is not None:
+                label.set_text(describe_binding(kind, value) if kind else "—")
+
+    def _apply_bindings(self, bindings: dict[int, tuple[str, str]]) -> None:
+        self._bindings = dict(bindings)
+        self._rebuild_bindings()
+
+    def _open_editor(self, index: int) -> None:
+        """Open the binding editor for one button."""
+        if not self._state.profiles:
+            self._status.set_text("No profile to edit.")
+            return
+
+        profile = self._editing_profile()
+        if profile is None:
+            self._status.set_text("Select a profile first.")
+            return
+
+        kind, value = self._bindings.get(index, ("disabled", None))
+        BindingEditor(
+            parent=self,
+            button_index=index,
+            kind=kind or "disabled",
+            value=value,
+            on_apply=lambda i, k, v: self._start_binding_write(profile, i, k, v),
+        ).present()
+
+    def _editing_profile(self) -> str | None:
+        """The profile edits apply to: the active one, else the desktop one."""
+        return (
+            self._state.active_profile
+            or self._state.desktop_profile
+            or (self._state.profiles[0] if self._state.profiles else None)
+        )
+
+    def _start_binding_write(self, profile: str, index: int, kind: str, value) -> bool:
+        """Kick off the write and report whether it was accepted.
+
+        The editor needs an immediate answer so it can stay open on failure,
+        so this reports optimistically and corrects the status line once the
+        daemon replies.
+        """
+        run_and_report(
+            self._write_binding(profile, index, kind, value),
+            self._on_async_error,
+        )
+        return True
+
+    async def _write_binding(self, profile: str, index: int, kind: str, value) -> None:
+        try:
+            if kind == "disabled":
+                ok = await self._client.clear_binding(profile, index)
+            else:
+                ok = await self._client.set_binding(profile, index, kind, str(value))
+        except (RuntimeError, OSError) as exc:
+            self._status.set_text(f"Could not change the binding: {exc}")
+            return
+        if not ok:
+            self._status.set_text("The daemon rejected that binding.")
+            return
+        self._status.set_text(f"Updated {describe(index)} in {profile}.")
+        await self._refresh()
 
     # --- interaction -----------------------------------------------------
 

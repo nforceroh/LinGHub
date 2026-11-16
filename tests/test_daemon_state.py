@@ -113,6 +113,105 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class SetBindingTests(unittest.TestCase):
+    """Changing a binding must invalidate the loaded fingerprint.
+
+    Otherwise the daemon believes the mouse already has the right profile and
+    never writes the change.
+    """
+
+    def setUp(self):
+        self.binding = Binding(type="key", value="KEY_F")
+        self.state = DaemonState(config=make_config(
+            DESKTOP,
+            Profile(name="wot", bindings={3: self.binding}),
+        ))
+        # Pretend the game is running, so "wot" is the target profile.
+        self.state.stack = ["wot"]
+        self.state.mark_loaded("wot")
+
+    def test_set_binding_reports_success(self):
+        self.assertTrue(
+            self.state.set_binding("wot", 5, Binding(type="special", value="resolution-up"))
+        )
+
+    def test_set_binding_updates_the_profile(self):
+        self.state.set_binding("wot", 5, Binding(type="special", value="resolution-up"))
+        profile = self.state.config.profile_named("wot")
+        self.assertEqual(profile.bindings[5].type, "special")
+
+    def test_set_binding_leaves_other_bindings_alone(self):
+        self.state.set_binding("wot", 5, Binding(type="special", value="resolution-up"))
+        self.assertEqual(self.state.config.profile_named("wot").bindings[3], self.binding)
+
+    def test_set_binding_marks_the_loaded_profile_stale(self):
+        self.assertFalse(self.state.needs_write)
+        self.state.set_binding("wot", 5, Binding(type="special", value="resolution-up"))
+        self.assertTrue(self.state.needs_write)
+
+    def test_removing_a_binding_also_marks_it_stale(self):
+        self.state.set_binding("wot", 3, None)
+        self.assertNotIn(3, self.state.config.profile_named("wot").bindings)
+        self.assertTrue(self.state.needs_write)
+
+    def test_unknown_profile_returns_false(self):
+        self.assertFalse(self.state.set_binding("nope", 3, self.binding))
+
+    def test_unknown_profile_leaves_the_config_alone(self):
+        before = self.state.config
+        self.state.set_binding("nope", 3, self.binding)
+        self.assertIs(self.state.config, before)
+
+
+class BindingPersistenceTests(unittest.TestCase):
+    """A binding change must survive a save/load cycle.
+
+    The daemon updates the config in memory and then writes it. If the two
+    disagree, the mouse gets one thing and the file another.
+    """
+
+    def test_change_survives_a_roundtrip(self):
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from linghub.config import load, save
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            path.write_text(json.dumps({
+                "version": 1,
+                "settings": {"desktop_profile": "desktop"},
+                "profiles": {
+                    "desktop": {"games": []},
+                    "wot": {"games": ["WorldOfTanks.exe"],
+                            "bindings": {"3": {"type": "key", "value": "KEY_F"}}},
+                },
+            }), encoding="utf-8")
+
+            state = DaemonState(config=load(path))
+            state.stack = ["wot"]
+            state.mark_loaded("wot")
+            self.assertFalse(state.needs_write)
+
+            self.assertTrue(state.set_binding("wot", 5, Binding("special", "resolution-up")))
+            save(path, state.config)
+
+            # The mouse must be told to rewrite, not left thinking it is current.
+            self.assertTrue(state.needs_write)
+
+            reloaded = load(path)
+            self.assertEqual(reloaded.profile_named("wot").bindings[5].type, "special")
+            self.assertEqual(reloaded.profile_named("wot").bindings[3].type, "key")
+
+    def test_desktop_profile_change_also_rewrites(self):
+        state = DaemonState(config=make_config(DESKTOP, WOT))
+        state.mark_loaded("desktop")
+        self.assertFalse(state.needs_write)
+        state.set_binding("desktop", 0, Binding("key", "KEY_A"))
+        self.assertTrue(state.needs_write)
+
+
 class FingerprintTests(unittest.TestCase):
     """Editing a profile's contents must trigger a rewrite, not just a rename."""
 

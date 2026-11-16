@@ -114,6 +114,20 @@ class DaemonClient:
     async def reload(self) -> bool:
         return bool(await self._call("Reload"))
 
+    async def get_bindings(self, profile: str) -> dict[int, tuple[str, str]]:
+        """Every binding in a profile, as {button index: (type, value)}."""
+        raw = await self._call("GetBindings", "s", [profile]) or ()
+        return {
+            int(index): (str(kind), str(value))
+            for index, kind, value in raw
+        }
+
+    async def set_binding(self, profile: str, index: int, kind: str, value: str | None) -> bool:
+        return bool(await self._call("SetBinding", "siss", [profile, index, kind, value or ""]))
+
+    async def clear_binding(self, profile: str, index: int) -> bool:
+        return bool(await self._call("ClearBinding", "si", [profile, index]))
+
     def disconnect(self) -> None:
         if self._bus is not None:
             self._bus.disconnect()
