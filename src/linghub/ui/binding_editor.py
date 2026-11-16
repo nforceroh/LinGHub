@@ -25,37 +25,19 @@ from .binding_labels import (
 from .buttonmap import describe
 
 
-# The modes, in the order they appear in the dialog.
-#
-# MODE_KEY and MODE_KEY_MACRO both send one key, but by different mechanisms:
-# ACTION_KEY emits a key event, while ACTION_MACRO replays a press/release
-# pair. Some games - World of Tanks under Wine among them - only honour the
-# macro form, so both have to be offered.
-MODE_KEY = "key"
-MODE_KEY_MACRO = "key-macro"
-MODE_CHORD = "chord"
-MODE_SPECIAL = "special"
-MODE_BUTTON = "button"
-MODE_NOTHING = "nothing"
-
-MODE_LABELS = (
-    (MODE_KEY, "A single key"),
-    (MODE_KEY_MACRO, "A single key, as a macro"),
-    (MODE_CHORD, "A modifier chord"),
-    (MODE_SPECIAL, "A mouse function"),
-    (MODE_BUTTON, "Another mouse button"),
-    (MODE_NOTHING, "Nothing"),
+from .binding_modes import (
+    LABELS as MODE_LABELS,
+    MODE_BUTTON,
+    MODE_CHORD,
+    MODE_KEY,
+    MODE_KEY_MACRO,
+    MODE_NOTHING,
+    MODE_SPECIAL,
+    is_single_key_macro,
+    mode_for,
+    single_key_of,
+    stored_binding,
 )
-
-
-def _is_single_key_macro(spec: object) -> bool:
-    """True when a macro spec is one key pressed and released, nothing else."""
-    tokens = str(spec).split()
-    return len(tokens) == 1 and tokens[0].startswith("KEY_")
-
-
-def _single_key_of(spec: str) -> str:
-    return spec.split()[0]
 
 
 class BindingEditor(Adw.Window):
@@ -187,18 +169,7 @@ class BindingEditor(Adw.Window):
         self._stack.add_named(label, MODE_NOTHING)
 
     def _select_initial_mode(self, kind: str, value: object = None) -> None:
-        wanted = {
-            "key": MODE_KEY,
-            "special": MODE_SPECIAL,
-            "button": MODE_BUTTON,
-            "macro": MODE_CHORD,
-            "disabled": MODE_NOTHING,
-        }.get(kind, MODE_KEY)
-        # A macro holding exactly one press/release pair is a single key sent
-        # the macro way, which is what some games need. Show it as that rather
-        # than as a chord, so re-saving does not silently change the mechanism.
-        if kind == "macro" and _is_single_key_macro(value):
-            wanted = MODE_KEY_MACRO
+        wanted = mode_for(kind, value)
         for position, (mode, _label) in enumerate(MODE_LABELS):
             if mode == wanted:
                 self._modes.set_selected(position)
@@ -212,16 +183,25 @@ class BindingEditor(Adw.Window):
         """
         if value is None:
             return
-        if kind == "macro" and _is_single_key_macro(value):
-            self._select_in(self._key_macro_dropdown, _single_key_of(str(value)))
-        elif kind == "macro":
+        mode = mode_for(kind, value)
+        if mode == MODE_CHORD:
+            # The chord page is a set of checkboxes plus a key, not a dropdown.
             self.load_chord(str(value))
-        elif kind == "key":
-            self._select_in(self._key_dropdown, str(value))
-        elif kind == "special":
-            self._select_in(self._special_dropdown, str(value))
-        elif kind == "button":
-            self._select_in(self._button_dropdown, str(value))
+            return
+        dropdown = self._dropdowns().get(mode)
+        if dropdown is None:
+            return
+        text = single_key_of(str(value)) if mode == MODE_KEY_MACRO else str(value)
+        self._select_in(dropdown, text)
+
+    def _dropdowns(self) -> dict:
+        """The modes whose value is a single dropdown choice."""
+        return {
+            MODE_KEY: self._key_dropdown,
+            MODE_KEY_MACRO: self._key_macro_dropdown,
+            MODE_SPECIAL: self._special_dropdown,
+            MODE_BUTTON: self._button_dropdown,
+        }
 
     @staticmethod
     def _select_in(dropdown: Gtk.DropDown, value: str) -> None:
@@ -278,20 +258,9 @@ class BindingEditor(Adw.Window):
     def _selected_value(self) -> str:
         """The value for the current mode, as the config should store it."""
         mode = self.mode
-        if mode == MODE_KEY:
-            return self._key_dropdown._choices[self._key_dropdown.get_selected()]
-        if mode == MODE_KEY_MACRO:
-            return self._key_macro_dropdown._choices[
-                self._key_macro_dropdown.get_selected()
-            ]
-        if mode == MODE_SPECIAL:
-            return self._special_dropdown._choices[
-                self._special_dropdown.get_selected()
-            ]
-        if mode == MODE_BUTTON:
-            return self._button_dropdown._choices[
-                self._button_dropdown.get_selected()
-            ]
+        dropdown = self._dropdowns().get(mode)
+        if dropdown is not None:
+            return dropdown._choices[dropdown.get_selected()]
         if mode == MODE_CHORD:
             modifiers = [
                 name for name, check in self._modifier_checks.items() if check.get_active()
@@ -301,18 +270,7 @@ class BindingEditor(Adw.Window):
         return ""
 
     def _current_binding(self) -> tuple[str, object]:
-        mode = self.mode
-        if mode == MODE_NOTHING:
-            return "disabled", None
-        if mode == MODE_BUTTON:
-            return "button", int(self._selected_value())
-        if mode == MODE_CHORD:
-            return "macro", self._selected_value()
-        if mode == MODE_KEY_MACRO:
-            return "macro", self._selected_value()
-        if mode == MODE_SPECIAL:
-            return "special", self._selected_value()
-        return "key", self._selected_value()
+        return stored_binding(self.mode, self._selected_value())
 
     def _on_apply_clicked(self, _button) -> None:
         if self._applying:
