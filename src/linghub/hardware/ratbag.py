@@ -87,6 +87,25 @@ class RatbagClient:
             raise RuntimeError("multiple G502 devices found; cannot choose safely")
         return matches[0]
 
+    async def report_rates(self, device: Device) -> list[int]:
+        """The report rates this device accepts, in Hz.
+
+        Read from the hardware profile rather than a table in this repo, so a
+        variant offering a different set is not presented with wrong choices.
+        Returns an empty list if the device does not publish them, because a
+        missing capability must not stop the daemon from starting.
+        """
+        try:
+            profiles = await self.profiles(device)
+            if not profiles:
+                return []
+            return [
+                int(rate)
+                for rate in await self._property(profiles[0].path, "Profile", "ReportRates")
+            ]
+        except (RuntimeError, OSError):
+            return []
+
     async def profiles(self, device: Device) -> list[Profile]:
         paths = await self._property(device.path, "Device", "Profiles")
         profiles = []

@@ -57,6 +57,7 @@ class Daemon:
         self._gamemode: GameModeClient | None = None
         self._session_bus: MessageBus | None = None
         self._interface: ManagerInterface | None = None
+        self._report_rates: list[int] = []
         self._manual_override: str | None = None
         self._detected_game: str | None = None
 
@@ -67,7 +68,13 @@ class Daemon:
         client = RatbagClient(self._bus)
         device = await client.find_device()
         self._writer = ProfileWriter(client, device)
-        logger.info("using device %s at %s", device.name, device.path)
+        # A missing capability must not stop the daemon: an empty list just
+        # means the UI offers no rate choices.
+        self._report_rates = await client.report_rates(device)
+        logger.info(
+            "using device %s at %s (report rates %s)",
+            device.name, device.path, self._report_rates,
+        )
 
     async def _connect_with_retry(self, interval: float) -> None:
         """Wait for the device to appear rather than exiting.
@@ -111,6 +118,11 @@ class Daemon:
             on_set_binding=self._request_set_binding,
             get_leds=self._get_leds,
             on_set_leds=self._request_set_leds,
+            get_resolutions=self._get_resolutions,
+            get_report_rate=self._get_report_rate,
+            get_report_rates=self._get_report_rates,
+            on_set_resolution=self._request_set_resolution,
+            on_set_report_rate=self._request_set_report_rate,
         )
         self._session_bus.export(PATH, self._interface)
         await self._session_bus.request_name(SERVICE)
@@ -227,6 +239,71 @@ class Daemon:
             return False
 
         logger.info("leds of %r are now %r", profile_name, settings)
+        self._wake()
+        return True
+
+    def _get_resolutions(self, profile_name: str) -> tuple:
+        """A profile's DPI slots as (dpi, is_default, is_disabled) in order."""
+        if self._state is None:
+            return ()
+        profile = self._state.config.profile_named(profile_name)
+        if profile is None:
+            return ()
+        return tuple(
+            (
+                int(slot.get("dpi", 0)),
+                bool(slot.get("default")),
+                bool(slot.get("disabled")),
+            )
+            for slot in profile.resolutions
+        )
+
+    def _get_report_rate(self, profile_name: str) -> int:
+        if self._state is None:
+            return 0
+        profile = self._state.config.profile_named(profile_name)
+        return int(profile.report_rate or 0) if profile else 0
+
+    def _get_report_rates(self, profile_name: str) -> tuple:
+        """The rates the device accepts, cached from the last connect.
+
+        Read from the device rather than hard-coded, so a variant offering a
+        different set is not presented with the wrong choices.
+        """
+        return tuple(self._report_rates)
+
+    def _request_set_resolution(
+        self, profile_name: str, index: int, dpi: int, make_default: bool, disabled: bool
+    ) -> bool:
+        return self._apply_and_save(
+            lambda: self._state.set_resolution(
+                profile_name, index, dpi,
+                make_default=make_default, disabled=disabled,
+            ),
+            f"SetResolution({profile_name!r}, {index}, {dpi})",
+        )
+
+    def _request_set_report_rate(self, profile_name: str, rate: int) -> bool:
+        return self._apply_and_save(
+            lambda: self._state.set_report_rate(profile_name, rate),
+            f"SetReportRate({profile_name!r}, {rate})",
+        )
+
+    def _apply_and_save(self, change, description: str) -> bool:
+        """Run a config change, persist it, and roll back if saving fails.
+
+        Every write path needs the same rule: the running config must never
+        disagree with the file, so a failed save restores the previous config.
+        """
+        assert self._state is not None
+        previous = self._state.config
+        if not change():
+            logger.warning("%s: rejected", description)
+            return False
+        if not self._save_config():
+            self._state.config = previous
+            return False
+        logger.info("%s applied", description)
         self._wake()
         return True
 

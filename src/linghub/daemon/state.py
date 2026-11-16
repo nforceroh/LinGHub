@@ -125,6 +125,50 @@ class DaemonState:
         self._replace_profile(profile_name, profile.with_leds(settings))
         return True
 
+    def set_resolution(
+        self, profile_name: str, index: int, dpi: int, *,
+        make_default: bool = False, disabled: bool | None = None,
+    ) -> bool:
+        """Change one DPI slot.
+
+        Only one slot may be the default: ratbagd honours a single one, so
+        moving the marker has to clear the old one rather than leaving two.
+        """
+        profile = self.config.profile_named(profile_name)
+        if profile is None:
+            return False
+        if not 0 <= index < len(profile.resolutions):
+            return False
+
+        updated = []
+        for position, resolution in enumerate(profile.resolutions):
+            if position != index:
+                entry = dict(resolution)
+                if make_default:
+                    entry.pop("default", None)
+                updated.append(entry)
+                continue
+
+            entry = dict(resolution)
+            entry["dpi"] = int(dpi)
+            if make_default:
+                entry["default"] = True
+            if disabled is not None:
+                entry["disabled"] = bool(disabled)
+            updated.append(entry)
+
+        self._replace_profile(
+            profile_name, replace(profile, resolutions=tuple(updated))
+        )
+        return True
+
+    def set_report_rate(self, profile_name: str, rate: int) -> bool:
+        profile = self.config.profile_named(profile_name)
+        if profile is None:
+            return False
+        self._replace_profile(profile_name, replace(profile, report_rate=int(rate)))
+        return True
+
     def _replace_profile(self, profile_name: str, updated: Profile) -> None:
         self.config = replace(
             self.config,

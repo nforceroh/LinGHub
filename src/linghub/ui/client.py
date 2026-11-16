@@ -128,6 +128,37 @@ class DaemonClient:
     async def clear_binding(self, profile: str, index: int) -> bool:
         return bool(await self._call("ClearBinding", "si", [profile, index]))
 
+    async def get_resolutions(self, profile: str) -> list[dict]:
+        """A profile's DPI slots in order."""
+        raw = await self._call("GetResolutions", "s", [profile]) or ()
+        return [
+            {
+                "index": int(index),
+                "dpi": int(dpi),
+                "default": bool(is_default),
+                "disabled": bool(is_disabled),
+            }
+            for index, dpi, is_default, is_disabled in raw
+        ]
+
+    async def set_resolution(
+        self, profile: str, index: int, dpi: int, *,
+        make_default: bool = False, disabled: bool = False,
+    ) -> bool:
+        return bool(await self._call(
+            "SetResolution", "siubb",
+            [profile, index, dpi, make_default, disabled],
+        ))
+
+    async def get_report_rate(self, profile: str) -> int:
+        return int(await self._call("GetReportRate", "s", [profile]) or 0)
+
+    async def get_report_rates(self, profile: str) -> tuple[int, ...]:
+        return tuple(int(r) for r in await self._call("GetReportRates", "s", [profile]) or ())
+
+    async def set_report_rate(self, profile: str, rate: int) -> bool:
+        return bool(await self._call("SetReportRate", "su", [profile, rate]))
+
     async def get_leds(self, profile: str) -> dict[int, dict]:
         """A profile's LED zones, as {index: {mode, color, brightness, duration}}."""
         raw = await self._call("GetLeds", "s", [profile]) or ()

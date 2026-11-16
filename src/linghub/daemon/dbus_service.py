@@ -44,6 +44,11 @@ class ManagerInterface(ServiceInterface):
         on_set_binding=None,
         get_leds=None,
         on_set_leds=None,
+        get_resolutions=None,
+        get_report_rate=None,
+        get_report_rates=None,
+        on_set_resolution=None,
+        on_set_report_rate=None,
     ):
         super().__init__(INTERFACE)
         self._on_load_profile = on_load_profile
@@ -53,6 +58,11 @@ class ManagerInterface(ServiceInterface):
         self._on_set_binding = on_set_binding
         self._get_leds = get_leds
         self._on_set_leds = on_set_leds
+        self._get_resolutions = get_resolutions
+        self._get_report_rate = get_report_rate
+        self._get_report_rates = get_report_rates
+        self._on_set_resolution = on_set_resolution
+        self._on_set_report_rate = on_set_report_rate
 
     @method()
     def LoadProfile(self, name: "s") -> "b":
@@ -112,6 +122,66 @@ class ManagerInterface(ServiceInterface):
             return False
         logger.info("ClearBinding(%r, %d) requested over D-Bus", profile, index)
         return bool(self._on_set_binding(profile, index, "disabled", None))
+
+    @method()
+    def GetResolutions(self, profile: "s") -> "a(uuuu)":
+        """A profile's DPI slots as (index, dpi, is_default, is_disabled).
+
+        The flags are 0/1 rather than D-Bus booleans: dbus-fast rejects `bool`
+        inside a struct when the value came from a Python int, and the caller
+        only needs to know whether each is set.
+        """
+        if self._get_resolutions is None:
+            return []
+        slots = self._get_resolutions(profile) or ()
+        return [
+            (
+                int(index),
+                int(dpi),
+                1 if default else 0,
+                1 if disabled else 0,
+            )
+            for index, (dpi, default, disabled) in enumerate(slots)
+        ]
+
+    @method()
+    def SetResolution(
+        self, profile: "s", index: "i", dpi: "u", make_default: "b", disabled: "b"
+    ) -> "b":
+        """Change one DPI slot."""
+        if self._on_set_resolution is None:
+            return False
+        logger.info(
+            "SetResolution(%r, %d, dpi=%d, default=%s, disabled=%s) requested over D-Bus",
+            profile, index, dpi, make_default, disabled,
+        )
+        return bool(self._on_set_resolution(profile, index, dpi, make_default, disabled))
+
+    @method()
+    def GetReportRate(self, profile: "s") -> "u":
+        """The profile's report rate in Hz, or 0 if unset."""
+        if self._get_report_rate is None:
+            return 0
+        return int(self._get_report_rate(profile) or 0)
+
+    @method()
+    def GetReportRates(self, profile: "s") -> "au":
+        """The report rates the device accepts, in Hz.
+
+        Read from hardware rather than hard-coded, so a device that offers a
+        different set is not presented with the wrong choices.
+        """
+        if self._get_report_rates is None:
+            return []
+        return [int(rate) for rate in (self._get_report_rates(profile) or ())]
+
+    @method()
+    def SetReportRate(self, profile: "s", rate: "u") -> "b":
+        """Change the profile's report rate."""
+        if self._on_set_report_rate is None:
+            return False
+        logger.info("SetReportRate(%r, %d) requested over D-Bus", profile, rate)
+        return bool(self._on_set_report_rate(profile, rate))
 
     @method()
     def GetLeds(self, profile: "s") -> "a(us(uuu)uu)":

@@ -312,6 +312,69 @@ class DeviceLossTests(unittest.TestCase):
         self.assertIsNone(daemon._writer)
 
 
+class ResolutionTests(unittest.TestCase):
+    """DPI slots and the report rate are part of the profile, like bindings."""
+
+    def _state(self):
+        return DaemonState(config=make_config(
+            DESKTOP,
+            Profile(name="wot", resolutions=(
+                {"dpi": 400}, {"dpi": 800, "default": True}, {"dpi": 1600},
+            )),
+        ))
+
+    def test_set_resolution_updates_one_slot(self):
+        state = self._state()
+        self.assertTrue(state.set_resolution("wot", 2, 3200))
+        self.assertEqual(state.config.profile_named("wot").resolutions[2]["dpi"], 3200)
+
+    def test_set_resolution_leaves_other_slots_alone(self):
+        state = self._state()
+        state.set_resolution("wot", 2, 3200)
+        self.assertEqual(state.config.profile_named("wot").resolutions[0]["dpi"], 400)
+
+    def test_moving_the_default_clears_the_old_one(self):
+        """Two defaults would be ambiguous, and the hardware honours one."""
+        state = self._state()
+        state.set_resolution("wot", 0, 400, make_default=True)
+        resolutions = state.config.profile_named("wot").resolutions
+        self.assertTrue(resolutions[0].get("default"))
+        self.assertFalse(resolutions[1].get("default"))
+
+    def test_disabling_a_slot_is_recorded(self):
+        state = self._state()
+        state.set_resolution("wot", 2, 1600, disabled=True)
+        self.assertTrue(state.config.profile_named("wot").resolutions[2]["disabled"])
+
+    def test_set_resolution_rejects_a_missing_slot(self):
+        state = self._state()
+        self.assertFalse(state.set_resolution("wot", 9, 800))
+
+    def test_set_resolution_rejects_an_unknown_profile(self):
+        self.assertFalse(self._state().set_resolution("nope", 0, 800))
+
+    def test_set_report_rate(self):
+        state = self._state()
+        self.assertTrue(state.set_report_rate("wot", 500))
+        self.assertEqual(state.config.profile_named("wot").report_rate, 500)
+
+    def test_changing_dpi_makes_the_profile_stale(self):
+        """Otherwise the daemon never pushes it to the mouse."""
+        state = self._state()
+        state.stack = ["wot"]
+        state.mark_loaded("wot")
+        self.assertFalse(state.needs_write)
+        state.set_resolution("wot", 0, 999)
+        self.assertTrue(state.needs_write)
+
+    def test_changing_report_rate_makes_the_profile_stale(self):
+        state = self._state()
+        state.stack = ["wot"]
+        state.mark_loaded("wot")
+        state.set_report_rate("wot", 125)
+        self.assertTrue(state.needs_write)
+
+
 class FingerprintTests(unittest.TestCase):
     """Editing a profile's contents must trigger a rewrite, not just a rename."""
 

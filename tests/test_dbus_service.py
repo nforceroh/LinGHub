@@ -45,6 +45,25 @@ class FakeDaemon:
         self.led_calls.append((profile, settings))
         return self.accept
 
+    def get_resolutions(self, profile):
+        return getattr(self, "resolutions", ())
+
+    def get_report_rate(self, profile):
+        return getattr(self, "report_rate", 0)
+
+    def get_report_rates(self, profile):
+        return getattr(self, "report_rates", (125, 250, 500, 1000))
+
+    def on_set_resolution(self, profile, index, dpi, make_default, disabled):
+        self.res_calls = getattr(self, "res_calls", [])
+        self.res_calls.append((profile, index, dpi, make_default, disabled))
+        return self.accept
+
+    def on_set_report_rate(self, profile, rate):
+        self.rate_calls = getattr(self, "rate_calls", [])
+        self.rate_calls.append((profile, rate))
+        return self.accept
+
 
 def make_interface(daemon):
     return ManagerInterface(
@@ -55,6 +74,11 @@ def make_interface(daemon):
         on_set_binding=daemon.on_set_binding,
         get_leds=daemon.get_leds,
         on_set_leds=daemon.on_set_leds,
+        get_resolutions=daemon.get_resolutions,
+        get_report_rate=daemon.get_report_rate,
+        get_report_rates=daemon.get_report_rates,
+        on_set_resolution=daemon.on_set_resolution,
+        on_set_report_rate=daemon.on_set_report_rate,
     )
 
 
@@ -156,6 +180,49 @@ class LedMethodTests(unittest.TestCase):
         self.assertFalse(ok)
 
 
+class DpiMethodTests(unittest.TestCase):
+    def test_get_resolutions_returns_slots(self):
+        daemon = FakeDaemon()
+        daemon.resolutions = (
+            (400, False, False),
+            (800, True, False),
+            (100, False, True),
+        )
+        interface = make_interface(daemon)
+        self.assertEqual(
+            call(interface, "GetResolutions", "wot"),
+            [(0, 400, 0, 0), (1, 800, 1, 0), (2, 100, 0, 1)],
+        )
+
+    def test_get_resolutions_empty_for_unknown_profile(self):
+        self.assertEqual(call(make_interface(FakeDaemon()), "GetResolutions", "nope"), [])
+
+    def test_report_rate_is_exposed(self):
+        daemon = FakeDaemon()
+        daemon.report_rate = 500
+        self.assertEqual(call(make_interface(daemon), "GetReportRate", "wot"), 500)
+
+    def test_report_rates_are_exposed(self):
+        daemon = FakeDaemon()
+        daemon.report_rates = (125, 250)
+        self.assertEqual(call(make_interface(daemon), "GetReportRates", "wot"), [125, 250])
+
+    def test_set_resolution_routes_to_the_daemon(self):
+        daemon = FakeDaemon()
+        ok = call(make_interface(daemon), "SetResolution", "wot", 1, 1600, True, False)
+        self.assertTrue(ok)
+        self.assertEqual(daemon.res_calls, [("wot", 1, 1600, True, False)])
+
+    def test_set_resolution_reports_rejection(self):
+        daemon = FakeDaemon(accept=False)
+        self.assertFalse(call(make_interface(daemon), "SetResolution", "wot", 1, 1600, False, False))
+
+    def test_set_report_rate_routes_to_the_daemon(self):
+        daemon = FakeDaemon()
+        self.assertTrue(call(make_interface(daemon), "SetReportRate", "wot", 500))
+        self.assertEqual(daemon.rate_calls, [("wot", 500)])
+
+
 class PropertyTests(unittest.TestCase):
     def test_active_profile_reports_loaded(self):
         daemon = FakeDaemon(StateSnapshot(loaded_profile="world-of-tanks"))
@@ -191,6 +258,8 @@ class IntrospectionTests(unittest.TestCase):
             "LoadProfile", "Reload", "ListProfiles",
             "GetBindings", "SetBinding", "ClearBinding",
             "GetLeds", "SetLeds",
+            "GetResolutions", "SetResolution", "GetReportRate", "SetReportRate",
+            "GetReportRates",
             "ActiveProfile", "DetectedGame", "DesktopProfile",
             "ProfileChanged", "GameDetected", "GameExited",
         ):
