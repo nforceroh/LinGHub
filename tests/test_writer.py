@@ -26,6 +26,7 @@ class FakeClient:
         self._dirty = False
         self.fail_activation = False
         self.ignore_report_rate = False
+        self.ignore_mapping_payload = False
 
     async def _call(self, message):
         from types import SimpleNamespace
@@ -36,6 +37,13 @@ class FakeClient:
             interface, name, variant = message.body
             if name == "ReportRate" and self.ignore_report_rate:
                 # Simulate ratbagd accepting the write but not applying it.
+                self._dirty = True
+                return SimpleNamespace(message_type=MessageType.METHOD_RETURN, body=[0])
+            if name == "Mapping" and self.ignore_mapping_payload:
+                # Simulate ratbagd accepting the write but keeping the old
+                # payload: same action type, different value.
+                action_type, _payload = variant.value
+                self._values[(message.path, name)] = (action_type, 999)
                 self._dirty = True
                 return SimpleNamespace(message_type=MessageType.METHOD_RETURN, body=[0])
             self._values[(message.path, name)] = variant.value
@@ -104,6 +112,30 @@ class WriterTests(unittest.IsolatedAsyncioTestCase):
         profile = Profile(name="desktop", report_rate=500)
         with self.assertRaisesRegex(WriteError, "report rate did not take effect"):
             await self.writer.apply(profile, 0)
+
+    async def test_raises_when_the_keycode_does_not_take_effect(self):
+        """The action type matching is not enough.
+
+        A write that lands ACTION_KEY with the wrong keycode used to pass
+        verification, because the payload was read and then never compared.
+        """
+        self.client.ignore_mapping_payload = True
+        profile = Profile(name="desktop", bindings={0: Binding("key", "KEY_X")})
+        with self.assertRaisesRegex(WriteError, "button 0"):
+            await self.writer.apply(profile, 0)
+
+    async def test_raises_when_a_macro_does_not_take_effect(self):
+        self.client.ignore_mapping_payload = True
+        profile = Profile(
+            name="desktop",
+            bindings={0: Binding("macro", "+KEY_LEFTCTRL +KEY_C -KEY_C -KEY_LEFTCTRL")},
+        )
+        with self.assertRaisesRegex(WriteError, "button 0"):
+            await self.writer.apply(profile, 0)
+
+    async def test_accepts_a_matching_payload(self):
+        profile = Profile(name="desktop", bindings={0: Binding("key", "KEY_X")})
+        await self.writer.apply(profile, 0)  # must not raise
 
     async def test_raises_for_missing_slot(self):
         profile = Profile(name="desktop")

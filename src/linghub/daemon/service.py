@@ -465,7 +465,36 @@ class Daemon:
         if self._manual_override is not None:
             self._state.stack = [self._manual_override]
 
+        await self._observe_active_slot()
         await self._apply_target()
+
+    async def _observe_active_slot(self) -> None:
+        """Ask the hardware which slot is active, so drift is noticed.
+
+        Without this the daemon compares only its own memory: a physical
+        profile button, a ratbagctl call, or a KVM reconnect could move the
+        active slot and the daemon would never correct it.
+        """
+        assert self._state is not None
+        if self._writer is None:
+            return
+        try:
+            active = await self._writer.active_slot()
+        except (RuntimeError, OSError, DBusFastError) as exc:
+            logger.debug("cannot read the active slot: %s", exc)
+            return
+        except AttributeError:
+            # A writer without the capability cannot report drift; treat it as
+            # unknown rather than failing the tick.
+            return
+
+        before = self._state.needs_write
+        self._state.observe_active_slot(active)
+        if not before and self._state.needs_write:
+            logger.info(
+                "the mouse is on slot %s but %r belongs in slot %s; reloading",
+                active, self._state.loaded_profile, self._state.expected_slot,
+            )
 
     async def run(self) -> None:
         if not self._reload_config():

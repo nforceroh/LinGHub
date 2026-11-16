@@ -509,6 +509,62 @@ class ProfileManagementTests(unittest.TestCase):
         self.assertIsNone(state.loaded_profile)
 
 
+class ActiveSlotTests(unittest.TestCase):
+    """The daemon must notice when the hardware disagrees with its belief.
+
+    It used to compare only its own memory, so if the active slot changed
+    underneath it - a physical profile button, ratbagctl, a KVM reconnect, or
+    ratbagd resetting to a disabled slot - it never corrected itself.
+    """
+
+    def _state(self):
+        state = DaemonState(config=make_config(DESKTOP, WOT))
+        state.stack = ["world-of-tanks"]
+        state.mark_loaded("world-of-tanks")
+        return state
+
+    def test_no_drift_when_the_expected_slot_is_active(self):
+        state = self._state()
+        state.observe_active_slot(1)
+        self.assertFalse(state.needs_write)
+
+    def test_drift_when_a_different_slot_is_active(self):
+        state = self._state()
+        state.observe_active_slot(2)
+        self.assertTrue(state.needs_write)
+
+    def test_drift_when_nothing_is_active(self):
+        state = self._state()
+        state.observe_active_slot(None)
+        self.assertTrue(state.needs_write)
+
+    def test_the_desktop_profile_expects_slot_0(self):
+        state = DaemonState(config=make_config(DESKTOP, WOT))
+        state.mark_loaded("desktop")
+        state.observe_active_slot(0)
+        self.assertFalse(state.needs_write)
+        state.observe_active_slot(1)
+        self.assertTrue(state.needs_write)
+
+    def test_an_unknown_loaded_profile_is_not_drift(self):
+        """Before the first write there is nothing to disagree with.
+
+        needs_write is still true - nothing has been written yet - but that is
+        the "never loaded" reason, not drift.
+        """
+        state = DaemonState(config=make_config(DESKTOP, WOT))
+        state.observe_active_slot(3)
+        self.assertFalse(state._slot_drifted)
+
+    def test_drift_clears_after_a_successful_write(self):
+        state = self._state()
+        state.observe_active_slot(2)
+        self.assertTrue(state.needs_write)
+        state.mark_loaded("world-of-tanks")
+        state.observe_active_slot(1)
+        self.assertFalse(state.needs_write)
+
+
 class FingerprintTests(unittest.TestCase):
     """Editing a profile's contents must trigger a rewrite, not just a rename."""
 

@@ -15,6 +15,28 @@ from . import mapping
 from .ratbag import SERVICE, RatbagClient, Device
 
 
+def _payloads_match(actual, expected) -> bool:
+    """Compare a mapping payload, tolerating dbus-fast's Variant wrapping.
+
+    Macro payloads arrive as a list of (event, value) tuples; scalars arrive
+    bare or wrapped in a Variant depending on the signature.
+    """
+    from dbus_fast import Variant
+
+    if isinstance(actual, Variant):
+        actual = actual.value
+    if isinstance(expected, Variant):
+        expected = expected.value
+
+    if isinstance(actual, (list, tuple)) and isinstance(expected, (list, tuple)):
+        if len(actual) != len(expected):
+            return False
+        return all(
+            tuple(a) == tuple(e) for a, e in zip(actual, expected)
+        )
+    return actual == expected
+
+
 class WriteError(RuntimeError):
     """A write did not take effect."""
 
@@ -89,6 +111,18 @@ class ProfileWriter:
         await self._wait_for_commit(path)
 
         return WriteResult(slot=slot, changed=tuple(changed))
+
+    async def active_slot(self) -> int | None:
+        """Which slot the device says is active, or None if none is.
+
+        Read from hardware rather than remembered, so the daemon can notice
+        when something outside it changed the active profile.
+        """
+        paths = await self._get(self._device.path, "Device", "Profiles")
+        for index, path in enumerate(paths):
+            if await self._get(path, "Profile", "IsActive"):
+                return index
+        return None
 
     async def _write_resolution(self, profile_path: str, index: int, resolution: dict) -> None:
         paths = await self._get(profile_path, "Profile", "Resolutions")
@@ -172,4 +206,12 @@ class ProfileWriter:
                 raise WriteError(
                     f"button {index} action type did not take effect: "
                     f"wrote {expected_type}, read {actual_type}"
+                )
+            # The payload matters as much as the type: ACTION_KEY with the
+            # wrong keycode is a different binding that looks identical if you
+            # only compare types.
+            if not _payloads_match(actual_payload, expected_payload):
+                raise WriteError(
+                    f"button {index} value did not take effect: "
+                    f"wrote {expected_payload!r}, read {actual_payload!r}"
                 )

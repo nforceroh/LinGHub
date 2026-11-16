@@ -45,6 +45,7 @@ class DaemonState:
     stack: list[str] = field(default_factory=list)
     loaded_profile: str | None = None
     loaded_fingerprint: str | None = None
+    _slot_drifted: bool = False
 
     @property
     def target_profile(self) -> Profile:
@@ -65,12 +66,41 @@ class DaemonState:
         Compares a fingerprint rather than just the name, so editing a
         profile's bindings in the config causes a rewrite even though the
         profile is still called the same thing.
+
+        Also true when the hardware's active slot disagrees with what this
+        state believes, which is how a physical profile button, ratbagctl, or
+        a KVM reconnect gets corrected.
         """
         target = self.target_profile
         return (
             self.loaded_profile != target.name
             or self.loaded_fingerprint != fingerprint(target)
+            or self._slot_drifted
         )
+
+    def observe_active_slot(self, active_slot: int | None) -> None:
+        """Record which slot the hardware says is active.
+
+        Called each tick with the slot read from the device. A mismatch means
+        something outside the daemon changed the active profile, so the next
+        write re-asserts it. An unknown loaded profile is not drift: there is
+        nothing yet to disagree with.
+        """
+        if self.loaded_profile is None:
+            self._slot_drifted = False
+            return
+        expected = self.expected_slot
+        self._slot_drifted = expected is None or active_slot != expected
+
+    @property
+    def expected_slot(self) -> int | None:
+        """The slot the loaded profile should occupy, or None if unknown."""
+        if self.loaded_profile is None:
+            return None
+        profile = self.config.profile_named(self.loaded_profile)
+        if profile is None:
+            return None
+        return 0 if profile.is_desktop else 1
 
     def observe(self, detection: Detection) -> None:
         """Update the stack from one detection pass.
@@ -92,6 +122,8 @@ class DaemonState:
         self.loaded_profile = profile_name
         profile = self.config.profile_named(profile_name)
         self.loaded_fingerprint = fingerprint(profile) if profile else None
+        # A successful write puts the hardware where we expect it.
+        self._slot_drifted = False
 
     def set_binding(
         self, profile_name: str, index: int, binding: Binding | None
