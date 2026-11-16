@@ -25,6 +25,7 @@ from .binding_labels import describe_binding
 from .buttonmap import BUTTONS, describe, manual_number
 from .client import DaemonClient, DaemonState
 from .diagram import MouseDiagram
+from .led_panel import LedPanel
 
 
 logger = logging.getLogger("linghub.ui.window")
@@ -40,6 +41,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._selected_button: int | None = None
         self._bindings: dict[int, tuple[str, str]] = {}
         self._profile_rows: dict[str, Adw.ActionRow] = {}
+        self._led_panel: LedPanel | None = None
+        self._leds: dict[int, dict] = {}
 
         self.set_default_size(980, 620)
 
@@ -94,29 +97,56 @@ class MainWindow(Adw.ApplicationWindow):
         return box
 
     def _build_side_pane(self) -> Gtk.Widget:
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        box.set_margin_top(12)
-        box.set_margin_bottom(12)
-        box.set_margin_start(12)
-        box.set_margin_end(12)
+        """Profiles, buttons and lighting, sharing the height between them.
 
-        box.append(self._section_label("Profiles"))
+        A plain box would let the last child take whatever it needs and squash
+        the rest, which left the button table showing a single row. A Paned
+        gives each section a share the user can adjust.
+        """
+        paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
+        paned.set_wide_handle(True)
+
+        # --- profiles + buttons share the top ---
+        top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        top.set_margin_top(12)
+        top.set_margin_start(12)
+        top.set_margin_end(12)
+
+        top.append(self._section_label("Profiles"))
         self._profile_list = Gtk.ListBox()
         self._profile_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self._profile_list.connect("row-activated", self._on_profile_activated)
-        scroller = Gtk.ScrolledWindow()
-        scroller.set_child(self._profile_list)
-        scroller.set_vexpand(True)
-        scroller.set_min_content_height(160)
-        box.append(scroller)
+        profile_scroller = Gtk.ScrolledWindow()
+        profile_scroller.set_child(self._profile_list)
+        profile_scroller.set_min_content_height(120)
+        profile_scroller.set_propagate_natural_height(True)
+        top.append(profile_scroller)
 
-        box.append(self._section_label("Buttons"))
+        top.append(self._section_label("Buttons"))
         table_scroller = Gtk.ScrolledWindow()
         table_scroller.set_child(self._build_button_table())
         table_scroller.set_vexpand(True)
-        box.append(table_scroller)
+        top.append(table_scroller)
 
-        return box
+        paned.set_start_child(top)
+
+        # --- lighting below, scrollable so it never squeezes the table ---
+        lighting = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        lighting.set_margin_start(12)
+        lighting.set_margin_end(12)
+        lighting.set_margin_top(8)
+        lighting.set_margin_bottom(12)
+        lighting.append(self._section_label("Lighting"))
+        self._led_panel = LedPanel(on_change=self._on_led_changed)
+        lighting.append(self._led_panel)
+
+        lighting_scroller = Gtk.ScrolledWindow()
+        lighting_scroller.set_child(lighting)
+        lighting_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        paned.set_end_child(lighting_scroller)
+
+        paned.set_position(380)
+        return paned
 
     def _build_button_table(self) -> Gtk.Widget:
         """Every button: manual number, function and ratbag index.
@@ -214,18 +244,49 @@ class MainWindow(Adw.ApplicationWindow):
 
         self._rebuild_profiles()
         self._rebuild_bindings()
+        if self._led_panel is not None:
+            self._led_panel.load(self._leds)
+
+    def _on_led_changed(self, mode: str, brightness: int, duration: int, color) -> None:
+        """Send a lighting change to the daemon."""
+        profile = self._editing_profile()
+        if profile is None:
+            return
+        run_and_report(
+            self._write_leds(profile, mode, brightness, duration, color),
+            self._on_async_error,
+        )
+
+    async def _write_leds(
+        self, profile: str, mode: str, brightness: int, duration: int, color
+    ) -> None:
+        try:
+            ok = await self._client.set_leds(profile, mode, brightness, duration, color)
+        except (RuntimeError, OSError) as exc:
+            self._status.set_text(f"Could not change the lighting: {exc}")
+            return
+        if not ok:
+            self._status.set_text("The daemon rejected that lighting change.")
+            return
+        self._status.set_text(f"Updated the lighting of {profile}.")
 
     async def _refresh_bindings(self) -> None:
-        """Read the edited profile's bindings so the table can show them."""
+        """Read the edited profile's bindings and lighting."""
         profile = self._editing_profile()
         if profile is None:
             self._bindings = {}
+            self._leds = {}
             return
         try:
             self._bindings = await self._client.get_bindings(profile)
         except (RuntimeError, OSError) as exc:
             logger.warning("cannot read bindings: %s", exc)
             self._bindings = {}
+        try:
+            self._leds = await self._client.get_leds(profile)
+        except (RuntimeError, OSError) as exc:
+            logger.warning("cannot read lighting: %s", exc)
+            self._leds = {}
 
     def _rebuild_profiles(self) -> None:
         """Make the profile list match the daemon's state, reusing rows.

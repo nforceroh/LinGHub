@@ -196,5 +196,71 @@ class SaveTests(unittest.TestCase):
         self.assertEqual(reloaded.desktop_profile, "desktop")
 
 
+class LedValidationTests(unittest.TestCase):
+    """LED settings are written straight to hardware, so validate on load.
+
+    An out-of-range brightness or an unknown mode would otherwise fail deep
+    inside the writer, or silently do nothing.
+    """
+
+    BASE = {
+        "version": 1,
+        "settings": {"desktop_profile": "desktop"},
+        "profiles": {"desktop": {"games": []}},
+    }
+
+    def _load_with_leds(self, leds):
+        body = json.loads(json.dumps(self.BASE))
+        body["profiles"]["desktop"]["leds"] = leds
+        with tempfile.TemporaryDirectory() as tmp:
+            return load(write_config(Path(tmp), body))
+
+    def test_valid_leds_load(self):
+        config = self._load_with_leds([
+            {"index": 0, "mode": "on", "color": [255, 0, 0], "brightness": 128},
+        ])
+        self.assertEqual(config.desktop.leds[0]["mode"], "on")
+
+    def test_unknown_mode_raises(self):
+        with self.assertRaisesRegex(ConfigError, "mode"):
+            self._load_with_leds([{"index": 0, "mode": "strobe"}])
+
+    def test_brightness_above_255_raises(self):
+        with self.assertRaisesRegex(ConfigError, "brightness"):
+            self._load_with_leds([{"index": 0, "mode": "on", "brightness": 256}])
+
+    def test_negative_brightness_raises(self):
+        with self.assertRaisesRegex(ConfigError, "brightness"):
+            self._load_with_leds([{"index": 0, "mode": "on", "brightness": -1}])
+
+    def test_color_must_be_three_channels(self):
+        with self.assertRaisesRegex(ConfigError, "color"):
+            self._load_with_leds([{"index": 0, "mode": "on", "color": [255, 0]}])
+
+    def test_color_channels_must_be_in_range(self):
+        with self.assertRaisesRegex(ConfigError, "color"):
+            self._load_with_leds([{"index": 0, "mode": "on", "color": [300, 0, 0]}])
+
+    def test_led_needs_an_index(self):
+        with self.assertRaisesRegex(ConfigError, "index"):
+            self._load_with_leds([{"mode": "on"}])
+
+    def test_leds_round_trip_through_save(self):
+        from linghub.config import save
+
+        body = json.loads(json.dumps(self.BASE))
+        body["profiles"]["desktop"]["leds"] = [
+            {"index": 0, "mode": "on", "color": [1, 2, 3], "brightness": 200},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_config(Path(tmp), body)
+            config = load(path)
+            save(path, config)
+            again = load(path)
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(again.desktop.leds, config.desktop.leds)
+        self.assertEqual(raw["profiles"]["desktop"]["leds"][0]["color"], [1, 2, 3])
+
+
 if __name__ == "__main__":
     unittest.main()

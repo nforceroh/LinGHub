@@ -103,6 +103,8 @@ class ProfileListTests(unittest.TestCase):
         window._table_rows = {}
         window._binding_rows = {}
         window._profile_rows = {}
+        window._led_panel = None
+        window._leds = {}
 
         window._title = Adw.WindowTitle(title="t")
         window._status = Gtk.Label()

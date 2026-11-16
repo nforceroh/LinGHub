@@ -48,6 +48,76 @@ def _parse_bindings(raw: dict) -> dict[int, Binding]:
     return bindings
 
 
+LED_MODES = ("off", "on", "cycle", "breathing")
+
+
+def validate_led(entry: dict) -> dict:
+    """Validate one LED settings dict, returning a normalised copy."""
+    return _parse_leds([entry])[0]
+
+
+def _parse_leds(raw: list) -> tuple[dict, ...]:
+    """Validate LED settings at load time.
+
+    These values go straight to the hardware, so a bad one would otherwise
+    fail deep inside the writer or silently do nothing.
+    """
+    leds = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise ConfigError("each led must be an object")
+        if "index" not in entry:
+            raise ConfigError("led is missing an 'index'")
+        try:
+            index = int(entry["index"])
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(f"led index {entry['index']!r} is not a number") from exc
+
+        led: dict = {"index": index}
+
+        if "mode" in entry:
+            mode = entry["mode"]
+            if mode not in LED_MODES:
+                raise ConfigError(
+                    f"led {index} has unknown mode {mode!r}; expected one of {LED_MODES}"
+                )
+            led["mode"] = mode
+
+        if "brightness" in entry:
+            brightness = entry["brightness"]
+            if not isinstance(brightness, int) or not 0 <= brightness <= 255:
+                raise ConfigError(
+                    f"led {index} brightness must be 0-255, got {brightness!r}"
+                )
+            led["brightness"] = brightness
+
+        if "duration" in entry:
+            duration = entry["duration"]
+            if not isinstance(duration, int) or duration < 0:
+                raise ConfigError(
+                    f"led {index} duration must be a non-negative integer, got {duration!r}"
+                )
+            led["duration"] = duration
+
+        if "color" in entry:
+            color = entry["color"]
+            if not isinstance(color, (list, tuple)) or len(color) != 3:
+                raise ConfigError(
+                    f"led {index} color must be three channels, got {color!r}"
+                )
+            channels = []
+            for channel in color:
+                if not isinstance(channel, int) or not 0 <= channel <= 255:
+                    raise ConfigError(
+                        f"led {index} color channels must be 0-255, got {color!r}"
+                    )
+                channels.append(channel)
+            led["color"] = channels
+
+        leds.append(led)
+    return tuple(leds)
+
+
 def _parse_profile(name: str, raw: dict) -> Profile:
     games = tuple(Game(executable=g) for g in raw.get("games", []))
     return Profile(
@@ -56,7 +126,7 @@ def _parse_profile(name: str, raw: dict) -> Profile:
         report_rate=raw.get("report_rate"),
         resolutions=tuple(raw.get("resolutions", [])),
         bindings=_parse_bindings(raw.get("bindings", {})),
-        leds=tuple(raw.get("leds", [])),
+        leds=_parse_leds(raw.get("leds", [])),
     )
 
 

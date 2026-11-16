@@ -42,6 +42,8 @@ class ManagerInterface(ServiceInterface):
         get_state,
         get_bindings=None,
         on_set_binding=None,
+        get_leds=None,
+        on_set_leds=None,
     ):
         super().__init__(INTERFACE)
         self._on_load_profile = on_load_profile
@@ -49,6 +51,8 @@ class ManagerInterface(ServiceInterface):
         self._get_state = get_state
         self._get_bindings = get_bindings
         self._on_set_binding = on_set_binding
+        self._get_leds = get_leds
+        self._on_set_leds = on_set_leds
 
     @method()
     def LoadProfile(self, name: "s") -> "b":
@@ -108,6 +112,59 @@ class ManagerInterface(ServiceInterface):
             return False
         logger.info("ClearBinding(%r, %d) requested over D-Bus", profile, index)
         return bool(self._on_set_binding(profile, index, "disabled", None))
+
+    @method()
+    def GetLeds(self, profile: "s") -> "a(us(uuu)uu)":
+        """A profile's LED settings, one entry per zone.
+
+        Returns (index, mode, colour, brightness, duration). The zones are
+        separate in the hardware even when the UI drives them together, so the
+        shape stays honest about that.
+        """
+        if self._get_leds is None:
+            return []
+        leds = self._get_leds(profile) or {}
+        result = []
+        for index, settings in sorted(leds.items()):
+            color = settings.get("color") or (0, 0, 0)
+            result.append((
+                int(index),
+                str(settings.get("mode", "off")),
+                (int(color[0]), int(color[1]), int(color[2])),
+                int(settings.get("brightness", 255)),
+                int(settings.get("duration", 0)),
+            ))
+        return result
+
+    @method()
+    def SetLeds(
+        self,
+        profile: "s",
+        mode: "s",
+        brightness: "u",
+        duration: "u",
+        red: "u",
+        green: "u",
+        blue: "u",
+    ) -> "b":
+        """Set every LED zone of a profile to the same effect.
+
+        The UI presents the two zones as one control, so this takes one set of
+        values rather than a list. Splitting them later means adding a method
+        that takes a per-zone list, not changing this one's meaning.
+        """
+        if self._on_set_leds is None:
+            return False
+        logger.info(
+            "SetLeds(%r, %r, brightness=%d, duration=%d, rgb=(%d,%d,%d)) requested over D-Bus",
+            profile, mode, brightness, duration, red, green, blue,
+        )
+        return bool(self._on_set_leds(profile, {
+            "mode": mode,
+            "brightness": brightness,
+            "duration": duration,
+            "color": (red, green, blue),
+        }))
 
     @dbus_property(access=PropertyAccess.READ)
     def ActiveProfile(self) -> "s":

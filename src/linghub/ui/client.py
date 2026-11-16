@@ -128,6 +128,33 @@ class DaemonClient:
     async def clear_binding(self, profile: str, index: int) -> bool:
         return bool(await self._call("ClearBinding", "si", [profile, index]))
 
+    async def get_leds(self, profile: str) -> dict[int, dict]:
+        """A profile's LED zones, as {index: {mode, color, brightness, duration}}."""
+        raw = await self._call("GetLeds", "s", [profile]) or ()
+        return {
+            int(index): {
+                "mode": str(mode),
+                "color": tuple(int(c) for c in color),
+                "brightness": int(brightness),
+                "duration": int(duration),
+            }
+            for index, mode, color, brightness, duration in raw
+        }
+
+    async def set_leds(
+        self,
+        profile: str,
+        mode: str,
+        brightness: int,
+        duration: int,
+        color: tuple[int, int, int],
+    ) -> bool:
+        red, green, blue = color
+        return bool(await self._call(
+            "SetLeds", "ssuuuuu",
+            [profile, mode, brightness, duration, red, green, blue],
+        ))
+
     def disconnect(self) -> None:
         if self._bus is not None:
             self._bus.disconnect()

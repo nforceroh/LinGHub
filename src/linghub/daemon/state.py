@@ -110,7 +110,22 @@ class DaemonState:
         if profile is None:
             return False
 
-        updated = profile.with_binding(index, binding)
+        self._replace_profile(profile_name, profile.with_binding(index, binding))
+        return True
+
+    def set_leds(self, profile_name: str, settings: dict) -> bool:
+        """Set every LED zone of a profile to the same effect.
+
+        Like set_binding, the loaded fingerprint is left alone so the daemon
+        pushes the change to the mouse on its next tick.
+        """
+        profile = self.config.profile_named(profile_name)
+        if profile is None:
+            return False
+        self._replace_profile(profile_name, profile.with_leds(settings))
+        return True
+
+    def _replace_profile(self, profile_name: str, updated: Profile) -> None:
         self.config = replace(
             self.config,
             profiles=[
@@ -118,4 +133,3 @@ class DaemonState:
                 for candidate in self.config.profiles
             ],
         )
-        return True

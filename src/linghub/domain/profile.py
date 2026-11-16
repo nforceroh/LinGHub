@@ -77,3 +77,18 @@ class Profile:
         else:
             updated[index] = binding
         return replace(self, bindings=updated)
+
+    def with_leds(self, settings: dict) -> "Profile":
+        """A copy with every LED zone set to the same effect.
+
+        The UI treats the zones as one control, but they are separate in the
+        hardware, so each recorded entry gets the same values. A profile with
+        no LED entries is returned unchanged: there is no zone to update, and
+        inventing indices would write to hardware nobody asked about.
+        """
+        zones = []
+        for entry in self.leds:
+            merged = dict(entry)
+            merged.update(settings)
+            zones.append(merged)
+        return replace(self, leds=tuple(zones))

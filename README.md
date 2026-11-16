@@ -53,6 +53,12 @@ another mouse button, or nothing. The change goes to the daemon, which writes th
 config and pushes it to the mouse. The daemon recognises its own write and does
 not mistake it for a hand edit.
 
+Below the button table is a lighting panel: colour, effect, brightness and
+speed, applied to the whole profile. The G502 has two LED zones, but they read
+as one strip, so the panel drives them together; the daemon writes the same
+values to each. Effects are `off`, `fixed colour`, `cycle` and `breathing`, and
+only the looping ones have a speed.
+
 The dialog only offers bindings the hardware can actually encode. `second-mode`
 is deliberately absent because libratbag rejects it on the G502 (issue #1798); if
 a config already contains it, the table shows the raw name so it can be replaced.

@@ -107,6 +107,8 @@ class Daemon:
             get_state=self._snapshot,
             get_bindings=self._get_bindings,
             on_set_binding=self._request_set_binding,
+            get_leds=self._get_leds,
+            on_set_leds=self._request_set_leds,
         )
         self._session_bus.export(PATH, self._interface)
         await self._session_bus.request_name(SERVICE)
@@ -184,6 +186,45 @@ class Daemon:
         logger.info(
             "binding %d of %r is now %s(%r)", index, profile_name, kind, value
         )
+        self._wake()
+        return True
+
+    def _get_leds(self, profile_name: str) -> dict[int, dict]:
+        """A profile's LED zones, keyed by index."""
+        if self._state is None:
+            return {}
+        profile = self._state.config.profile_named(profile_name)
+        if profile is None:
+            return {}
+        return {int(entry["index"]): dict(entry) for entry in profile.leds}
+
+    def _request_set_leds(self, profile_name: str, settings: dict) -> bool:
+        """Change a profile's lighting, persist it, and let the next tick push it.
+
+        Same rollback rule as a binding change: the in-memory config is only
+        kept if saving succeeds, so the running state never disagrees with the
+        file.
+        """
+        assert self._state is not None
+
+        try:
+            # Reuse the config validator so the ranges cannot drift from what
+            # a hand-written file is allowed to contain.
+            config_module.validate_led(dict(settings, index=0))
+        except config_module.ConfigError as exc:
+            logger.warning("SetLeds: %s", exc)
+            return False
+
+        previous = self._state.config
+        if not self._state.set_leds(profile_name, settings):
+            logger.warning("SetLeds(%r): no such profile", profile_name)
+            return False
+
+        if not self._save_config():
+            self._state.config = previous
+            return False
+
+        logger.info("leds of %r are now %r", profile_name, settings)
         self._wake()
         return True
 

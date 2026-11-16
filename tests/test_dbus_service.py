@@ -37,6 +37,14 @@ class FakeDaemon:
         self.set_calls.append((profile, index, kind, value))
         return self.accept
 
+    def get_leds(self, profile):
+        return getattr(self, "leds", {})
+
+    def on_set_leds(self, profile, settings):
+        self.led_calls = getattr(self, "led_calls", [])
+        self.led_calls.append((profile, settings))
+        return self.accept
+
 
 def make_interface(daemon):
     return ManagerInterface(
@@ -45,6 +53,8 @@ def make_interface(daemon):
         get_state=daemon.get_state,
         get_bindings=daemon.get_bindings,
         on_set_binding=daemon.on_set_binding,
+        get_leds=daemon.get_leds,
+        on_set_leds=daemon.on_set_leds,
     )
 
 
@@ -116,6 +126,36 @@ class BindingMethodTests(unittest.TestCase):
         self.assertEqual(daemon.set_calls, [("wot", 3, "disabled", None)])
 
 
+class LedMethodTests(unittest.TestCase):
+    def test_get_leds_returns_settings(self):
+        daemon = FakeDaemon()
+        daemon.leds = {0: {"mode": "on", "color": (255, 0, 0), "brightness": 128}}
+        interface = make_interface(daemon)
+        self.assertEqual(
+            call(interface, "GetLeds", "wot"),
+            [(0, "on", (255, 0, 0), 128, 0)],
+        )
+
+    def test_get_leds_empty_for_unknown_profile(self):
+        self.assertEqual(call(make_interface(FakeDaemon()), "GetLeds", "nope"), [])
+
+    def test_set_leds_routes_to_the_daemon(self):
+        daemon = FakeDaemon()
+        interface = make_interface(daemon)
+        ok = call(interface, "SetLeds", "wot", "breathing", 128, 3000, 10, 20, 30)
+        self.assertTrue(ok)
+        self.assertEqual(
+            daemon.led_calls,
+            [("wot", {"mode": "breathing", "brightness": 128, "duration": 3000,
+                      "color": (10, 20, 30)})],
+        )
+
+    def test_set_leds_reports_rejection(self):
+        daemon = FakeDaemon(accept=False)
+        ok = call(make_interface(daemon), "SetLeds", "wot", "on", 255, 0, 1, 2, 3)
+        self.assertFalse(ok)
+
+
 class PropertyTests(unittest.TestCase):
     def test_active_profile_reports_loaded(self):
         daemon = FakeDaemon(StateSnapshot(loaded_profile="world-of-tanks"))
@@ -150,6 +190,7 @@ class IntrospectionTests(unittest.TestCase):
         for member in (
             "LoadProfile", "Reload", "ListProfiles",
             "GetBindings", "SetBinding", "ClearBinding",
+            "GetLeds", "SetLeds",
             "ActiveProfile", "DetectedGame", "DesktopProfile",
             "ProfileChanged", "GameDetected", "GameExited",
         ):
