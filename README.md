@@ -62,6 +62,32 @@ systemctl --user status linghub.service
 journalctl --user -u linghub.service -f
 ```
 
+## D-Bus interface
+
+The daemon publishes `org.linghub.Manager` on the session bus at
+`/org/linghub/Manager`, so a UI can read state and request changes without
+editing the config file.
+
+| Member | Kind | Meaning |
+| --- | --- | --- |
+| `ListProfiles` | method → `as` | Every profile name in the config |
+| `LoadProfile(s)` | method → `b` | Load a profile now; false if it does not exist |
+| `Reload` | method → `b` | Re-read the config file |
+| `ActiveProfile` | property `s` | Profile currently on the mouse, empty if unknown |
+| `DetectedGame` | property `s` | Game currently detected, empty if none |
+| `DesktopProfile` | property `s` | Profile used when no game is running |
+| `ProfileChanged(s)` | signal | A profile was loaded onto the mouse |
+| `GameDetected(s)` | signal | A game started being detected |
+| `GameExited(s)` | signal | A detected game stopped running |
+
+A manual `LoadProfile` lasts until the detected game changes, then detection
+takes over again.
+
+```bash
+busctl --user call org.linghub.Manager /org/linghub/Manager \
+  org.linghub.Manager ListProfiles
+```
+
 ## Configuration
 
 The daemon reads `~/.config/linghub/config.json`. See

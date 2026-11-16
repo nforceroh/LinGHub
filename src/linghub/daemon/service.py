@@ -18,6 +18,8 @@ from ..discovery.detector import detect
 from ..discovery.gamemode import GameModeClient
 from ..hardware.ratbag import RatbagClient
 from ..hardware.writer import ProfileWriter, WriteError
+from .dbus_service import PATH, SERVICE, ManagerInterface
+from .snapshot import StateSnapshot
 from .state import DaemonState
 from .watcher import ConfigWatcher
 
@@ -50,6 +52,10 @@ class Daemon:
         self._watcher = ConfigWatcher(self._config_path)
         self._wakeup = asyncio.Event()
         self._gamemode: GameModeClient | None = None
+        self._session_bus: MessageBus | None = None
+        self._interface: ManagerInterface | None = None
+        self._manual_override: str | None = None
+        self._detected_game: str | None = None
 
     async def _connect(self) -> None:
         self._bus = await asyncio.wait_for(
@@ -59,6 +65,57 @@ class Daemon:
         device = await client.find_device()
         self._writer = ProfileWriter(client, device)
         logger.info("using device %s at %s", device.name, device.path)
+
+    async def _export_interface(self) -> None:
+        """Publish the manager interface on the session bus.
+
+        Failure here is not fatal: the daemon still switches profiles, it just
+        cannot be controlled by the UI.
+        """
+        try:
+            self._session_bus = await asyncio.wait_for(
+                MessageBus(bus_type=BusType.SESSION).connect(), timeout=5
+            )
+        except (OSError, asyncio.TimeoutError) as exc:
+            logger.warning("cannot publish D-Bus interface: %s", exc)
+            return
+
+        self._interface = ManagerInterface(
+            on_load_profile=self._request_profile,
+            on_reload=self._request_reload,
+            get_state=self._snapshot,
+        )
+        self._session_bus.export(PATH, self._interface)
+        await self._session_bus.request_name(SERVICE)
+        logger.info("published %s on the session bus", SERVICE)
+
+    def _snapshot(self) -> StateSnapshot:
+        assert self._state is not None
+        return StateSnapshot(
+            profile_names=tuple(p.name for p in self._state.config.profiles),
+            loaded_profile=self._state.loaded_profile,
+            detected_game=self._detected_game,
+            desktop_profile=self._state.config.desktop_profile,
+        )
+
+    def _request_profile(self, name: str) -> bool:
+        """Handle a manual profile request from the UI.
+
+        The override is cleared as soon as the detected game changes, so a
+        manual choice does not fight detection indefinitely.
+        """
+        assert self._state is not None
+        if self._state.config.profile_named(name) is None:
+            logger.warning("LoadProfile(%r): no such profile", name)
+            return False
+        self._manual_override = name
+        self._wake()
+        return True
+
+    def _request_reload(self) -> bool:
+        self._watcher.reset()
+        self._wake()
+        return True
 
     def _reload_config(self) -> bool:
         try:
@@ -113,11 +170,31 @@ class Daemon:
         self._pending = None
         logger.info("loaded profile %r into slot %d (%d changes)", target.name, slot, len(result.changed))
 
+        if self._interface is not None:
+            self._interface.ProfileChanged(target.name)
+
     async def _tick(self) -> None:
         assert self._state is not None
         self._reload_if_changed()
         detection = detect(self._state.config.profiles)
+
+        previous_game = self._detected_game
         self._state.observe(detection)
+        self._detected_game = detection.game.profile.name if detection.game else None
+
+        # A manual choice lasts until the detected game changes, then detection
+        # takes over again.
+        if self._detected_game != previous_game:
+            self._manual_override = None
+            if self._interface is not None:
+                if self._detected_game is not None:
+                    self._interface.GameDetected(self._detected_game)
+                elif previous_game is not None:
+                    self._interface.GameExited(previous_game)
+
+        if self._manual_override is not None:
+            self._state.stack = [self._manual_override]
+
         await self._apply_target()
 
     async def run(self) -> None:
@@ -128,6 +205,7 @@ class Daemon:
             raise ConfigStartupError("cannot start without a valid config")
 
         await self._connect()
+        await self._export_interface()
         interval = self._poll_interval or self._state.config.poll_interval
 
         # GameMode is an accelerator: when it fires, run a tick immediately
@@ -152,6 +230,8 @@ class Daemon:
                 self._wakeup.clear()
         finally:
             self._gamemode.disconnect()
+            if self._session_bus is not None:
+                self._session_bus.disconnect()
             if self._bus is not None:
                 self._bus.disconnect()
 
