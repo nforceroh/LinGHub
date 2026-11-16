@@ -23,6 +23,8 @@ gi.require_version("AppIndicator3", "0.1")
 
 from gi.repository import AppIndicator3, GLib, Gtk
 
+from . import daemon_access
+
 
 logger = logging.getLogger("linghub.tray")
 
@@ -84,27 +86,15 @@ class Tray:
         return GLib.SOURCE_CONTINUE
 
     def _refresh_thread(self) -> None:
-        import asyncio
-
         try:
-            state = asyncio.run(self._query())
+            state = daemon_access.state()
+        except daemon_access.DaemonUnavailable as exc:
+            logger.debug("daemon unavailable: %s", exc)
+            state = None
         finally:
             self._busy = False
         if state is not None:
             GLib.idle_add(self._apply, state)
-
-    async def _query(self):
-        from .ui.client import DaemonClient
-
-        client = DaemonClient()
-        if not await client.connect():
-            return None
-        try:
-            return await client.state()
-        except (RuntimeError, OSError):
-            return None
-        finally:
-            client.disconnect()
 
     def _apply(self, state) -> bool:
         """Update the menu from a daemon state snapshot."""
@@ -176,22 +166,13 @@ class Tray:
         threading.Thread(target=self._load_thread, args=(name,), daemon=True).start()
 
     def _load_thread(self, name: str) -> None:
-        import asyncio
+        async def load(client):
+            return await client.load_profile(name)
 
-        async def run():
-            from .ui.client import DaemonClient
-
-            client = DaemonClient()
-            if not await client.connect():
-                return
-            try:
-                await client.load_profile(name)
-            except (RuntimeError, OSError) as exc:
-                logger.warning("could not load %r: %s", name, exc)
-            finally:
-                client.disconnect()
-
-        asyncio.run(run())
+        try:
+            daemon_access.call(load)
+        except daemon_access.DaemonUnavailable as exc:
+            logger.warning("could not load %r: %s", name, exc)
         GLib.idle_add(self._refresh)
 
     def _open_ui(self) -> None:

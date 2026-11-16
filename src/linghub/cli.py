@@ -99,35 +99,24 @@ def _run_daemon(args: argparse.Namespace) -> int:
 
 def _run_status() -> int:
     """Ask the running daemon for its state over the session bus."""
-    import asyncio
+    from . import daemon_access
 
-    from .ui.client import DaemonClient
+    try:
+        state = daemon_access.state()
+    except daemon_access.DaemonUnavailable as exc:
+        print(
+            f"Error: the daemon is not running or not answering ({exc}).",
+            file=sys.stderr,
+        )
+        return 1
 
-    async def query() -> int:
-        client = DaemonClient()
-        if not await client.connect():
-            print("Error: cannot reach the session bus.", file=sys.stderr)
-            return 1
-        try:
-            state = await client.state()
-        except (RuntimeError, OSError, DBusFastError) as exc:
-            print(
-                f"Error: the daemon is not running or not answering ({exc}).",
-                file=sys.stderr,
-            )
-            return 1
-        finally:
-            client.disconnect()
-
-        print(format_status(
-            active=state.active_profile,
-            detected=state.detected_game or None,
-            desktop=state.desktop_profile,
-            profiles=state.profiles,
-        ))
-        return 0
-
-    return asyncio.run(query())
+    print(format_status(
+        active=state.active_profile,
+        detected=state.detected_game or None,
+        desktop=state.desktop_profile,
+        profiles=state.profiles,
+    ))
+    return 0
 
 
 async def _run_hardware(args: argparse.Namespace) -> None:
