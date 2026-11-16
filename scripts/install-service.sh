@@ -29,8 +29,35 @@ mkdir -p "$UNIT_DIR"
 sed "s|^ExecStart=.*|ExecStart=$PYTHON -m linghub.cli run|" \
     "$REPO_DIR/data/linghub.service" > "$UNIT_PATH"
 
+TRAY_UNIT_PATH="$UNIT_DIR/linghub-tray.service"
+# The tray is optional: it needs a graphical session and a StatusNotifier host,
+# and a headless machine has neither.
+INSTALL_TRAY="${LINGHUB_TRAY:-ask}"
+
+if [ "$INSTALL_TRAY" = "ask" ]; then
+    if [ -t 0 ]; then
+        read -r -p "Install the tray icon service? [y/N] " reply
+        case "$reply" in
+            [yY]*) INSTALL_TRAY=yes ;;
+            *) INSTALL_TRAY=no ;;
+        esac
+    else
+        INSTALL_TRAY=no
+    fi
+fi
+
+if [ "$INSTALL_TRAY" = "yes" ]; then
+    sed "s|^ExecStart=.*|ExecStart=$PYTHON -m linghub.cli tray|" \
+        "$REPO_DIR/data/linghub-tray.service" > "$TRAY_UNIT_PATH"
+fi
+
 systemctl --user daemon-reload
 systemctl --user enable --now linghub.service
+
+if [ "$INSTALL_TRAY" = "yes" ]; then
+    systemctl --user enable --now linghub-tray.service
+    echo "Installed $TRAY_UNIT_PATH"
+fi
 
 echo "Installed $UNIT_PATH"
 echo "Check status with: systemctl --user status linghub.service"
