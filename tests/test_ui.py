@@ -172,6 +172,81 @@ class ProfileListTests(unittest.TestCase):
         )
 
 
+@unittest.skipUnless(_has_cairo(), "needs pycairo and Gtk 4")
+class LedSaveModelTests(unittest.TestCase):
+    """Editing must not write, and a poll must not clobber unsaved edits."""
+
+    def _window(self):
+        from gi.repository import Adw, Gtk
+
+        from linghub.ui.client import DaemonState
+        from linghub.ui.window import MainWindow
+
+        window = MainWindow.__new__(MainWindow)
+        Adw.ApplicationWindow.__init__(window)
+        window._state = DaemonState()
+        window._title = Adw.WindowTitle(title="t")
+        window._status = Gtk.Label()
+        window._profile_list = Gtk.ListBox()
+        window._profile_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        window._profile_rows = {}
+        window._table_rows = {}
+        window._binding_rows = {}
+        window._bindings = {}
+        window._leds = {}
+        window._selected_button = None
+        from linghub.ui.led_panel import LedPanel
+
+        window._led_panel = LedPanel(on_save=lambda *a: None)
+        window._apply_state(DaemonState(
+            active_profile="desktop",
+            profiles=("desktop",),
+            desktop_profile="desktop",
+        ))
+        return window
+
+    def test_editing_does_not_call_the_client(self):
+        calls = []
+
+        class FakeClient:
+            async def set_leds(self, *a):
+                calls.append(a)
+                return True
+
+        window = self._window()
+        window._client = FakeClient()
+        panel = window._led_panel
+        for value in range(100, 121):
+            panel._brightness.set_value(value)
+        self.assertEqual(calls, [], "editing wrote to the daemon")
+
+    def test_a_poll_does_not_discard_unsaved_edits(self):
+        window = self._window()
+        panel = window._led_panel
+        panel.load({0: {"mode": "on", "color": (255, 0, 0),
+                        "brightness": 100, "duration": 0}})
+        panel._brightness.set_value(222)
+        self.assertTrue(panel.dirty)
+
+        # A poll arrives with the old values from disk.
+        window._leds = {0: {"mode": "on", "color": (255, 0, 0),
+                            "brightness": 100, "duration": 0}}
+        window._apply_state(window._state)
+
+        self.assertEqual(panel.brightness, 222, "the poll reverted the edit")
+        self.assertTrue(panel.dirty)
+
+    def test_a_poll_refreshes_a_clean_panel(self):
+        window = self._window()
+        panel = window._led_panel
+        panel.load({0: {"mode": "on", "color": (255, 0, 0),
+                        "brightness": 100, "duration": 0}})
+        window._leds = {0: {"mode": "off", "color": (0, 0, 0),
+                            "brightness": 50, "duration": 0}}
+        window._apply_state(window._state)
+        self.assertEqual(panel.mode, "off")
+
+
 class SignalHandlingTests(unittest.TestCase):
     def setUp(self):
         self.calls = 0

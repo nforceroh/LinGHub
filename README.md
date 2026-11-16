@@ -54,7 +54,10 @@ config and pushes it to the mouse. The daemon recognises its own write and does
 not mistake it for a hand edit.
 
 Below the button table is a lighting panel: colour, effect, brightness and
-speed, applied to the whole profile. The G502 has two LED zones, but they read
+speed, applied to the whole profile. Lighting is edited and then saved rather
+than written as you go, because sliders fire a change per pixel — dragging one
+used to mean a config write and two hardware commits for every step. Nothing
+reaches the mouse until Save; Revert throws away unsaved edits. The G502 has two LED zones, but they read
 as one strip, so the panel drives them together; the daemon writes the same
 values to each. Effects are `off`, `fixed colour`, `cycle` and `breathing`, and
 only the looping ones have a speed.

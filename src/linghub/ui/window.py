@@ -137,7 +137,7 @@ class MainWindow(Adw.ApplicationWindow):
         lighting.set_margin_top(8)
         lighting.set_margin_bottom(12)
         lighting.append(self._section_label("Lighting"))
-        self._led_panel = LedPanel(on_change=self._on_led_changed)
+        self._led_panel = LedPanel(on_save=self._on_led_saved)
         lighting.append(self._led_panel)
 
         lighting_scroller = Gtk.ScrolledWindow()
@@ -245,10 +245,14 @@ class MainWindow(Adw.ApplicationWindow):
         self._rebuild_profiles()
         self._rebuild_bindings()
         if self._led_panel is not None:
-            self._led_panel.load(self._leds)
+            # Never reload the panel over unsaved edits: the poll runs every
+            # two seconds and would silently discard whatever the user is in
+            # the middle of choosing.
+            if not self._led_panel.dirty:
+                self._led_panel.load(self._leds)
 
-    def _on_led_changed(self, mode: str, brightness: int, duration: int, color) -> None:
-        """Send a lighting change to the daemon."""
+    def _on_led_saved(self, mode: str, brightness: int, duration: int, color) -> None:
+        """Persist the panel's staged values when Save is pressed."""
         profile = self._editing_profile()
         if profile is None:
             return
@@ -268,6 +272,10 @@ class MainWindow(Adw.ApplicationWindow):
         if not ok:
             self._status.set_text("The daemon rejected that lighting change.")
             return
+        # Only now do the panel's values become the saved baseline, so a
+        # failed write leaves the edits intact and still worth retrying.
+        if self._led_panel is not None:
+            self._led_panel.mark_saved()
         self._status.set_text(f"Updated the lighting of {profile}.")
 
     async def _refresh_bindings(self) -> None:
