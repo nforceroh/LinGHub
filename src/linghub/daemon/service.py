@@ -173,12 +173,7 @@ class Daemon:
     def _request_set_binding(
         self, profile_name: str, index: int, kind: str, value: object
     ) -> bool:
-        """Change one binding, persist it, and let the next tick push it.
-
-        The config is updated in memory first so the UI sees the change
-        immediately; if saving fails the in-memory change is rolled back, so
-        the running state never disagrees with the file.
-        """
+        """Change one binding, persist it, and let the next tick push it."""
         assert self._state is not None
 
         if kind not in Binding.VALID_TYPES:
@@ -190,20 +185,10 @@ class Daemon:
             logger.warning("SetBinding: %s", exc)
             return False
 
-        previous = self._state.config
-        if not self._state.set_binding(profile_name, index, binding):
-            logger.warning("SetBinding(%r): no such profile", profile_name)
-            return False
-
-        if not self._save_config():
-            self._state.config = previous
-            return False
-
-        logger.info(
-            "binding %d of %r is now %s(%r)", index, profile_name, kind, value
+        return self._apply_and_save(
+            lambda: self._state.set_binding(profile_name, index, binding),
+            f"SetBinding({profile_name!r}, {index}, {kind}, {value!r})",
         )
-        self._wake()
-        return True
 
     def _get_leds(self, profile_name: str) -> dict[int, dict]:
         """A profile's LED zones, keyed by index."""
@@ -215,12 +200,7 @@ class Daemon:
         return {int(entry["index"]): dict(entry) for entry in profile.leds}
 
     def _request_set_leds(self, profile_name: str, settings: dict) -> bool:
-        """Change a profile's lighting, persist it, and let the next tick push it.
-
-        Same rollback rule as a binding change: the in-memory config is only
-        kept if saving succeeds, so the running state never disagrees with the
-        file.
-        """
+        """Change a profile's lighting, persist it, and let the next tick push it."""
         assert self._state is not None
 
         try:
@@ -231,18 +211,10 @@ class Daemon:
             logger.warning("SetLeds: %s", exc)
             return False
 
-        previous = self._state.config
-        if not self._state.set_leds(profile_name, settings):
-            logger.warning("SetLeds(%r): no such profile", profile_name)
-            return False
-
-        if not self._save_config():
-            self._state.config = previous
-            return False
-
-        logger.info("leds of %r are now %r", profile_name, settings)
-        self._wake()
-        return True
+        return self._apply_and_save(
+            lambda: self._state.set_leds(profile_name, settings),
+            f"SetLeds({profile_name!r}, {settings!r})",
+        )
 
     def _get_resolutions(self, profile_name: str) -> tuple:
         """A profile's DPI slots as (dpi, is_default, is_disabled) in order."""
