@@ -16,6 +16,8 @@ from dbus_fast.aio import MessageBus
 from .. import config as config_module
 from ..discovery.detector import detect
 from ..discovery.gamemode import GameModeClient
+from dbus_fast import DBusError as DBusFastError
+
 from ..hardware.ratbag import DeviceNotFound, RatbagClient
 from ..hardware.writer import ProfileWriter, WriteError
 from ..domain.profile import Binding
@@ -273,9 +275,36 @@ class Daemon:
         self._state.config = config
         logger.info("reloaded config: %d profile(s)", len(config.profiles))
 
+    async def _reconnect(self, attempts: int = 3, delay: float = 1.0) -> None:
+        """Try to reconnect to the device after it disappeared.
+
+        Bounded rather than looping until the device returns: blocking here
+        would stop the tick loop, so games would stop being detected while the
+        mouse is unplugged. A few quick attempts handle a KVM flick; a longer
+        absence is picked up by the next tick.
+        """
+        self._writer = None
+        for attempt in range(attempts):
+            try:
+                await self._connect()
+                if attempt:
+                    logger.info("device is back")
+                return
+            except DeviceNotFound as exc:
+                if attempt == 0:
+                    logger.warning("%s; will retry", exc)
+                await asyncio.sleep(delay * (attempt + 1))
+        logger.warning("device still absent; detection continues without it")
+
     async def _apply_target(self) -> None:
         """Load the target profile if it differs from what is loaded."""
-        assert self._state is not None and self._writer is not None
+        assert self._state is not None
+        if self._writer is None:
+            await self._reconnect()
+        if self._writer is None:
+            # Still absent: nothing to write to. Detection keeps running and
+            # the next tick tries again.
+            return
 
         if not self._state.needs_write:
             return
@@ -286,7 +315,17 @@ class Daemon:
         try:
             result = await self._writer.apply(target, slot)
         except WriteError as exc:
+            # A refused write is not a missing device: keep the writer and
+            # retry on the next tick.
             logger.error("failed to load profile %r: %s", target.name, exc)
+            self._pending = target.name
+            return
+        except (RuntimeError, OSError, DBusFastError) as exc:
+            # The device object is gone: a KVM switch, an unplugged cable, a
+            # flat battery. The writer is stale, so drop it and reconnect
+            # rather than letting this escape and killing the daemon.
+            logger.warning("lost the device while writing: %s", exc)
+            self._writer = None
             self._pending = target.name
             return
 
@@ -298,6 +337,15 @@ class Daemon:
             self._interface.ProfileChanged(target.name)
 
     async def _tick(self) -> None:
+        assert self._state is not None
+        try:
+            await self._tick_once()
+        except (RuntimeError, OSError, DBusFastError) as exc:
+            # One bad tick must not take the daemon down: systemd would restart
+            # it, losing state and the manual override.
+            logger.error("tick failed: %s", exc)
+
+    async def _tick_once(self) -> None:
         assert self._state is not None
         self._reload_if_changed()
         detection = detect(self._state.config.profiles)

@@ -212,6 +212,106 @@ class BindingPersistenceTests(unittest.TestCase):
         self.assertTrue(state.needs_write)
 
 
+class DeviceLossTests(unittest.TestCase):
+    """A mouse can vanish at any time.
+
+    A KVM switch, a cable, or a flat battery all remove the hidraw node. The
+    daemon must survive that, drop its stale writer, and reconnect when the
+    device returns - not exit and rely on systemd to restart it.
+    """
+
+    def _daemon(self):
+        from linghub.daemon.service import Daemon
+
+        daemon = Daemon()
+        daemon._state = DaemonState(config=make_config(DESKTOP, WOT))
+        daemon._state.mark_loaded("stale")
+        return daemon
+
+    def test_a_vanished_device_does_not_escape_the_tick(self):
+        import asyncio
+
+        from linghub.hardware.writer import WriteError
+
+        daemon = self._daemon()
+
+        class Vanished:
+            async def apply(self, profile, slot):
+                raise RuntimeError("D-Bus call Get failed: Unknown object")
+
+        daemon._writer = Vanished()
+        # Must return, not raise.
+        asyncio.run(daemon._tick())
+        self.assertIsNone(daemon._writer, "the stale writer was kept")
+
+    def test_a_write_error_keeps_the_writer(self):
+        """A refused write is not the same as a missing device."""
+        import asyncio
+
+        from linghub.hardware.writer import WriteError
+
+        daemon = self._daemon()
+        writer = type("W", (), {"apply": staticmethod(lambda p, s: None)})()
+        daemon._writer = writer
+
+        async def apply(profile, slot):
+            raise WriteError("commit did not complete within the timeout")
+
+        daemon._writer = type("W", (), {"apply": staticmethod(apply)})()
+        asyncio.run(daemon._tick())
+        self.assertIsNotNone(daemon._writer)
+
+    def test_the_daemon_reconnects_after_device_loss(self):
+        import asyncio
+
+        from linghub.hardware.ratbag import DeviceNotFound
+
+        daemon = self._daemon()
+        attempts = {"n": 0}
+
+        async def connect():
+            attempts["n"] += 1
+            if attempts["n"] < 3:
+                raise DeviceNotFound("no G502 found")
+            daemon._writer = object()
+
+        daemon._connect = connect
+        asyncio.run(daemon._reconnect(delay=0))
+        self.assertEqual(attempts["n"], 3)
+        self.assertIsNotNone(daemon._writer)
+
+    def test_a_tick_with_no_device_does_not_raise(self):
+        """After a failed reconnect there is nothing to write to; skip, don't crash."""
+        import asyncio
+
+        from linghub.hardware.ratbag import DeviceNotFound
+
+        daemon = self._daemon()
+
+        async def never():
+            raise DeviceNotFound("still gone")
+
+        daemon._connect = never
+        daemon._writer = None
+        asyncio.run(daemon._tick())
+        self.assertIsNone(daemon._writer)
+
+    def test_reconnect_gives_up_so_detection_continues(self):
+        """Blocking until the device returns would stop detecting games."""
+        import asyncio
+
+        from linghub.hardware.ratbag import DeviceNotFound
+
+        daemon = self._daemon()
+
+        async def never():
+            raise DeviceNotFound("still gone")
+
+        daemon._connect = never
+        asyncio.run(daemon._reconnect(attempts=2, delay=0))
+        self.assertIsNone(daemon._writer)
+
+
 class FingerprintTests(unittest.TestCase):
     """Editing a profile's contents must trigger a rewrite, not just a rename."""
 

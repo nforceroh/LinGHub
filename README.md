@@ -66,6 +66,11 @@ The dialog only offers bindings the hardware can actually encode. `second-mode`
 is deliberately absent because libratbag rejects it on the G502 (issue #1798); if
 a config already contains it, the table shows the raw name so it can be replaced.
 
+The daemon survives the mouse disappearing: a KVM switch, an unplugged cable or
+a flat battery all remove the device node. It keeps detecting games, drops its
+stale handle, and reconnects when the device returns. Note the hidraw node
+number changes on reconnect, so nothing caches the device path.
+
 The UI talks to the daemon over D-Bus, so the daemon must be running. It needs
 PyGObject, which on Fedora is the `python3-gobject` package:
 
