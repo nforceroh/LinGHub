@@ -142,7 +142,13 @@ class Tray:
             item.connect("activate", lambda _w, n=name: self._load(n))
             self._profiles_menu.append(item)
             self._profile_items.append(item)
-        self._profiles_menu.show_all()
+        # A submenu attached to a MenuItem does not inherit show_all(), so it
+        # stays hidden and the parent renders as an empty arrow. Each level has
+        # to be shown explicitly.
+        for item in self._profile_items:
+            item.show()
+        self._profiles_menu.show()
+        self._profiles_box.show()
         self._profiles_box.set_sensitive(bool(names))
 
     # --- actions ---------------------------------------------------------
