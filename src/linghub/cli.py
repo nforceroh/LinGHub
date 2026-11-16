@@ -76,6 +76,23 @@ def _detect_watch(args: argparse.Namespace) -> int:
         return 0
 
 
+def _run_daemon(args: argparse.Namespace) -> int:
+    import logging
+
+    from .daemon.service import Daemon
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    daemon = Daemon(config_path=args.config, poll_interval=args.interval)
+    try:
+        asyncio.run(daemon.run())
+    except KeyboardInterrupt:
+        return 0
+    except (RuntimeError, OSError, DBusFastError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 async def _run_hardware(args: argparse.Namespace) -> None:
     bus = await asyncio.wait_for(MessageBus(bus_type=BusType.SYSTEM).connect(), timeout=5)
     try:
@@ -109,10 +126,17 @@ def main() -> int:
     detect_cmd.add_argument("--watch", action="store_true", help="poll and report changes")
     detect_cmd.add_argument("--explain", action="store_true", help="show why each process did or did not match")
 
+    run_cmd = commands.add_parser("run", help="run the daemon: watch for games and load profiles")
+    run_cmd.add_argument("--config", default=config_module.DEFAULT_CONFIG_PATH, help="config file path")
+    run_cmd.add_argument("--interval", type=float, default=None, help="override the poll interval")
+
     args = parser.parse_args()
 
     if args.command == "detect":
         return _detect_watch(args) if args.watch else _detect_once(args)
+
+    if args.command == "run":
+        return _run_daemon(args)
 
     try:
         asyncio.run(_run_hardware(args))
