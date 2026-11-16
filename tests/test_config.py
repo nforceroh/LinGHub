@@ -95,8 +95,38 @@ class LoadTests(unittest.TestCase):
             "profiles": {"desktop": {"games": [], "bindings": {"0": {"type": "nonsense"}}}},
         }
         with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaises(ValueError):
+            # ConfigError, not a bare ValueError: the daemon catches ConfigError
+            # when it reloads, so anything else would escape and kill it.
+            with self.assertRaisesRegex(ConfigError, "unknown binding type"):
                 load(write_config(Path(tmp), body))
+
+    def test_a_non_numeric_button_value_raises(self):
+        body = {
+            "version": 1,
+            "settings": {"desktop_profile": "desktop"},
+            "profiles": {"desktop": {"games": [], "bindings": {"0": {"type": "button",
+                                                                   "value": "left"}}}},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ConfigError, "must be a number"):
+                load(write_config(Path(tmp), body))
+
+    def test_a_button_value_written_as_text_is_normalised(self):
+        """Older configs hold "9" where a hand-written file holds 9.
+
+        Both encode to the same hardware action, so nothing ever failed - but
+        the two files disagreed, and the next save is what heals it.
+        """
+        body = {
+            "version": 1,
+            "settings": {"desktop_profile": "desktop"},
+            "profiles": {"desktop": {"games": [], "bindings": {"0": {"type": "button",
+                                                                   "value": "9"}}}},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            loaded = load(write_config(Path(tmp), body))
+            self.assertEqual(loaded.desktop.bindings[0].value, 9)
+            self.assertIsInstance(loaded.desktop.bindings[0].value, int)
 
     def test_example_config_is_valid(self):
         example = Path(__file__).resolve().parent.parent / "config.example.json"

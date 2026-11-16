@@ -43,6 +43,28 @@ class Binding:
             raise ValueError(
                 f"unknown binding type {self.type!r}; expected one of {self.VALID_TYPES}"
             )
+        if self.type == "button":
+            object.__setattr__(self, "value", self._button_number(self.value))
+
+    @staticmethod
+    def _button_number(value: object) -> int:
+        """A button binding's value is a number, however it arrived.
+
+        The D-Bus interface carries every binding value as a string, so a
+        write from the UI delivers `"9"`. Left alone, that reaches the config
+        file and a button binding there reads `"9"` while a hand-written one
+        reads `9`. Both encode to the same hardware action, so the difference
+        was invisible until you compared the files — which is exactly the kind
+        of drift worth removing rather than tolerating.
+        """
+        if isinstance(value, bool):
+            raise ValueError(f"button binding value must be a number, got {value!r}")
+        try:
+            return int(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"button binding value must be a number, got {value!r}"
+            ) from exc
 
 
 @dataclass(frozen=True)

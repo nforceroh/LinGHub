@@ -44,7 +44,10 @@ def _parse_bindings(raw: dict) -> dict[int, Binding]:
             raise ConfigError(f"binding key {key!r} is not a button index") from exc
         if not isinstance(value, dict) or "type" not in value:
             raise ConfigError(f"binding {key!r} must be an object with a 'type'")
-        bindings[index] = Binding(type=value["type"], value=value.get("value"))
+        try:
+            bindings[index] = Binding(type=value["type"], value=value.get("value"))
+        except ValueError as exc:
+            raise ConfigError(f"binding {key!r} is invalid: {exc}") from exc
     return bindings
 
 

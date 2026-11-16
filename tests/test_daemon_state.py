@@ -353,6 +353,60 @@ class DeviceLossTests(unittest.TestCase):
         self.assertIsNone(daemon._writer)
 
 
+class ReloadTests(unittest.TestCase):
+    """A broken config edit must never take the daemon down.
+
+    The daemon already kept the previous config when a reload failed, but it
+    only caught `ConfigError`. A malformed binding raised a bare `ValueError`
+    from the domain model, which escaped, so a single typo in a hand-edited
+    binding was enough to kill the service mid-session.
+    """
+
+    def _daemon(self, body: dict):
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from linghub.daemon.service import Daemon
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "config.json"
+        path.write_text(json.dumps(body), encoding="utf-8")
+        daemon = Daemon(config_path=path)
+        return daemon, path
+
+    def _body(self, bindings: dict) -> dict:
+        return {
+            "version": 1,
+            "settings": {"desktop_profile": "desktop"},
+            "profiles": {"desktop": {"games": [], "bindings": bindings}},
+        }
+
+    def test_an_unknown_binding_type_does_not_raise(self):
+        daemon, _ = self._daemon(self._body({"0": {"type": "nonsense"}}))
+        self.assertFalse(daemon._reload_config())
+
+    def test_a_non_numeric_button_does_not_raise(self):
+        daemon, _ = self._daemon(self._body({"0": {"type": "button", "value": "left"}}))
+        self.assertFalse(daemon._reload_config())
+
+    def test_a_broken_edit_keeps_the_previous_config(self):
+        daemon, path = self._daemon(self._body({"0": {"type": "key", "value": "KEY_A"}}))
+        self.assertTrue(daemon._reload_config())
+        before = daemon._state.config
+
+        path.write_text(
+            '{"version": 1, "settings": {"desktop_profile": "desktop"},'
+            ' "profiles": {"desktop": {"games": [],'
+            ' "bindings": {"0": {"type": "nonsense"}}}}}',
+            encoding="utf-8",
+        )
+        daemon._watcher.reset()
+        daemon._reload_if_changed()
+        self.assertIs(daemon._state.config, before)
+
+
 class ApplyTargetSlotTests(unittest.TestCase):
     """ADR-0001, at the point where it actually reaches the hardware.
 
