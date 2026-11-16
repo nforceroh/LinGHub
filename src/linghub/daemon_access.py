@@ -39,9 +39,10 @@ async def run_with_client(action: Callable[[Any], Any]) -> Any:
         raise DaemonUnavailable("cannot reach the session bus")
     try:
         return await action(client)
-    except (RuntimeError, OSError) as exc:
-        raise DaemonUnavailable(str(exc)) from exc
     finally:
+        # Whatever the action does, the connection is not left open. Errors
+        # from the action propagate unchanged: a bug inside it is not a
+        # missing daemon, and reporting it as one hides the bug.
         client.disconnect()
 
 

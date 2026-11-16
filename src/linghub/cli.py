@@ -109,6 +109,10 @@ def _run_status() -> int:
             file=sys.stderr,
         )
         return 1
+    except (RuntimeError, OSError) as exc:
+        # A failure inside the call is not a missing daemon, so say so.
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
     print(format_status(
         active=state.active_profile,

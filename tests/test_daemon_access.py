@@ -57,14 +57,6 @@ class RunWithClientTests(unittest.IsolatedAsyncioTestCase):
         await daemon_access.run_with_client(action)
         self.assertTrue(FakeClient.instances[-1].disconnected)
 
-    async def test_disconnects_after_a_failure(self):
-        async def action(client):
-            raise RuntimeError("boom")
-
-        with self.assertRaises(daemon_access.DaemonUnavailable):
-            await daemon_access.run_with_client(action)
-        self.assertTrue(FakeClient.instances[-1].disconnected)
-
     async def test_a_missing_daemon_raises_daemon_unavailable(self):
         async def make_failing():
             return None
@@ -83,13 +75,33 @@ class RunWithClientTests(unittest.IsolatedAsyncioTestCase):
         finally:
             FakeClient.__init__ = original_init
 
-    async def test_a_runtime_error_becomes_daemon_unavailable(self):
-        """Callers should not have to know about D-Bus exception types."""
-        async def action(client):
-            raise OSError("no bus")
+    async def test_an_action_error_propagates_unchanged(self):
+        """A bug inside the action is not a missing daemon.
 
-        with self.assertRaises(daemon_access.DaemonUnavailable):
+        The module exists to tell those two apart, so collapsing them defeats
+        its purpose: a real bug would be reported as "no daemon".
+        """
+        async def action(client):
+            raise RuntimeError("boom")
+
+        with self.assertRaises(RuntimeError) as caught:
             await daemon_access.run_with_client(action)
+        self.assertNotIsInstance(caught.exception, daemon_access.DaemonUnavailable)
+
+    async def test_an_os_error_from_the_action_propagates(self):
+        async def action(client):
+            raise OSError("disk on fire")
+
+        with self.assertRaises(OSError):
+            await daemon_access.run_with_client(action)
+
+    async def test_the_client_is_still_disconnected_when_the_action_raises(self):
+        async def action(client):
+            raise RuntimeError("boom")
+
+        with self.assertRaises(RuntimeError):
+            await daemon_access.run_with_client(action)
+        self.assertTrue(FakeClient.instances[-1].disconnected)
 
 
 class CallTests(unittest.TestCase):

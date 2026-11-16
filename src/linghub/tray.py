@@ -91,6 +91,9 @@ class Tray:
         except daemon_access.DaemonUnavailable as exc:
             logger.debug("daemon unavailable: %s", exc)
             state = None
+        except Exception:  # noqa: BLE001 - a tray must not die on a bad poll
+            logger.exception("unexpected failure reading daemon state")
+            state = None
         finally:
             self._busy = False
         if state is not None:
@@ -173,6 +176,8 @@ class Tray:
             daemon_access.call(load)
         except daemon_access.DaemonUnavailable as exc:
             logger.warning("could not load %r: %s", name, exc)
+        except Exception:  # noqa: BLE001 - report, do not kill the tray
+            logger.exception("unexpected failure loading %r", name)
         GLib.idle_add(self._refresh)
 
     def _open_ui(self) -> None:
