@@ -99,6 +99,7 @@ class ProfileListTests(unittest.TestCase):
         Adw.ApplicationWindow.__init__(window)
         window._state = DaemonState()
         window._selected_button = None
+        window._editing = None
         window._bindings = {}
         window._table_rows = {}
         window._binding_rows = {}
@@ -163,16 +164,18 @@ class ProfileListTests(unittest.TestCase):
         from linghub.ui.client import DaemonState
 
         window = self._window(active="desktop")
-        self.assertEqual(
-            window._profile_list.get_row_at_index(0).get_subtitle(), "active"
+        self.assertIn(
+            "on the mouse",
+            window._profile_list.get_row_at_index(0).get_subtitle(),
         )
         window._apply_state(DaemonState(
             active_profile="world-of-tanks",
             profiles=("desktop", "world-of-tanks", "star-citizen"),
             desktop_profile="desktop",
         ))
-        self.assertEqual(
-            window._profile_list.get_row_at_index(1).get_subtitle(), "active"
+        self.assertIn(
+            "on the mouse",
+            window._profile_list.get_row_at_index(1).get_subtitle(),
         )
 
 
@@ -199,6 +202,7 @@ class LedSaveModelTests(unittest.TestCase):
         window._bindings = {}
         window._leds = {}
         window._selected_button = None
+        window._editing = None
         from linghub.ui.led_panel import LedPanel
 
         window._led_panel = LedPanel(on_save=lambda *a: None)
@@ -285,6 +289,7 @@ class ProfileManagementUiTests(unittest.TestCase):
         window._led_panel = None
         window._dpi_panel = None
         window._selected_button = None
+        window._editing = None
         window._apply_state(DaemonState(
             active_profile="desktop",
             profiles=("desktop", "wot"),
@@ -319,6 +324,121 @@ class ProfileManagementUiTests(unittest.TestCase):
         window = self._window()
         window._prompt_delete_profile()
         self.assertIn("select a profile", window._status.get_text().lower())
+
+
+@unittest.skipUnless(_has_cairo(), "needs pycairo and Gtk 4")
+class SelectionVersusLoadingTests(unittest.TestCase):
+    """Selecting a profile edits it; it must not load it onto the mouse.
+
+    These were the same gesture, so editing a gaming profile meant writing it
+    to the mouse and making the mouse use it - and with no game running the
+    daemon then reverted it two seconds later.
+    """
+
+    def _window(self):
+        from gi.repository import Adw, Gtk
+
+        from linghub.ui.client import DaemonState
+        from linghub.ui.window import MainWindow
+
+        window = MainWindow.__new__(MainWindow)
+        Adw.ApplicationWindow.__init__(window)
+        window._state = DaemonState()
+        window._title = Adw.WindowTitle(title="t")
+        window._status = Gtk.Label()
+        window._profile_list = Gtk.ListBox()
+        window._profile_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        window._profile_rows = {}
+        window._table_rows = {}
+        window._binding_rows = {}
+        window._bindings = {}
+        window._leds = {}
+        window._resolutions = []
+        window._report_rates = ()
+        window._report_rate = 0
+        window._led_panel = None
+        window._dpi_panel = None
+        window._selected_button = None
+        window._editing = None
+        window._editing = None
+        window._apply_state(DaemonState(
+            active_profile="desktop",
+            profiles=("desktop", "world-of-tanks"),
+            desktop_profile="desktop",
+        ))
+        return window
+
+    def test_selecting_a_profile_does_not_load_it(self):
+        calls = []
+
+        class FakeClient:
+            async def load_profile(self, name):
+                calls.append(name)
+                return True
+
+        window = self._window()
+        window._client = FakeClient()
+        window._select_profile("world-of-tanks")
+        self.assertEqual(calls, [], "selecting a profile loaded it onto the mouse")
+
+    def test_selecting_a_gaming_profile_makes_it_the_edit_target(self):
+        window = self._window()
+        window._select_profile("world-of-tanks")
+        self.assertEqual(window._editing_profile(), "world-of-tanks")
+
+    def test_a_gaming_profile_is_editable_with_no_game_running(self):
+        """The whole point: editing must not require loading."""
+        window = self._window()
+        window._select_profile("world-of-tanks")
+        self.assertEqual(window._editing_profile(), "world-of-tanks")
+        self.assertEqual(window._state.active_profile, "desktop")
+
+    def test_the_edit_target_defaults_to_the_active_profile(self):
+        window = self._window()
+        self.assertEqual(window._editing_profile(), "desktop")
+
+    def test_loading_is_a_separate_action(self):
+        """Loading is its own gesture, driven by the selection."""
+        import asyncio
+
+        calls = []
+
+        from linghub.ui.client import DaemonState
+
+        class FakeClient:
+            async def load_profile(self, name):
+                calls.append(name)
+                return True
+
+            async def state(self):
+                return DaemonState(
+                    active_profile="desktop",
+                    profiles=("desktop", "world-of-tanks"),
+                    desktop_profile="desktop",
+                )
+
+            async def get_bindings(self, _profile):
+                return {}
+
+            async def get_leds(self, _profile):
+                return {}
+
+            async def get_resolutions(self, _profile):
+                return []
+
+            async def get_report_rates(self, _profile):
+                return ()
+
+            async def get_report_rate(self, _profile):
+                return 0
+
+        window = self._window()
+        window._client = FakeClient()
+        window._select_profile("world-of-tanks")
+        # _load_selected goes through the GLib bridge, which needs a main loop;
+        # drive the coroutine it would run instead.
+        asyncio.run(window._load_profile(window._editing_profile()))
+        self.assertEqual(calls, ["world-of-tanks"])
 
 
 class SignalHandlingTests(unittest.TestCase):

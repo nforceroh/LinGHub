@@ -40,6 +40,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._client = client
         self._state = DaemonState()
         self._selected_button: int | None = None
+        # Which profile the panels show. Deliberately separate from which
+        # profile is loaded on the mouse: editing must not reconfigure it.
+        self._editing: str | None = None
         self._bindings: dict[int, tuple[str, str]] = {}
         self._profile_rows: dict[str, Adw.ActionRow] = {}
         self._led_panel: LedPanel | None = None
@@ -140,11 +143,19 @@ class MainWindow(Adw.ApplicationWindow):
         self._delete_profile_button.connect("clicked", lambda _b: self._prompt_delete_profile())
         profile_header.append(self._delete_profile_button)
 
+        # Loading is its own action: selecting a profile only chooses what to
+        # edit, so this is how you put one on the mouse.
+        self._load_profile_button = Gtk.Button(label="Load")
+        self._load_profile_button.set_tooltip_text("Load the selected profile onto the mouse")
+        self._load_profile_button.add_css_class("flat")
+        self._load_profile_button.connect("clicked", lambda _b: self._load_selected())
+        profile_header.append(self._load_profile_button)
+
         top.append(profile_header)
 
         self._profile_list = Gtk.ListBox()
         self._profile_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        self._profile_list.connect("row-activated", self._on_profile_activated)
+        self._profile_list.connect("row-selected", self._on_profile_row_selected)
         profile_scroller = Gtk.ScrolledWindow()
         profile_scroller.set_child(self._profile_list)
         profile_scroller.set_min_content_height(120)
@@ -396,9 +407,16 @@ class MainWindow(Adw.ApplicationWindow):
                 existing[name] = row
                 self._profile_list.insert(row, position)
 
+            # Two different facts, so two different markers: the tick means
+            # "on the mouse", the subtitle means "shown in the panels".
             is_active = name == self._state.active_profile
             row._check.set_visible(is_active)
-            row.set_subtitle("active" if is_active else "")
+            parts = []
+            if is_active:
+                parts.append("on the mouse")
+            if name == self._editing_profile():
+                parts.append("editing")
+            row.set_subtitle(" · ".join(parts))
             row._desktop.set_visible(name == self._state.desktop_profile)
 
     def _rebuild_bindings(self) -> None:
@@ -588,7 +606,13 @@ class MainWindow(Adw.ApplicationWindow):
         ).present()
 
     def _editing_profile(self) -> str | None:
-        """The profile edits apply to: the active one, else the desktop one."""
+        """The profile the panels show and edit.
+
+        The selection wins, so a gaming profile can be edited without being
+        loaded. Falls back to what is loaded, then the desktop profile.
+        """
+        if self._editing and self._editing in self._state.profiles:
+            return self._editing
         return (
             self._state.active_profile
             or self._state.desktop_profile
@@ -632,8 +656,26 @@ class MainWindow(Adw.ApplicationWindow):
         self._button_detail.set_text(f"Selected: {describe(index)}")
         self._rebuild_bindings()
 
-    def _on_profile_activated(self, _list, row) -> None:
-        name = row.get_title()
+    def _on_profile_row_selected(self, _list, row) -> None:
+        """Selecting a row chooses what to edit. It does not load anything."""
+        if row is None:
+            return
+        self._select_profile(row.get_title())
+
+    def _select_profile(self, name: str) -> None:
+        """Make `name` the profile the panels show and edit."""
+        if name == self._editing:
+            return
+        self._editing = name
+        self._status.set_text(f"Editing {name}.")
+        run_and_report(self._refresh(), self._on_async_error)
+
+    def _load_selected(self) -> None:
+        """Load the selected profile onto the mouse. A deliberate action."""
+        name = self._editing_profile()
+        if name is None:
+            self._status.set_text("Select a profile to load.")
+            return
         run_and_report(self._load_profile(name), self._on_async_error)
 
     async def _load_profile(self, name: str) -> None:
