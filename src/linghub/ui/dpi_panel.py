@@ -14,6 +14,8 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gtk
 
+from . import panel_rules
+
 
 # The range ratbagd accepts for a G502; read from the device where possible.
 MIN_DPI = 100
@@ -104,14 +106,16 @@ class DpiPanel(Gtk.Box):
         """Only one slot may be the default, so ticking one clears the rest."""
         if self._loading:
             return
-        if self._rows[index]["default"].get_active():
-            self._loading = True
-            try:
-                for position, row in enumerate(self._rows):
-                    if position != index:
-                        row["default"].set_active(False)
-            finally:
-                self._loading = False
+        current = [row["default"].get_active() for row in self._rows]
+        wanted = panel_rules.default_mask(
+            current, index, on=self._rows[index]["default"].get_active()
+        )
+        self._loading = True
+        try:
+            for row, active in zip(self._rows, wanted):
+                row["default"].set_active(active)
+        finally:
+            self._loading = False
         self._on_edited()
 
     # --- state -----------------------------------------------------------

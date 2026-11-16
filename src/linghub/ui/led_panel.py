@@ -18,17 +18,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gtk
 
-
-# The four modes every supported G502 reports, in libratbag's order.
-MODES: tuple[tuple[str, str], ...] = (
-    ("off", "Off"),
-    ("on", "Fixed colour"),
-    ("cycle", "Cycle colours"),
-    ("breathing", "Breathing"),
-)
-
-# Effects that loop have a speed; a fixed colour does not.
-ANIMATED_MODES = ("cycle", "breathing")
+from .panel_rules import MODES, controls_for, duration_to_speed, speed_to_duration
 
 DEFAULT_COLOR = (255, 59, 16)
 DEFAULT_BRIGHTNESS = 255
@@ -111,16 +101,10 @@ class LedPanel(Gtk.Box):
 
         return Gdk.RGBA(*(c / 255 for c in color), 1.0)
 
-    @staticmethod
-    def _duration_to_speed(duration: int) -> float:
-        """Map a duration in ms onto the 1-20 speed slider (lower is faster)."""
-        if duration <= 0:
-            return 10
-        return max(1, min(20, 20000 / duration))
-
-    @staticmethod
-    def _speed_to_duration(speed: float) -> int:
-        return int(20000 / max(1, speed))
+    # The conversions are kept here as names so existing callers and tests do
+    # not have to change; the arithmetic itself lives in panel_rules.
+    _duration_to_speed = staticmethod(duration_to_speed)
+    _speed_to_duration = staticmethod(speed_to_duration)
 
     # --- state -----------------------------------------------------------
 
@@ -179,10 +163,10 @@ class LedPanel(Gtk.Box):
 
     def _sync_sensitivity(self) -> None:
         """Only the looping effects have a speed, and colour is moot when off."""
-        animated = self.mode in ANIMATED_MODES
-        self._speed_row.set_sensitive(animated)
-        self._color_button.set_sensitive(self.mode != "off")
-        self._brightness.set_sensitive(self.mode != "off")
+        controls = controls_for(self.mode)
+        self._speed_row.set_sensitive(controls.speed)
+        self._color_button.set_sensitive(controls.color)
+        self._brightness.set_sensitive(controls.brightness)
 
     def _values(self) -> tuple:
         """Everything the panel edits, as one comparable tuple."""
