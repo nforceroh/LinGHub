@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Architecture review for LinGHub — fourth pass</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 4 4; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+
+      <header class="border-b border-slate-300 pb-6">
+        <h1 class="font-serif text-4xl tracking-tight">Architecture review for LinGHub</h1>
+        <p class="text-sm text-slate-500 mt-2">16 November 2026 · fourth pass · 4 candidates</p>
+        <div class="flex flex-wrap gap-5 mt-5 text-xs uppercase tracking-wider text-slate-600">
+          <span class="flex items-center gap-2"><span class="inline-block w-5 h-3 border border-slate-400 bg-white"></span> module</span>
+          <span class="flex items-center gap-2"><svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" stroke="#64748b" stroke-width="2" class="seam"/></svg> seam</span>
+          <span class="flex items-center gap-2"><svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" stroke="#dc2626" stroke-width="2"/></svg> leakage</span>
+          <span class="flex items-center gap-2"><span class="inline-block w-5 h-3 deep"></span> deep module</span>
+        </div>
+      </header>
+
+      <section class="rounded-lg border border-slate-200 bg-white p-5">
+        <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">The seam audit</p>
+        <p class="text-sm text-slate-700 mb-4">
+          Every seam added by the last three reviews, with how many modules call it.
+          One caller does not mean the seam is wrong &mdash; it means the seam is
+          <em>hypothetical</em> until a second appears, and the module has to earn its keep through testability instead.
+        </p>
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-xs uppercase tracking-wider text-slate-500 border-b border-slate-200">
+              <th class="text-left py-2">Module</th><th class="text-left py-2">Callers</th><th class="text-left py-2">Verdict</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            <tr><td class="py-2 font-mono text-xs">daemon_access.py</td><td class="py-2">2 &mdash; cli, tray</td><td class="py-2 text-emerald-700">Real seam</td></tr>
+            <tr><td class="py-2 font-mono text-xs">dbus_contract.py</td><td class="py-2">2 &mdash; client, interface</td><td class="py-2 text-emerald-700">Real seam</td></tr>
+            <tr><td class="py-2 font-mono text-xs">presentation.py</td><td class="py-2">1 &mdash; window</td><td class="py-2 text-amber-700">One caller, earns it through tests</td></tr>
+            <tr><td class="py-2 font-mono text-xs">binding_modes.py</td><td class="py-2">1 &mdash; editor</td><td class="py-2 text-amber-700">One caller, earns it through tests</td></tr>
+            <tr><td class="py-2 font-mono text-xs">collaborators.py</td><td class="py-2"><span class="text-red-700 font-semibold">0</span></td><td class="py-2 text-red-700">Nothing imports it</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="candidates" class="space-y-14">
+
+        <!-- ============ 1 ============ -->
+        <article id="c1" class="space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h2 class="font-serif text-2xl">1. Split the daemon's write surface out</h2>
+            <div class="flex gap-2">
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-emerald-100 text-emerald-800 font-semibold">Strong</span>
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-slate-100 text-slate-600">in-process</span>
+            </div>
+          </div>
+
+          <p class="font-mono text-sm text-slate-600">src/linghub/daemon/service.py:202–343 · 49 methods on one class</p>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Before — 49 methods, one class</p>
+              <div class="space-y-1 text-[10px]">
+                <div class="bg-red-50 border-l-4 border-red-400 px-2 py-1">D-Bus handlers <span class="text-slate-500">14 methods</span></div>
+                <div class="bg-red-50 border-l-4 border-red-400 px-2 py-1">write persistence <span class="text-slate-500">_apply_and_save etc</span></div>
+                <div class="bg-slate-100 border-l-4 border-slate-400 px-2 py-1">device connect + apply <span class="text-slate-500">5 methods</span></div>
+                <div class="bg-slate-100 border-l-4 border-slate-400 px-2 py-1">tick + detection <span class="text-slate-500">2 methods</span></div>
+                <div class="bg-slate-100 border-l-4 border-slate-400 px-2 py-1">run loop + startup <span class="text-slate-500">2 methods</span></div>
+              </div>
+              <p class="text-[10px] text-red-700 mt-2">The three adapter classes forward into this same class.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">After — writes behind a seam</p>
+              <div class="space-y-1.5">
+                <div class="deep px-2 py-2 text-[10px] text-slate-200">Daemon <span class="text-slate-500">— run loop, device, tick</span></div>
+                <div class="border border-emerald-400 bg-emerald-50 px-2 py-1.5 text-[10px]">ProfileWrites <span class="text-slate-500">— validate, apply, save, roll back</span></div>
+                <div class="border border-emerald-400 bg-emerald-50 px-2 py-1.5 text-[10px]">the 3 collaborators <span class="text-slate-500">— real, not forwarders</span></div>
+              </div>
+              <p class="text-[10px] text-emerald-700 mt-2">The adapters become the implementation, not a shell around it.</p>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Problem</p>
+              <p>Last review's grouping added three adapter classes that forward into the same 49-method class. The grouping is cosmetic: the complexity did not move, it got a second name. The collaborators have no behaviour of their own.</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Solution</p>
+              <p>Move the request handlers and the write rule into a module that the adapters actually are, leaving <span class="font-mono text-xs">Daemon</span> with the run loop, device connection and tick.</p>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Wins</p>
+            <ul class="grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm list-disc list-inside text-slate-700">
+              <li>locality: the write rule has a home</li>
+              <li>the adapters stop being ceremony</li>
+              <li>Daemon shrinks toward the run loop</li>
+              <li>49 methods becomes two digests</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ============ 2 ============ -->
+        <article id="c2" class="space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h2 class="font-serif text-2xl">2. Make the collaborators load-bearing</h2>
+            <div class="flex gap-2">
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-emerald-100 text-emerald-800 font-semibold">Strong</span>
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-slate-100 text-slate-600">in-process</span>
+            </div>
+          </div>
+
+          <p class="font-mono text-sm text-slate-600">src/linghub/daemon/collaborators.py · imported by nothing</p>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-4">
+            <pre class="mermaid">
+flowchart LR
+  P["collaborators.py<br/>3 Protocols"] -.not imported.-> D["dbus_service.py"]
+  D -->|takes| A["_ProfileLifecycle<br/>_Bindings<br/>_DeviceSettings"]
+  A -->|forwards to| S["Daemon<br/>49 methods"]
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class P leak
+            </pre>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Problem</p>
+              <p>The Protocols were written to describe the three collaborators, and nothing imports them. The adapters do not declare that they satisfy them, so a drifted signature would not be caught.</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Solution</p>
+              <p>Either the adapters declare conformance so a mismatch fails at import, or the file goes. A Protocol nobody reads is a comment with a syntax cost.</p>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Wins</p>
+            <ul class="grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm list-disc list-inside text-slate-700">
+              <li>the interface is checked, not described</li>
+              <li>or: delete 68 lines of unread code</li>
+              <li>locality: one place states the contract</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ============ 3 ============ -->
+        <article id="c3" class="space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h2 class="font-serif text-2xl">3. Separate slot reasoning from config mutation</h2>
+            <div class="flex gap-2">
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-amber-100 text-amber-800 font-semibold">Worth exploring</span>
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-slate-100 text-slate-600">in-process</span>
+            </div>
+          </div>
+
+          <p class="font-mono text-sm text-slate-600">src/linghub/daemon/state.py:75–103, 128–267</p>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Before — two questions, one class</p>
+              <div class="space-y-2 text-[11px]">
+                <div class="border border-amber-300 bg-amber-50 rounded p-2">
+                  <p class="font-mono text-amber-800">expected_slot · observe_active_slot</p>
+                  <p class="text-slate-600 mt-1">"which slot should the hardware be on?"</p>
+                </div>
+                <div class="border border-amber-300 bg-amber-50 rounded p-2">
+                  <p class="font-mono text-amber-800">set_binding · set_leds · create_profile</p>
+                  <p class="text-slate-600 mt-1">"what should the config say?"</p>
+                </div>
+                <p class="text-[10px] text-slate-500 pt-1">Both answer through the same <span class="font-mono">needs_write</span>.</p>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">After — one question each</p>
+              <div class="space-y-2">
+                <div class="border border-emerald-400 bg-emerald-50 px-3 py-3 text-[11px]">
+                  <p class="font-mono">config state</p>
+                  <p class="text-slate-600 mt-1">profiles, loaded profile, fingerprint</p>
+                </div>
+                <div class="border border-emerald-400 bg-emerald-50 px-3 py-3 text-[11px]">
+                  <p class="font-mono">slot reasoning</p>
+                  <p class="text-slate-600 mt-1">expected slot, drift, target slot</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Problem</p>
+              <p><span class="font-mono text-xs">DaemonState</span> both mutates the config and reasons about which hardware Slot should be active. The Slot rules — 0 for desktop, 1 for gaming, drift detection — are device knowledge sitting in a class otherwise about config.</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Solution</p>
+              <p>Keep Slot reasoning where the Slot rules are: <span class="font-mono text-xs">expected_slot</span> and drift are one question, config mutation is another.</p>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Wins</p>
+            <ul class="grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm list-disc list-inside text-slate-700">
+              <li>locality: Slot rules in one place</li>
+              <li>ADR-0001 becomes readable as code</li>
+              <li>config mutation testable alone</li>
+            </ul>
+          </div>
+
+          <div class="rounded border-l-4 border-amber-400 bg-amber-50 px-3 py-2 text-xs text-amber-900 mt-2">
+            Consistent with ADR-0001 (profiles load into slot 1); this makes the rule explicit rather than changing it.
+          </div>
+        </article>
+
+        <!-- ============ 4 ============ -->
+        <article id="c4" class="space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h2 class="font-serif text-2xl">4. Move the panel rules out of the widgets</h2>
+            <div class="flex gap-2">
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-amber-100 text-amber-800 font-semibold">Worth exploring</span>
+              <span class="text-xs uppercase tracking-wider px-2.5 py-1 rounded bg-slate-100 text-slate-600">in-process</span>
+            </div>
+          </div>
+
+          <p class="font-mono text-sm text-slate-600">src/linghub/ui/dpi_panel.py:103–118 · src/linghub/ui/led_panel.py:112–124</p>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Before — rules inside handlers</p>
+              <div class="space-y-1.5 font-mono text-[10px] text-slate-600">
+                <div class="bg-red-50 border-l-2 border-red-400 px-2 py-1">dpi_panel._on_toggled<br/><span class="text-slate-500">"only one default" in a GTK callback</span></div>
+                <div class="bg-red-50 border-l-2 border-red-400 px-2 py-1">led_panel._duration_to_speed<br/><span class="text-slate-500">ms ↔ slider units, inverted</span></div>
+                <div class="bg-red-50 border-l-2 border-red-400 px-2 py-1">led_panel._sync_sensitivity<br/><span class="text-slate-500">which controls an effect enables</span></div>
+              </div>
+              <p class="text-[10px] text-red-700 mt-2">All three are testable only through the widget.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">After — rules beside the widgets</p>
+              <div class="deep rounded px-3 py-6 text-center">
+                <p class="text-xs uppercase tracking-wider text-slate-300">panel rules</p>
+                <p class="text-[10px] text-slate-400 mt-2">one default · speed conversion · enabled controls</p>
+                <p class="text-[10px] text-slate-500 mt-3 font-mono">2 callers</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Problem</p>
+              <p>The same shape the window had last week: a rule that does not need GTK lives inside a GTK callback, so the only way to test it is to build the widget. The speed inversion especially — it is arithmetic, not UI.</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Solution</p>
+              <p>Move the rules into a module both panels call, leaving the panels with widget wiring.</p>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Wins</p>
+            <ul class="grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm list-disc list-inside text-slate-700">
+              <li>two callers: a real seam</li>
+              <li>the speed inversion gets its own tests</li>
+              <li>panels shrink to wiring</li>
+            </ul>
+          </div>
+        </article>
+
+      </section>
+
+      <section id="top-recommendation" class="pt-4">
+        <div class="rounded-xl border-2 border-emerald-500 bg-white p-6">
+          <p class="text-xs uppercase tracking-wider text-emerald-700 font-semibold mb-2">Top recommendation</p>
+          <h2 class="font-serif text-2xl mb-2">
+            <a href="#c1" class="underline decoration-emerald-400 decoration-2 underline-offset-4">Split the daemon's write surface out</a>
+          </h2>
+          <p class="text-sm text-slate-700">
+            This is the one place where last review's work did not achieve what it intended.
+            The grouping is real but the complexity stayed: three adapters forward into the same 49-method class,
+            so the interface shrank while the implementation did not move. Doing this also makes #2 answerable —
+            the Protocols describe something that does not exist yet.
+          </p>
+        </div>
+      </section>
+
+      <section class="pt-2">
+        <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Checked, deliberately not proposed</p>
+        <ul class="text-sm text-slate-700 space-y-1 list-disc list-inside">
+          <li><span class="font-mono text-xs">config.save</span> re-parses to validate before writing. That is deliberate &mdash; the alternative is a corrupt config on disk &mdash; and the cost is one parse per edit, not per tick.</li>
+          <li><span class="font-mono text-xs">hotspot_editor.py</span> (526 lines) is a one-off authoring tool with no runtime path.</li>
+          <li><span class="font-mono text-xs">diagram.py</span> geometry is pure but has one caller and no bug history. Not worth a seam yet.</li>
+          <li>The seven <span class="font-mono text-xs">__new__</span> test constructions all belong to widgets that genuinely need GTK; the decisions they used to hide are already out.</li>
+        </ul>
+      </section>
+
+    </main>
+  </body>
+</html>
