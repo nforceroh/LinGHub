@@ -26,6 +26,13 @@ DESKTOP_SLOT = 0
 logger = logging.getLogger("linghub.daemon")
 
 
+class ConfigStartupError(RuntimeError):
+    """The config is missing or invalid, so the daemon cannot start.
+
+    Distinct from a transient failure: systemd should not restart on this.
+    """
+
+
 class Daemon:
     def __init__(
         self,
@@ -89,7 +96,10 @@ class Daemon:
 
     async def run(self) -> None:
         if not self._reload_config():
-            raise RuntimeError("cannot start without a valid config")
+            # A bad config is not transient: restarting will not fix it, so
+            # exit non-zero and let systemd's RestartPreventExitStatus stop
+            # the unit rather than looping.
+            raise ConfigStartupError("cannot start without a valid config")
 
         await self._connect()
         interval = self._poll_interval or self._state.config.poll_interval

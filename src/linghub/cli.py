@@ -79,7 +79,7 @@ def _detect_watch(args: argparse.Namespace) -> int:
 def _run_daemon(args: argparse.Namespace) -> int:
     import logging
 
-    from .daemon.service import Daemon
+    from .daemon.service import ConfigStartupError, Daemon
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     daemon = Daemon(config_path=args.config, poll_interval=args.interval)
@@ -87,6 +87,10 @@ def _run_daemon(args: argparse.Namespace) -> int:
         asyncio.run(daemon.run())
     except KeyboardInterrupt:
         return 0
+    except ConfigStartupError as exc:
+        # Exit 78 (EX_CONFIG) so the unit can refuse to restart on it.
+        print(f"Error: {exc}", file=sys.stderr)
+        return 78
     except (RuntimeError, OSError, DBusFastError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

@@ -79,6 +79,15 @@ class ProfileWriter:
         await self._wait_for_commit(path)
         await self._verify(path, profile)
 
+        # Writing a profile does not make it the active one. Activate the slot
+        # and commit again, otherwise the mouse keeps using whichever profile
+        # was active before.
+        await self._client._method(path, "Profile", "SetActive")
+        if not await self._get(path, "Profile", "IsActive"):
+            raise WriteError(f"profile slot {slot} did not become active")
+        await self._client._method(self._device.path, "Device", "Commit")
+        await self._wait_for_commit(path)
+
         return WriteResult(slot=slot, changed=tuple(changed))
 
     async def _write_resolution(self, profile_path: str, index: int, resolution: dict) -> None:

@@ -1,0 +1,19 @@
+[Unit]
+Description=LinGHub - load G502 profiles when games start
+Documentation=https://github.com/nforceroh/LinGHub
+# ratbagd is D-Bus activated, so it does not need to be running first, but
+# the graphical session must exist for the user bus to be reachable.
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/linghub run
+Restart=on-failure
+RestartSec=5s
+# Exit 78 is EX_CONFIG: a missing or invalid config will not fix itself, so
+# do not restart into a loop.
+RestartPreventExitStatus=78
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
