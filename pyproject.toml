@@ -3,14 +3,14 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "g502-ratbag-profile"
+name = "linghub"
 version = "0.1.0"
-description = "List and switch G502 hardware profiles through ratbagd"
+description = "Profile manager for the Logitech G502 family on Linux"
 requires-python = ">=3.11"
 dependencies = ["dbus-fast>=5.2,<6"]
 
 [project.scripts]
-g502-profile = "g502_profile.cli:main"
+linghub = "linghub.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,4 +1,4 @@
-"""Command-line entry point for G502 profile management."""
+"""Command-line entry point for LinGHub."""
 
 import argparse
 import asyncio
@@ -8,7 +8,7 @@ from dbus_fast import BusType
 from dbus_fast.aio import MessageBus
 from dbus_fast.errors import DBusFastError
 
-from .ratbag import RatbagClient
+from .hardware.ratbag import RatbagClient
 
 
 async def run(args: argparse.Namespace) -> None:

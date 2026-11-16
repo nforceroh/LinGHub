@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from dbus_fast import MessageType, Variant
 
-from g502_profile.ratbag import ROOT, RatbagClient
+from linghub.hardware.ratbag import ROOT, RatbagClient
 
 
 class FakeBus:
