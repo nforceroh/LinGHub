@@ -462,6 +462,16 @@ class Daemon:
                 elif previous_game is not None:
                     self._interface.GameExited(previous_game)
 
+        # A manual choice with no game running has nothing to override: the
+        # desktop profile is what should be loaded. Without this the override
+        # stuck forever, leaving a gaming profile on the mouse with no game.
+        if self._manual_override is not None and self._detected_game is None:
+            logger.info(
+                "clearing the manual override for %r: no game is running",
+                self._manual_override,
+            )
+            self._manual_override = None
+
         if self._manual_override is not None:
             self._state.stack = [self._manual_override]
 

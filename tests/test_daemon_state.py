@@ -565,6 +565,80 @@ class ActiveSlotTests(unittest.TestCase):
         self.assertFalse(state.needs_write)
 
 
+class ManualOverrideTests(unittest.TestCase):
+    """A manual profile choice must not outlive its reason.
+
+    The override used to clear only when the detected game changed, so picking
+    a profile while no game was running left it stuck forever: the mouse stayed
+    on a gaming profile with nothing running.
+    """
+
+    def _daemon(self):
+        from linghub.daemon.service import Daemon
+
+        daemon = Daemon()
+        daemon._state = DaemonState(config=make_config(DESKTOP, WOT))
+        return daemon
+
+    def test_an_override_is_cleared_when_no_game_is_running(self):
+        import asyncio
+
+        daemon = self._daemon()
+        daemon._manual_override = "world-of-tanks"
+        daemon._detected_game = None
+
+        def no_detection(_profiles):
+            from linghub.discovery.detector import Detection
+            return Detection(matches=[], rejections=[], considered=0)
+
+        import linghub.daemon.service as svc
+        original = svc.detect
+        svc.detect = no_detection
+        try:
+            asyncio.run(daemon._tick_once())
+        finally:
+            svc.detect = original
+
+        self.assertIsNone(daemon._manual_override)
+        self.assertEqual(daemon._state.target_profile.name, "desktop")
+
+    def test_an_override_survives_while_its_game_runs(self):
+        """A manual choice holds while the game it names is running.
+
+        The override is set on a later tick than the game being detected, so
+        the "detected game changed" rule does not clear it first.
+        """
+        import asyncio
+
+        from linghub.discovery.detector import Detection, Match
+        from linghub.discovery.processes import ProcessInfo
+
+        daemon = self._daemon()
+        daemon._detected_game = "world-of-tanks"
+        daemon._manual_override = "world-of-tanks"
+
+        profile = daemon._state.config.profile_named("world-of-tanks")
+        process = ProcessInfo(pid=1, name="p", executable_path="x.exe",
+                              real_executable_path="x.exe", command="x.exe")
+        detection = Detection(
+            matches=[Match(game=profile.games[0], profile=profile, process=process)],
+            rejections=[], considered=1,
+        )
+
+        def detected(_profiles):
+            return detection
+
+        import linghub.daemon.service as svc
+        original = svc.detect
+        svc.detect = detected
+        try:
+            asyncio.run(daemon._tick_once())
+        finally:
+            svc.detect = original
+
+        self.assertEqual(daemon._manual_override, "world-of-tanks")
+
+
 class FingerprintTests(unittest.TestCase):
     """Editing a profile's contents must trigger a rewrite, not just a rename."""
 
