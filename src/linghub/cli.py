@@ -97,6 +97,39 @@ def _run_daemon(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_status() -> int:
+    """Ask the running daemon for its state over the session bus."""
+    import asyncio
+
+    from .ui.client import DaemonClient
+
+    async def query() -> int:
+        client = DaemonClient()
+        if not await client.connect():
+            print("Error: cannot reach the session bus.", file=sys.stderr)
+            return 1
+        try:
+            state = await client.state()
+        except (RuntimeError, OSError, DBusFastError) as exc:
+            print(
+                f"Error: the daemon is not running or not answering ({exc}).",
+                file=sys.stderr,
+            )
+            return 1
+        finally:
+            client.disconnect()
+
+        print(format_status(
+            active=state.active_profile,
+            detected=state.detected_game or None,
+            desktop=state.desktop_profile,
+            profiles=state.profiles,
+        ))
+        return 0
+
+    return asyncio.run(query())
+
+
 async def _run_hardware(args: argparse.Namespace) -> None:
     bus = await asyncio.wait_for(MessageBus(bus_type=BusType.SYSTEM).connect(), timeout=5)
     try:
@@ -114,6 +147,19 @@ async def _run_hardware(args: argparse.Namespace) -> None:
             print(f"Profile {args.index} is already active; no changes made.")
     finally:
         bus.disconnect()
+
+
+def format_status(
+    *, active: str, detected: str | None, desktop: str, profiles: tuple[str, ...]
+) -> str:
+    """Render the running daemon's state as a short report."""
+    lines = [
+        f"Active profile : {active or 'unknown'}",
+        f"Detected game  : {detected or 'no game'}",
+        f"Desktop profile: {desktop}",
+        f"Profiles       : {len(profiles)} ({', '.join(profiles)})",
+    ]
+    return "\n".join(lines)
 
 
 def main() -> int:
@@ -136,6 +182,10 @@ def main() -> int:
 
     commands.add_parser("ui", help="open the graphical interface")
 
+    commands.add_parser(
+        "status", help="report what the running daemon is doing"
+    )
+
     hotspots_cmd = commands.add_parser(
         "hotspots", help="place button hotspots on a mouse image"
     )
@@ -151,6 +201,9 @@ def main() -> int:
         if args.out is not None:
             argv += ["--out", args.out]
         return editor_main(argv)
+
+    if args.command == "status":
+        return _run_status()
 
     if args.command == "ui":
         from .ui.app import main as ui_main

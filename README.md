@@ -148,12 +148,6 @@ profile plus application settings (ADR-0004).
 - [Glossary](GLOSSARY.md) — the vocabulary this project uses
 - [Architecture decisions](docs/adr/) — why the design is the way it is
 
-## Legacy scripts
-
-`utils/` holds the scripts that predate LinGHub. They use `ratbagctl` and their
-own `g502-profiles.json`, which is **not** the format LinGHub reads. They are
-kept for reference and will be removed.
-
 ## Development
 
 ```bash

@@ -1,8 +1,8 @@
 # G502 button map
 
 The annotated diagram shows each button with its manual number, G-name, and the
-**ratbag index** used by LinGHub and the legacy scripts in `utils/`. The
-unannotated photo is at `images/g502-photo.png`.
+**ratbag index** used by LinGHub. The unannotated photo is at
+`images/g502-photo.png`.
 
 > Note: ratbag numbers the buttons differently from the manual. The tilt wheel
 > and profile button are the main differences — check the table, not the
