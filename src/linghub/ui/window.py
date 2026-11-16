@@ -39,6 +39,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._state = DaemonState()
         self._selected_button: int | None = None
         self._bindings: dict[int, tuple[str, str]] = {}
+        self._profile_rows: dict[str, Adw.ActionRow] = {}
 
         self.set_default_size(980, 620)
 
@@ -227,21 +228,35 @@ class MainWindow(Adw.ApplicationWindow):
             self._bindings = {}
 
     def _rebuild_profiles(self) -> None:
-        child = self._profile_list.get_first_child()
-        while child is not None:
-            nxt = child.get_next_sibling()
-            self._profile_list.remove(child)
-            child = nxt
+        """Make the profile list match the daemon's state, reusing rows.
 
-        for name in self._state.profiles:
-            row = Adw.ActionRow(title=name)
-            if name == self._state.active_profile:
-                row.set_subtitle("active")
-                row.add_prefix(Gtk.Image.new_from_icon_name("object-select-symbolic"))
-            if name == self._state.desktop_profile:
-                row.add_suffix(Gtk.Label(label="desktop"))
-            row.set_activatable(True)
-            self._profile_list.append(row)
+        Rows are updated in place rather than recreated. Rebuilding the list
+        on every two-second poll destroyed the user's selection, so clicking a
+        profile appeared to bounce back to the first row.
+        """
+        names = self._state.profiles
+
+        # Drop rows for profiles that went away.
+        existing = self._profile_rows
+        for name in [name for name in existing if name not in names]:
+            self._profile_list.remove(existing.pop(name))
+
+        for position, name in enumerate(names):
+            row = existing.get(name)
+            if row is None:
+                row = Adw.ActionRow(title=name)
+                row.set_activatable(True)
+                row._check = Gtk.Image.new_from_icon_name("object-select-symbolic")
+                row.add_prefix(row._check)
+                row._desktop = Gtk.Label(label="desktop")
+                row.add_suffix(row._desktop)
+                existing[name] = row
+                self._profile_list.insert(row, position)
+
+            is_active = name == self._state.active_profile
+            row._check.set_visible(is_active)
+            row.set_subtitle("active" if is_active else "")
+            row._desktop.set_visible(name == self._state.desktop_profile)
 
     def _rebuild_bindings(self) -> None:
         """Fill in what each button does, and highlight the selected row."""

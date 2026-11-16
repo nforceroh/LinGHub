@@ -77,6 +77,99 @@ class ButtonMapTests(unittest.TestCase):
         self.assertEqual(describe(99), "Button 99")
 
 
+@unittest.skipUnless(_has_cairo(), "needs pycairo and Gtk 4")
+class ProfileListTests(unittest.TestCase):
+    """The profile list must survive the two-second poll.
+
+    Rebuilding every row from scratch on each poll destroyed the user's
+    selection, so clicking a profile appeared to bounce back to whatever was
+    listed first.
+    """
+
+    def _window(self, active="desktop"):
+        from linghub.ui.client import DaemonState
+        from linghub.ui.window import MainWindow
+
+        window = MainWindow.__new__(MainWindow)
+        import gi
+
+        gi.require_version("Adw", "1")
+        from gi.repository import Adw, Gtk
+
+        Adw.ApplicationWindow.__init__(window)
+        window._state = DaemonState()
+        window._selected_button = None
+        window._bindings = {}
+        window._table_rows = {}
+        window._binding_rows = {}
+        window._profile_rows = {}
+
+        window._title = Adw.WindowTitle(title="t")
+        window._status = Gtk.Label()
+        window._profile_list = Gtk.ListBox()
+        window._profile_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        window._apply_state(DaemonState(
+            active_profile=active,
+            profiles=("desktop", "world-of-tanks", "star-citizen"),
+            desktop_profile="desktop",
+        ))
+        return window
+
+    def test_selecting_a_profile_sticks(self):
+        window = self._window()
+        window._profile_list.select_row(window._profile_list.get_row_at_index(2))
+        selected = window._profile_list.get_selected_row()
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected.get_title(), "star-citizen")
+
+    def test_a_poll_does_not_clear_the_selection(self):
+        from linghub.ui.client import DaemonState
+
+        window = self._window()
+        window._profile_list.select_row(window._profile_list.get_row_at_index(2))
+
+        # Same state again, as the poll would deliver.
+        window._apply_state(DaemonState(
+            active_profile="desktop",
+            profiles=("desktop", "world-of-tanks", "star-citizen"),
+            desktop_profile="desktop",
+        ))
+
+        selected = window._profile_list.get_selected_row()
+        self.assertIsNotNone(selected, "the poll cleared the selection")
+        self.assertEqual(selected.get_title(), "star-citizen")
+
+    def test_rows_are_not_recreated_on_every_poll(self):
+        """Recreating rows is what loses focus and selection."""
+        from linghub.ui.client import DaemonState
+
+        window = self._window()
+        first = window._profile_list.get_row_at_index(1)
+
+        window._apply_state(DaemonState(
+            active_profile="desktop",
+            profiles=("desktop", "world-of-tanks", "star-citizen"),
+            desktop_profile="desktop",
+        ))
+        self.assertIs(window._profile_list.get_row_at_index(1), first)
+
+    def test_active_marker_moves_without_rebuilding(self):
+        from linghub.ui.client import DaemonState
+
+        window = self._window(active="desktop")
+        self.assertEqual(
+            window._profile_list.get_row_at_index(0).get_subtitle(), "active"
+        )
+        window._apply_state(DaemonState(
+            active_profile="world-of-tanks",
+            profiles=("desktop", "world-of-tanks", "star-citizen"),
+            desktop_profile="desktop",
+        ))
+        self.assertEqual(
+            window._profile_list.get_row_at_index(1).get_subtitle(), "active"
+        )
+
+
 class SignalHandlingTests(unittest.TestCase):
     def setUp(self):
         self.calls = 0
