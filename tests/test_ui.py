@@ -253,5 +253,128 @@ class HitTestGeometryTests(unittest.TestCase):
         self.assertIsNone(widget._spot_at(0, 0))
 
 
+@unittest.skipUnless(_has_cairo(), "needs pycairo and Gtk 4")
+class HotspotEditorTests(unittest.TestCase):
+    """The editor maps a click to a button, so redoing one point is possible.
+
+    Points are keyed by ratbag index rather than by click order: placing a
+    point for a button that already has one moves it, which is what makes
+    fixing a single bad hotspot practical.
+    """
+
+    def _editor(self, points=None):
+        from linghub.ui.hotspot_editor import HotspotEditor
+
+        editor = HotspotEditor.__new__(HotspotEditor)
+        editor._points = dict(points or {})
+        editor._selected = 0
+        editor._hover = None
+        emitted = []
+        editor.emit = lambda *args: emitted.append(args)
+        editor.queue_draw = lambda: None
+        editor._emitted = emitted
+
+        class Pixbuf:
+            def get_width(self):
+                return 1024
+
+            def get_height(self):
+                return 555
+
+        editor._pixbuf = Pixbuf()
+        # An image that fills the widget exactly, so fractions map 1:1.
+        editor.get_width = lambda: 1024
+        editor.get_height = lambda: 555
+        return editor
+
+    def test_placing_a_point_keys_it_to_the_selected_button(self):
+        editor = self._editor()
+        editor._selected = 5
+        editor._to_fraction = lambda x, y: (0.25, 0.5)
+        editor._on_pressed(_FakeGesture(1), 1, 100, 200)
+        self.assertEqual(editor.points, {5: (0.25, 0.5)})
+
+    def test_replacing_an_existing_point_does_not_add_a_second(self):
+        editor = self._editor({5: (0.1, 0.1)})
+        editor._selected = 5
+        editor._to_fraction = lambda x, y: (0.9, 0.9)
+        editor._on_pressed(_FakeGesture(1), 1, 100, 200)
+        self.assertEqual(editor.points, {5: (0.9, 0.9)})
+
+    def test_placing_advances_to_the_next_unplaced_button(self):
+        editor = self._editor()
+        editor._selected = 0
+        editor._to_fraction = lambda x, y: (0.2, 0.2)
+        editor._on_pressed(_FakeGesture(1), 1, 10, 10)
+        self.assertEqual(editor.selected, 1)
+
+    def test_advance_skips_buttons_that_already_have_points(self):
+        editor = self._editor({1: (0.5, 0.5)})
+        editor._selected = 0
+        editor._to_fraction = lambda x, y: (0.2, 0.2)
+        editor._on_pressed(_FakeGesture(1), 1, 10, 10)
+        self.assertEqual(editor.selected, 2)
+
+    def test_clicking_an_existing_marker_selects_it(self):
+        editor = self._editor({7: (0.5, 0.5)})
+        editor._selected = 0
+        cx, cy = editor._image_rect()[0] + 0.5 * 1024, 0.5 * 555
+        editor._on_pressed(_FakeGesture(1), 1, cx, cy)
+        self.assertEqual(editor.selected, 7)
+        self.assertEqual(editor.points, {7: (0.5, 0.5)})
+
+    def test_right_click_removes_the_marker_under_the_cursor(self):
+        editor = self._editor({3: (0.5, 0.5)})
+        cx = editor._image_rect()[0] + 0.5 * 1024
+        cy = editor._image_rect()[1] + 0.5 * 555
+        editor._on_pressed(_FakeGesture(3), 1, cx, cy)
+        self.assertEqual(editor.points, {})
+
+    def test_clicks_outside_the_image_are_ignored(self):
+        editor = self._editor()
+        editor._to_fraction = lambda x, y: None
+        editor._on_pressed(_FakeGesture(1), 1, 0, 0)
+        self.assertEqual(editor.points, {})
+
+    def test_selecting_emits_only_on_change(self):
+        editor = self._editor()
+        editor.select(4)
+        editor.select(4)
+        self.assertEqual(len(editor._emitted), 1)
+
+    def test_load_points_is_keyed_by_index(self):
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from linghub.ui.hotspot_editor import load_points
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "hotspots.json"
+            path.write_text(json.dumps({
+                "image": "x.png",
+                "hotspots": [
+                    {"index": 0, "x": 0.1, "y": 0.2},
+                    {"index": 9, "x": 0.3, "y": 0.4},
+                ],
+            }))
+            self.assertEqual(load_points(path), {0: (0.1, 0.2), 9: (0.3, 0.4)})
+
+    def test_load_points_tolerates_a_missing_file(self):
+        from pathlib import Path
+
+        from linghub.ui.hotspot_editor import load_points
+
+        self.assertEqual(load_points(Path("/nonexistent/hotspots.json")), {})
+
+
+class _FakeGesture:
+    def __init__(self, button):
+        self._button = button
+
+    def get_current_button(self):
+        return self._button
+
+
 if __name__ == "__main__":
     unittest.main()
