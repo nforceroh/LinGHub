@@ -28,7 +28,6 @@ logger = logging.getLogger("linghub.tray")
 
 INDICATOR_ID = "linghub"
 ICON_NAME = "input-mouse"
-UI_COMMAND = "linghub ui"
 
 
 class Tray:
@@ -148,6 +147,24 @@ class Tray:
 
     # --- actions ---------------------------------------------------------
 
+    def _report_failure(self, message: str) -> None:
+        """Tell the user something failed, since a tray has no console.
+
+        A silent failure is indistinguishable from a menu item that does
+        nothing, which is exactly how this looked before.
+        """
+        try:
+            dialog = Gtk.MessageDialog(
+                message_type=Gtk.MessageType.ERROR,
+                buttons=Gtk.ButtonsType.CLOSE,
+                text=message,
+            )
+            dialog.set_title("LinGHub")
+            dialog.run()
+            dialog.destroy()
+        except Exception:  # noqa: BLE001 - a dialog must never crash the tray
+            logger.error("%s", message)
+
     def _load(self, name: str) -> None:
         """Ask the daemon to load a profile, in the background."""
         threading.Thread(target=self._load_thread, args=(name,), daemon=True).start()
@@ -176,14 +193,21 @@ class Tray:
 
         Not a fork: the UI is GTK4 and this process is GTK3, so they cannot
         share an address space.
+
+        The interpreter is used rather than a `linghub` command, because the
+        console script is only on PATH when the virtualenv is active - which it
+        is not for a systemd unit. sys.executable is the interpreter already
+        running this tray, so it is guaranteed to be able to import linghub.
         """
+        command = [sys.executable, "-m", "linghub.cli", "ui"]
         try:
             subprocess.Popen(
-                UI_COMMAND.split(), start_new_session=True,
+                command, start_new_session=True,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
         except OSError as exc:
-            logger.warning("could not open the UI: %s", exc)
+            logger.error("could not open the UI: %s", exc)
+            self._report_failure(f"Could not open LinGHub: {exc}")
 
 
 def main(argv: list[str] | None = None) -> int:

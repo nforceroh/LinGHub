@@ -55,7 +55,30 @@ class IsolationTests(unittest.TestCase):
             Path(__file__).resolve().parent.parent / "src" / "linghub" / "tray.py"
         ).read_text()
         self.assertIn("subprocess.Popen", source)
-        self.assertIn("linghub ui", source)
+
+    def test_the_ui_is_launched_with_the_current_interpreter(self):
+        """A `linghub` command is not on PATH for a systemd unit.
+
+        The console script only exists inside an activated virtualenv, so
+        launching it by name failed with "No such file or directory" and the
+        menu item appeared to do nothing.
+        """
+        from pathlib import Path
+
+        source = (
+            Path(__file__).resolve().parent.parent / "src" / "linghub" / "tray.py"
+        ).read_text()
+        self.assertIn("sys.executable", source)
+        self.assertNotIn('"linghub ui"', source)
+
+    def test_a_failure_is_reported_to_the_user(self):
+        """A tray has no console, so a silent failure looks like a dead menu."""
+        from pathlib import Path
+
+        source = (
+            Path(__file__).resolve().parent.parent / "src" / "linghub" / "tray.py"
+        ).read_text()
+        self.assertIn("_report_failure", source)
 
 
 if __name__ == "__main__":
