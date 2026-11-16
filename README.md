@@ -15,8 +15,8 @@ Usable. Game detection, automatic profile switching, and a UI that edits
 bindings, DPI, report rate and lighting all work and have been exercised
 against a G502 Lightspeed on Fedora with World of Tanks and Star Citizen.
 
-Not done yet: packaging (it installs from a clone), a desktop notification when
-a profile switches, and testing on the other six G502 variants.
+Not done yet: packaging (it installs from a clone), and testing on the other six
+G502 variants.
 
 ## Requirements
 
@@ -40,6 +40,7 @@ linghub detect        # report which configured game is running
 linghub run           # run the daemon in the foreground
 linghub ui            # open the graphical interface
 linghub status        # report what the running daemon is doing
+linghub tray          # show a tray icon for switching profiles
 ```
 
 `switch` reports that ratbagd has queued a commit. Commits are asynchronous, so
@@ -82,7 +83,9 @@ a config already contains it, the table shows the raw name so it can be replaced
 
 The daemon survives the mouse disappearing: a KVM switch, an unplugged cable or
 a flat battery all remove the device node. It keeps detecting games, drops its
-stale handle, and reconnects when the device returns. Note the hidraw node
+stale handle, and reconnects when the device returns. It also publishes its
+D-Bus interface and starts detecting before it looks for the device, so the UI
+and tray still show the configured profiles while the mouse is away. Note the hidraw node
 number changes on reconnect, so nothing caches the device path.
 
 The UI talks to the daemon over D-Bus, so the daemon must be running. It needs
@@ -100,12 +103,39 @@ sed -i 's/include-system-site-packages = false/include-system-site-packages = tr
   .venv/pyvenv.cfg
 ```
 
+## Notifications and the tray
+
+The daemon sends a desktop notification when it switches profile, using
+`org.freedesktop.Notifications`, so it works on Plasma, GNOME and anywhere else
+implementing the spec. Repeated switches replace one notification rather than
+stacking. On a machine with no notification daemon the switch still happens, it
+is just silent.
+
+`linghub tray` puts an icon in the system tray with the active profile, a menu
+to load any profile, and an entry to open the UI.
+
+The tray is a **separate process**, and has to be: `AppIndicator3` is GTK3, and
+GTK3 cannot be loaded in the same process as the GTK4 UI — `gi` refuses two
+versions of the `Gtk` namespace. A separate process also means the tray survives
+closing the window, which is the point of having one. It talks only to the
+daemon, and "Open LinGHub" starts the UI as a subprocess.
+
+Note that if you already run [Solaar](https://github.com/pwr-Solaar/Solaar) it
+has its own tray icon for Logitech hardware, including battery reporting that
+ratbagd does not expose. Two icons for one mouse is clutter; the LinGHub tray is
+worth it only if you want click-to-open and profile switching from the tray.
+
 ## Running as a service
 
 ```bash
 ./scripts/install-service.sh     # install and start the user service
 ./scripts/uninstall-service.sh   # stop and remove it
 ```
+
+The install script also offers to install `linghub-tray.service`, which puts the
+tray icon in the session. It is a prompt rather than an assumption because the
+tray needs a graphical session and a StatusNotifier host, and a headless machine
+has neither. Set `LINGHUB_TRAY=yes` or `LINGHUB_TRAY=no` to skip the prompt.
 
 The daemon watches for games and loads the matching profile into slot 1,
 restoring the desktop profile into slot 0 when the last game exits. It reloads
