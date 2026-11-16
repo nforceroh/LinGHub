@@ -25,6 +25,7 @@ from .binding_labels import describe_binding
 from .buttonmap import BUTTONS, describe, manual_number
 from .client import DaemonClient, DaemonState
 from .diagram import MouseDiagram
+from .dpi_panel import DpiPanel
 from .led_panel import LedPanel
 
 
@@ -42,7 +43,11 @@ class MainWindow(Adw.ApplicationWindow):
         self._bindings: dict[int, tuple[str, str]] = {}
         self._profile_rows: dict[str, Adw.ActionRow] = {}
         self._led_panel: LedPanel | None = None
+        self._dpi_panel: DpiPanel | None = None
         self._leds: dict[int, dict] = {}
+        self._resolutions: list[dict] = []
+        self._report_rates: tuple[int, ...] = ()
+        self._report_rate: int = 0
 
         self.set_default_size(980, 620)
 
@@ -136,6 +141,11 @@ class MainWindow(Adw.ApplicationWindow):
         lighting.set_margin_end(12)
         lighting.set_margin_top(8)
         lighting.set_margin_bottom(12)
+        lighting.append(self._section_label("DPI and report rate"))
+        self._dpi_panel = DpiPanel(on_save=self._on_dpi_saved)
+        lighting.append(self._dpi_panel)
+        lighting.append(Gtk.Separator())
+
         lighting.append(self._section_label("Lighting"))
         self._led_panel = LedPanel(on_save=self._on_led_saved)
         lighting.append(self._led_panel)
@@ -250,6 +260,39 @@ class MainWindow(Adw.ApplicationWindow):
             # the middle of choosing.
             if not self._led_panel.dirty:
                 self._led_panel.load(self._leds)
+        if self._dpi_panel is not None and not self._dpi_panel.dirty:
+            self._dpi_panel.load(
+                self._resolutions, self._report_rates, self._report_rate
+            )
+
+    def _on_dpi_saved(self, slots: list, rate: int) -> None:
+        """Persist the DPI panel's staged values when Save is pressed."""
+        profile = self._editing_profile()
+        if profile is None:
+            return
+        run_and_report(
+            self._write_dpi(profile, slots, rate), self._on_async_error
+        )
+
+    async def _write_dpi(self, profile: str, slots: list, rate: int) -> None:
+        try:
+            for index, (dpi, is_default, disabled) in enumerate(slots):
+                ok = await self._client.set_resolution(
+                    profile, index, dpi,
+                    make_default=is_default, disabled=disabled,
+                )
+                if not ok:
+                    self._status.set_text(f"The daemon rejected DPI slot {index + 1}.")
+                    return
+            if rate and not await self._client.set_report_rate(profile, rate):
+                self._status.set_text("The daemon rejected that report rate.")
+                return
+        except (RuntimeError, OSError) as exc:
+            self._status.set_text(f"Could not change the DPI: {exc}")
+            return
+        if self._dpi_panel is not None:
+            self._dpi_panel.mark_saved()
+        self._status.set_text(f"Updated the DPI of {profile}.")
 
     def _on_led_saved(self, mode: str, brightness: int, duration: int, color) -> None:
         """Persist the panel's staged values when Save is pressed."""
@@ -295,6 +338,13 @@ class MainWindow(Adw.ApplicationWindow):
         except (RuntimeError, OSError) as exc:
             logger.warning("cannot read lighting: %s", exc)
             self._leds = {}
+        try:
+            self._resolutions = await self._client.get_resolutions(profile)
+            self._report_rates = await self._client.get_report_rates(profile)
+            self._report_rate = await self._client.get_report_rate(profile)
+        except (RuntimeError, OSError) as exc:
+            logger.warning("cannot read DPI: %s", exc)
+            self._resolutions = []
 
     def _rebuild_profiles(self) -> None:
         """Make the profile list match the daemon's state, reusing rows.

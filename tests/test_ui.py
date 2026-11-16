@@ -104,7 +104,11 @@ class ProfileListTests(unittest.TestCase):
         window._binding_rows = {}
         window._profile_rows = {}
         window._led_panel = None
+        window._dpi_panel = None
         window._leds = {}
+        window._resolutions = []
+        window._report_rates = ()
+        window._report_rate = 0
 
         window._title = Adw.WindowTitle(title="t")
         window._status = Gtk.Label()
@@ -198,6 +202,12 @@ class LedSaveModelTests(unittest.TestCase):
         from linghub.ui.led_panel import LedPanel
 
         window._led_panel = LedPanel(on_save=lambda *a: None)
+        from linghub.ui.dpi_panel import DpiPanel
+
+        window._dpi_panel = DpiPanel(on_save=lambda *a: None)
+        window._resolutions = []
+        window._report_rates = ()
+        window._report_rate = 0
         window._apply_state(DaemonState(
             active_profile="desktop",
             profiles=("desktop",),
