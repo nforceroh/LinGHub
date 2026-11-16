@@ -3,15 +3,80 @@
 import argparse
 import asyncio
 import sys
+import time
 
 from dbus_fast import BusType
 from dbus_fast.aio import MessageBus
 from dbus_fast.errors import DBusFastError
 
+from . import config as config_module
+from .discovery.detector import Detection, detect
 from .hardware.ratbag import RatbagClient
 
 
-async def run(args: argparse.Namespace) -> None:
+_UNSET = object()
+
+
+def _print_detection(detection: Detection, explain: bool) -> None:
+    match = detection.game
+    if match is None:
+        print("no game detected")
+    else:
+        print(f"{match.game.executable} -> profile {match.profile.name!r} (pid {match.process.pid})")
+
+    if not explain:
+        return
+
+    print(f"\nconsidered {detection.considered} process(es)")
+    for rejection in detection.rejections:
+        print(f"  skip  pid {rejection.process.pid:<7} {rejection.process.executable_name}: {rejection.reason}")
+    for match in detection.matches:
+        print(f"  match pid {match.process.pid:<7} {match.process.executable_name} -> {match.profile.name}")
+
+
+def _load_config(args: argparse.Namespace):
+    try:
+        return config_module.load(args.config)
+    except config_module.ConfigError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return None
+
+
+def _detect_once(args: argparse.Namespace) -> int:
+    config = _load_config(args)
+    if config is None:
+        return 1
+    _print_detection(detect(config.profiles), args.explain)
+    return 0
+
+
+def _detect_watch(args: argparse.Namespace) -> int:
+    config = _load_config(args)
+    if config is None:
+        return 1
+
+    print(f"watching for games every {config.poll_interval}s (ctrl-c to stop)")
+    previous: object = _UNSET
+    try:
+        while True:
+            detection = detect(config.profiles)
+            match = detection.game
+            current = match.profile.name if match else None
+            if current != previous:
+                if match is None:
+                    print("no game detected")
+                else:
+                    print(f"{match.game.executable} -> profile {match.profile.name!r} (pid {match.process.pid})")
+                if args.explain:
+                    _print_detection(detection, explain=True)
+                previous = current
+            time.sleep(config.poll_interval)
+    except KeyboardInterrupt:
+        print()
+        return 0
+
+
+async def _run_hardware(args: argparse.Namespace) -> None:
     bus = await asyncio.wait_for(MessageBus(bus_type=BusType.SYSTEM).connect(), timeout=5)
     try:
         client = RatbagClient(bus)
@@ -33,12 +98,24 @@ async def run(args: argparse.Namespace) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Manage G502 hardware profiles via ratbagd.")
     commands = parser.add_subparsers(dest="command", required=True)
+
     commands.add_parser("list", help="list hardware profiles")
+
     switch = commands.add_parser("switch", help="activate a hardware profile")
     switch.add_argument("index", type=int, help="profile index")
+
+    detect_cmd = commands.add_parser("detect", help="report which configured game is running")
+    detect_cmd.add_argument("--config", default=config_module.DEFAULT_CONFIG_PATH, help="config file path")
+    detect_cmd.add_argument("--watch", action="store_true", help="poll and report changes")
+    detect_cmd.add_argument("--explain", action="store_true", help="show why each process did or did not match")
+
     args = parser.parse_args()
+
+    if args.command == "detect":
+        return _detect_watch(args) if args.watch else _detect_once(args)
+
     try:
-        asyncio.run(run(args))
+        asyncio.run(_run_hardware(args))
     except (RuntimeError, OSError, DBusFastError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

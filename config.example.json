@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "settings": {
+    "desktop_profile": "desktop",
+    "poll_interval": 2
+  },
+  "profiles": {
+    "desktop": {
+      "games": [],
+      "report_rate": 1000,
+      "resolutions": [
+        {"dpi": 400},
+        {"dpi": 800, "active": true, "default": true},
+        {"dpi": 1000}
+      ],
+      "bindings": {
+        "0": {"type": "button", "value": 1},
+        "1": {"type": "button", "value": 2},
+        "2": {"type": "button", "value": 3},
+        "3": {"type": "button", "value": 4},
+        "4": {"type": "button", "value": 5},
+        "6": {"type": "special", "value": "resolution-down"},
+        "7": {"type": "special", "value": "resolution-up"}
+      },
+      "leds": [
+        {"index": 0, "mode": "cycle", "duration": 8000},
+        {"index": 1, "mode": "cycle", "duration": 8000}
+      ]
+    },
+    "world-of-tanks": {
+      "games": ["WorldOfTanks.exe"],
+      "report_rate": 1000,
+      "resolutions": [
+        {"dpi": 750},
+        {"dpi": 800, "active": true, "default": true}
+      ],
+      "bindings": {
+        "0": {"type": "button", "value": 1},
+        "1": {"type": "button", "value": 2},
+        "2": {"type": "button", "value": 3},
+        "3": {"type": "key", "value": "KEY_F"},
+        "4": {"type": "key", "value": "KEY_R"},
+        "5": {"type": "key", "value": "KEY_P"},
+        "6": {"type": "key", "value": "KEY_F7"},
+        "7": {"type": "key", "value": "KEY_T"}
+      },
+      "leds": [
+        {"index": 0, "mode": "cycle", "duration": 8000},
+        {"index": 1, "mode": "cycle", "duration": 8000}
+      ]
+    }
+  }
+}
