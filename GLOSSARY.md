@@ -34,6 +34,12 @@ What a single mouse button does when pressed: a key, a modifier chord, a
 special action, or nothing.
 _Avoid_: mapping, assignment, action, shortcut
 
+**Key binding**:
+A binding that sends one key. It can be encoded two ways — as a key event, or
+as a macro holding a single press/release pair — and some games only honour one
+of them. See ADR-0008.
+_Avoid_: keystroke, hotkey
+
 **Special action**:
 A mouse-internal behaviour such as DPI up/down or profile cycling, handled by
 the mouse itself rather than emitted as a key.

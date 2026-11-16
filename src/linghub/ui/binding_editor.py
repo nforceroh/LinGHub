@@ -25,8 +25,14 @@ from .binding_labels import (
 from .buttonmap import describe
 
 
-# The five modes, in the order they appear in the dialog.
+# The modes, in the order they appear in the dialog.
+#
+# MODE_KEY and MODE_KEY_MACRO both send one key, but by different mechanisms:
+# ACTION_KEY emits a key event, while ACTION_MACRO replays a press/release
+# pair. Some games - World of Tanks under Wine among them - only honour the
+# macro form, so both have to be offered.
 MODE_KEY = "key"
+MODE_KEY_MACRO = "key-macro"
 MODE_CHORD = "chord"
 MODE_SPECIAL = "special"
 MODE_BUTTON = "button"
@@ -34,11 +40,22 @@ MODE_NOTHING = "nothing"
 
 MODE_LABELS = (
     (MODE_KEY, "A single key"),
+    (MODE_KEY_MACRO, "A single key, as a macro"),
     (MODE_CHORD, "A modifier chord"),
     (MODE_SPECIAL, "A mouse function"),
     (MODE_BUTTON, "Another mouse button"),
     (MODE_NOTHING, "Nothing"),
 )
+
+
+def _is_single_key_macro(spec: object) -> bool:
+    """True when a macro spec is one key pressed and released, nothing else."""
+    tokens = str(spec).split()
+    return len(tokens) == 1 and tokens[0].startswith("KEY_")
+
+
+def _single_key_of(spec: str) -> str:
+    return spec.split()[0]
 
 
 class BindingEditor(Adw.Window):
@@ -89,6 +106,9 @@ class BindingEditor(Adw.Window):
         self._key_dropdown = self._build_choice_page(
             MODE_KEY, [(name, label) for name, label in COMMON_KEYS]
         )
+        self._key_macro_dropdown = self._build_choice_page(
+            MODE_KEY_MACRO, [(name, label) for name, label in COMMON_KEYS]
+        )
         self._special_dropdown = self._build_choice_page(
             MODE_SPECIAL, list(SPECIAL_CHOICES)
         )
@@ -117,7 +137,7 @@ class BindingEditor(Adw.Window):
         toolbar.set_content(box)
         self.set_content(toolbar)
         self._builder = box
-        self._select_initial_mode(kind)
+        self._select_initial_mode(kind, value)
         self._load_initial_value(kind, value)
         self._sync_mode()
 
@@ -166,7 +186,7 @@ class BindingEditor(Adw.Window):
         label.add_css_class("dim-label")
         self._stack.add_named(label, MODE_NOTHING)
 
-    def _select_initial_mode(self, kind: str) -> None:
+    def _select_initial_mode(self, kind: str, value: object = None) -> None:
         wanted = {
             "key": MODE_KEY,
             "special": MODE_SPECIAL,
@@ -174,6 +194,11 @@ class BindingEditor(Adw.Window):
             "macro": MODE_CHORD,
             "disabled": MODE_NOTHING,
         }.get(kind, MODE_KEY)
+        # A macro holding exactly one press/release pair is a single key sent
+        # the macro way, which is what some games need. Show it as that rather
+        # than as a chord, so re-saving does not silently change the mechanism.
+        if kind == "macro" and _is_single_key_macro(value):
+            wanted = MODE_KEY_MACRO
         for position, (mode, _label) in enumerate(MODE_LABELS):
             if mode == wanted:
                 self._modes.set_selected(position)
@@ -187,7 +212,9 @@ class BindingEditor(Adw.Window):
         """
         if value is None:
             return
-        if kind == "macro":
+        if kind == "macro" and _is_single_key_macro(value):
+            self._select_in(self._key_macro_dropdown, _single_key_of(str(value)))
+        elif kind == "macro":
             self.load_chord(str(value))
         elif kind == "key":
             self._select_in(self._key_dropdown, str(value))
@@ -253,6 +280,10 @@ class BindingEditor(Adw.Window):
         mode = self.mode
         if mode == MODE_KEY:
             return self._key_dropdown._choices[self._key_dropdown.get_selected()]
+        if mode == MODE_KEY_MACRO:
+            return self._key_macro_dropdown._choices[
+                self._key_macro_dropdown.get_selected()
+            ]
         if mode == MODE_SPECIAL:
             return self._special_dropdown._choices[
                 self._special_dropdown.get_selected()
@@ -276,6 +307,8 @@ class BindingEditor(Adw.Window):
         if mode == MODE_BUTTON:
             return "button", int(self._selected_value())
         if mode == MODE_CHORD:
+            return "macro", self._selected_value()
+        if mode == MODE_KEY_MACRO:
             return "macro", self._selected_value()
         if mode == MODE_SPECIAL:
             return "special", self._selected_value()

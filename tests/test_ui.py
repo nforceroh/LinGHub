@@ -854,13 +854,36 @@ class BindingEditorTests(unittest.TestCase):
                     self.assertEqual(got_value, value)
 
     def test_mode_matches_the_binding_type(self):
+        """A single-key macro is its own mode, not a chord."""
         expected = {
             "key": "key", "special": "special", "button": "button",
             "macro": "chord", "disabled": "nothing",
         }
         for kind, value in self.CASES:
             with self.subTest(kind=kind):
-                self.assertEqual(self._open(kind, value).mode, expected[kind])
+                mode = self._open(kind, value).mode
+                if kind == "macro" and value == "KEY_M":
+                    self.assertEqual(mode, "key-macro")
+                else:
+                    self.assertEqual(mode, expected[kind])
+
+    def test_a_single_key_macro_opens_in_its_own_mode(self):
+        """ACTION_MACRO with one press/release pair is a key sent the macro way.
+
+        Some games only honour that form, so it must not be shown as a chord -
+        re-saving would silently change the mechanism and break the binding.
+        """
+        editor = self._open("macro", "KEY_X")
+        self.assertEqual(editor.mode, "key-macro")
+        self.assertEqual(editor._current_binding(), ("macro", "KEY_X"))
+
+    def test_a_single_key_macro_is_not_confused_with_a_key(self):
+        editor = self._open("macro", "KEY_X")
+        self.assertNotEqual(editor.mode, "key")
+
+    def test_a_real_chord_still_opens_as_a_chord(self):
+        editor = self._open("macro", "+KEY_LEFTCTRL +KEY_C -KEY_C -KEY_LEFTCTRL")
+        self.assertEqual(editor.mode, "chord")
 
     def test_unknown_macro_key_is_kept(self):
         """A key outside the common list must not be silently dropped."""

@@ -77,6 +77,11 @@ Profiles can be created, renamed and deleted from the buttons above the profile
 list. The desktop profile cannot be deleted, and neither can the last remaining
 one; the daemon refuses both rather than relying on the UI to check.
 
+A single key can be sent two ways: as a key event, or as a macro holding one
+press/release pair. They are not interchangeable — World of Tanks under Wine
+ignores the key-event form — so the editor offers both, as "A single key" and
+"A single key, as a macro". See [ADR-0008](docs/adr/0008-key-versus-macro.md).
+
 The dialog only offers bindings the hardware can actually encode. `second-mode`
 is deliberately absent because libratbag rejects it on the G502 (issue #1798); if
 a config already contains it, the table shows the raw name so it can be replaced.
