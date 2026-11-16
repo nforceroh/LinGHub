@@ -21,88 +21,15 @@ from dbus_fast import DBusError as DBusFastError
 from ..hardware.ratbag import DeviceNotFound, RatbagClient
 from ..hardware.writer import ProfileWriter, WriteError
 from ..notify import Notifier, profile_message
-from ..domain.profile import Binding
+from . import slots
 from .dbus_service import PATH, SERVICE, ManagerInterface
 from .snapshot import StateSnapshot
 from .state import DaemonState
 from .watcher import ConfigWatcher
+from .writes import Bindings, ConfigWrites, DeviceSettings, ProfileLifecycle
 
-
-GAMING_SLOT = 1
-DESKTOP_SLOT = 0
 
 logger = logging.getLogger("linghub.daemon")
-
-
-class _ProfileLifecycle:
-    """The daemon's profile-lifecycle operations, as one collaborator."""
-
-    def __init__(self, daemon: "Daemon"):
-        self._daemon = daemon
-
-    def load(self, name: str) -> bool:
-        return self._daemon._request_profile(name)
-
-    def reload(self) -> bool:
-        return self._daemon._request_reload()
-
-    def create(self, name: str, executable: str) -> bool:
-        return self._daemon._request_create_profile(name, executable)
-
-    def rename(self, old: str, new: str) -> bool:
-        return self._daemon._request_rename_profile(old, new)
-
-    def delete(self, name: str) -> bool:
-        return self._daemon._request_delete_profile(name)
-
-
-class _Bindings:
-    """The daemon's binding operations, as one collaborator."""
-
-    def __init__(self, daemon: "Daemon"):
-        self._daemon = daemon
-
-    def get(self, profile: str) -> dict[int, tuple[str, object]]:
-        return self._daemon._get_bindings(profile)
-
-    def set(self, profile: str, index: int, kind: str, value: object) -> bool:
-        return self._daemon._request_set_binding(profile, index, kind, value)
-
-    def clear(self, profile: str, index: int) -> bool:
-        return self._daemon._request_set_binding(profile, index, "disabled", None)
-
-
-class _DeviceSettings:
-    """The daemon's DPI, report-rate and lighting operations."""
-
-    def __init__(self, daemon: "Daemon"):
-        self._daemon = daemon
-
-    def get_resolutions(self, profile: str) -> tuple:
-        return self._daemon._get_resolutions(profile)
-
-    def set_resolution(
-        self, profile: str, index: int, dpi: int,
-        make_default: bool, disabled: bool,
-    ) -> bool:
-        return self._daemon._request_set_resolution(
-            profile, index, dpi, make_default, disabled
-        )
-
-    def get_report_rate(self, profile: str) -> int:
-        return self._daemon._get_report_rate(profile)
-
-    def get_report_rates(self, profile: str) -> tuple[int, ...]:
-        return self._daemon._get_report_rates(profile)
-
-    def set_report_rate(self, profile: str, rate: int) -> bool:
-        return self._daemon._request_set_report_rate(profile, rate)
-
-    def get_leds(self, profile: str) -> dict[int, dict]:
-        return self._daemon._get_leds(profile)
-
-    def set_leds(self, profile: str, settings: dict) -> bool:
-        return self._daemon._request_set_leds(profile, settings)
 
 
 class ConfigStartupError(RuntimeError):
@@ -133,6 +60,38 @@ class Daemon:
         self._notifier: Notifier | None = None
         self._manual_override: str | None = None
         self._detected_game: str | None = None
+
+        # The three collaborators the D-Bus adapter calls. They hold the config
+        # edits; this class keeps the run loop, the device, and the decision of
+        # which profile should be on the mouse.
+        writes = ConfigWrites(
+            state=lambda: self._state,
+            save=self._save_config,
+            wake=self._wake,
+        )
+        self.profiles = ProfileLifecycle(
+            state=lambda: self._state,
+            writes=writes,
+            request_load=self._request_load,
+            request_reload=self._request_reload,
+        )
+        self.bindings = Bindings(state=lambda: self._state, writes=writes)
+        self.settings = DeviceSettings(
+            state=lambda: self._state,
+            writes=writes,
+            report_rates=lambda: tuple(self._report_rates),
+        )
+
+    def _request_load(self, name: str) -> bool:
+        """Load a named profile, overriding detection until that changes."""
+        self._manual_override = name
+        self._wake()
+        return True
+
+    def _request_reload(self) -> bool:
+        self._watcher.reset()
+        self._wake()
+        return True
 
     async def _connect(self) -> None:
         if self._bus is None:
@@ -181,9 +140,9 @@ class Daemon:
             return
 
         self._interface = ManagerInterface(
-            profiles=_ProfileLifecycle(self),
-            bindings=_Bindings(self),
-            settings=_DeviceSettings(self),
+            profiles=self.profiles,
+            bindings=self.bindings,
+            settings=self.settings,
             get_state=self._snapshot,
         )
         self._session_bus.export(PATH, self._interface)
@@ -198,166 +157,6 @@ class Daemon:
             detected_game=self._detected_game,
             desktop_profile=self._state.config.desktop_profile,
         )
-
-    def _request_profile(self, name: str) -> bool:
-        """Handle a manual profile request from the UI.
-
-        The override is cleared as soon as the detected game changes, so a
-        manual choice does not fight detection indefinitely.
-        """
-        assert self._state is not None
-        if self._state.config.profile_named(name) is None:
-            logger.warning("LoadProfile(%r): no such profile", name)
-            return False
-        self._manual_override = name
-        self._wake()
-        return True
-
-    def _request_reload(self) -> bool:
-        self._watcher.reset()
-        self._wake()
-        return True
-
-    def _get_bindings(self, profile_name: str) -> dict[int, tuple[str, object]]:
-        """Every binding in a profile, as plain values for D-Bus."""
-        if self._state is None:
-            return {}
-        profile = self._state.config.profile_named(profile_name)
-        if profile is None:
-            return {}
-        return {
-            index: (binding.type, binding.value)
-            for index, binding in profile.bindings.items()
-        }
-
-    def _request_set_binding(
-        self, profile_name: str, index: int, kind: str, value: object
-    ) -> bool:
-        """Change one binding, persist it, and let the next tick push it."""
-        assert self._state is not None
-
-        if kind not in Binding.VALID_TYPES:
-            logger.warning("SetBinding: unknown binding type %r", kind)
-            return False
-        try:
-            binding = Binding(type=kind, value=value)
-        except ValueError as exc:
-            logger.warning("SetBinding: %s", exc)
-            return False
-
-        return self._apply_and_save(
-            lambda: self._state.set_binding(profile_name, index, binding),
-            f"SetBinding({profile_name!r}, {index}, {kind}, {value!r})",
-        )
-
-    def _get_leds(self, profile_name: str) -> dict[int, dict]:
-        """A profile's LED zones, keyed by index."""
-        if self._state is None:
-            return {}
-        profile = self._state.config.profile_named(profile_name)
-        if profile is None:
-            return {}
-        return {int(entry["index"]): dict(entry) for entry in profile.leds}
-
-    def _request_set_leds(self, profile_name: str, settings: dict) -> bool:
-        """Change a profile's lighting, persist it, and let the next tick push it."""
-        assert self._state is not None
-
-        try:
-            # Reuse the config validator so the ranges cannot drift from what
-            # a hand-written file is allowed to contain.
-            config_module.validate_led(dict(settings, index=0))
-        except config_module.ConfigError as exc:
-            logger.warning("SetLeds: %s", exc)
-            return False
-
-        return self._apply_and_save(
-            lambda: self._state.set_leds(profile_name, settings),
-            f"SetLeds({profile_name!r}, {settings!r})",
-        )
-
-    def _get_resolutions(self, profile_name: str) -> tuple:
-        """A profile's DPI slots as (dpi, is_default, is_disabled) in order."""
-        if self._state is None:
-            return ()
-        profile = self._state.config.profile_named(profile_name)
-        if profile is None:
-            return ()
-        return tuple(
-            (
-                int(slot.get("dpi", 0)),
-                bool(slot.get("default")),
-                bool(slot.get("disabled")),
-            )
-            for slot in profile.resolutions
-        )
-
-    def _get_report_rate(self, profile_name: str) -> int:
-        if self._state is None:
-            return 0
-        profile = self._state.config.profile_named(profile_name)
-        return int(profile.report_rate or 0) if profile else 0
-
-    def _get_report_rates(self, profile_name: str) -> tuple:
-        """The rates the device accepts, cached from the last connect.
-
-        Read from the device rather than hard-coded, so a variant offering a
-        different set is not presented with the wrong choices.
-        """
-        return tuple(self._report_rates)
-
-    def _request_set_resolution(
-        self, profile_name: str, index: int, dpi: int, make_default: bool, disabled: bool
-    ) -> bool:
-        return self._apply_and_save(
-            lambda: self._state.set_resolution(
-                profile_name, index, dpi,
-                make_default=make_default, disabled=disabled,
-            ),
-            f"SetResolution({profile_name!r}, {index}, {dpi})",
-        )
-
-    def _request_set_report_rate(self, profile_name: str, rate: int) -> bool:
-        return self._apply_and_save(
-            lambda: self._state.set_report_rate(profile_name, rate),
-            f"SetReportRate({profile_name!r}, {rate})",
-        )
-
-    def _request_create_profile(self, name: str, executable: str) -> bool:
-        return self._apply_and_save(
-            lambda: self._state.create_profile(name, executable),
-            f"CreateProfile({name!r})",
-        )
-
-    def _request_rename_profile(self, old: str, new: str) -> bool:
-        return self._apply_and_save(
-            lambda: self._state.rename_profile(old, new),
-            f"RenameProfile({old!r}, {new!r})",
-        )
-
-    def _request_delete_profile(self, name: str) -> bool:
-        return self._apply_and_save(
-            lambda: self._state.delete_profile(name),
-            f"DeleteProfile({name!r})",
-        )
-
-    def _apply_and_save(self, change, description: str) -> bool:
-        """Run a config change, persist it, and roll back if saving fails.
-
-        Every write path needs the same rule: the running config must never
-        disagree with the file, so a failed save restores the previous config.
-        """
-        assert self._state is not None
-        previous = self._state.config
-        if not change():
-            logger.warning("%s: rejected", description)
-            return False
-        if not self._save_config():
-            self._state.config = previous
-            return False
-        logger.info("%s applied", description)
-        self._wake()
-        return True
 
     def _save_config(self) -> bool:
         assert self._state is not None
@@ -439,7 +238,7 @@ class Daemon:
             return
 
         target = self._state.target_profile
-        slot = DESKTOP_SLOT if target.is_desktop else GAMING_SLOT
+        slot = slots.slot_for(target)
 
         try:
             result = await self._writer.apply(target, slot)

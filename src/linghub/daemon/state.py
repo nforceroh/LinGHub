@@ -13,6 +13,7 @@ from dataclasses import dataclass, field, replace
 from ..config import Config
 from ..discovery.detector import Detection
 from ..domain.profile import Binding, Game, Profile
+from . import slots
 
 
 def fingerprint(profile: Profile) -> str:
@@ -81,26 +82,23 @@ class DaemonState:
     def observe_active_slot(self, active_slot: int | None) -> None:
         """Record which slot the hardware says is active.
 
-        Called each tick with the slot read from the device. A mismatch means
-        something outside the daemon changed the active profile, so the next
-        write re-asserts it. An unknown loaded profile is not drift: there is
-        nothing yet to disagree with.
+        Called each tick with the slot read from the device. The Slot rules
+        themselves live in `slots`: this only holds the answer.
         """
+        self._slot_drifted = slots.drifted(self.loaded, active_slot)
+
+    @property
+    def loaded(self) -> Profile | None:
+        """The profile the daemon last loaded, or None if it has not loaded one."""
         if self.loaded_profile is None:
-            self._slot_drifted = False
-            return
-        expected = self.expected_slot
-        self._slot_drifted = expected is None or active_slot != expected
+            return None
+        return self.config.profile_named(self.loaded_profile)
 
     @property
     def expected_slot(self) -> int | None:
         """The slot the loaded profile should occupy, or None if unknown."""
-        if self.loaded_profile is None:
-            return None
-        profile = self.config.profile_named(self.loaded_profile)
-        if profile is None:
-            return None
-        return 0 if profile.is_desktop else 1
+        loaded = self.loaded
+        return None if loaded is None else slots.slot_for(loaded)
 
     def observe(self, detection: Detection) -> None:
         """Update the stack from one detection pass.
