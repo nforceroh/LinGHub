@@ -73,3 +73,17 @@ _Avoid_: save, flush, sync, apply
 The single file holding every profile plus application settings. The daemon is
 its only writer.
 _Avoid_: settings, preferences, store, database
+
+**Config change**:
+One edit to the config: a new binding, a DPI slot, a lighting effect, or a
+whole profile. Every config change obeys the same rule — apply it, save it, and
+undo it in memory if the save fails — so the file on disk and the running state
+never disagree.
+_Avoid_: write, mutation, update
+
+**Collaborator**:
+One of the three things the D-Bus adapter asks the daemon for: profile
+lifecycle, bindings, or device settings. Grouping by what a method acts on
+keeps the adapter's interface narrow and its implementations testable without
+a bus.
+_Avoid_: helper, handler, backend

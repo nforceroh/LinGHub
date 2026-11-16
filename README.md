@@ -216,6 +216,35 @@ validate is never written over.
 - [Architecture decisions](docs/adr/) — why the design is the way it is
 - [Architecture reviews](docs/reviews/) — deepening opportunities, dated
 
+## Where the code lives
+
+```
+src/linghub/
+├── domain/          Profile, Game, Binding — pure, no I/O
+├── hardware/        ratbagd: reading, encoding, writing and verifying
+├── discovery/       /proc and GameMode: is a game running?
+├── daemon/
+│   ├── service.py   the run loop, the device, and which profile should load
+│   ├── state.py     what the daemon believes, and what it should do next
+│   ├── writes.py    every config change, and the rule that persists it
+│   ├── slots.py     which slot a profile belongs in (ADR-0001)
+│   ├── collaborators.py  what the D-Bus adapter needs from the daemon
+│   ├── dbus_service.py   the D-Bus surface itself
+│   └── snapshot.py  a read-only view for the interface
+├── ui/
+│   ├── window.py    the main window
+│   ├── presentation.py   what the window should show, decided without a widget
+│   ├── panel_rules.py    the DPI and lighting rules, without a widget
+│   ├── binding_modes.py  how the editor's modes map to stored bindings
+│   └── *_panel.py   widget wiring only
+├── dbus_contract.py  one owner for member names and signatures
+└── daemon_access.py  the shared entry point for CLI and tray
+```
+
+The pattern throughout: a decision that does not need a framework lives in a
+module the framework calls, so it can be tested directly. `presentation`,
+`panel_rules`, `binding_modes`, `slots` and `writes` are all that shape.
+
 ## Development
 
 ```bash
