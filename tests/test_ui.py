@@ -257,9 +257,9 @@ class HitTestGeometryTests(unittest.TestCase):
 class HotspotEditorTests(unittest.TestCase):
     """The editor maps a click to a button, so redoing one point is possible.
 
-    Points are keyed by ratbag index rather than by click order: placing a
-    point for a button that already has one moves it, which is what makes
-    fixing a single bad hotspot practical.
+    Points are keyed by ratbag index rather than by click order. Placing is
+    explicit: a marker click always selects or drags, never restamps, which is
+    what made moving one circle appear to move others.
     """
 
     def _editor(self, points=None):
@@ -269,6 +269,9 @@ class HotspotEditorTests(unittest.TestCase):
         editor._points = dict(points or {})
         editor._selected = 0
         editor._hover = None
+        editor._armed = False
+        editor._drag = None
+        editor._drag_origin = None
         emitted = []
         editor.emit = lambda *args: emitted.append(args)
         editor.queue_draw = lambda: None
@@ -287,51 +290,113 @@ class HotspotEditorTests(unittest.TestCase):
         editor.get_height = lambda: 555
         return editor
 
-    def test_placing_a_point_keys_it_to_the_selected_button(self):
+    # --- placing ------------------------------------------------------
+
+    def test_placing_needs_the_button_to_be_armed(self):
         editor = self._editor()
         editor._selected = 5
         editor._to_fraction = lambda x, y: (0.25, 0.5)
         editor._on_pressed(_FakeGesture(1), 1, 100, 200)
-        self.assertEqual(editor.points, {5: (0.25, 0.5)})
+        self.assertEqual(editor.points, {})
+        self.assertEqual(editor._emitted[-1], ("needs-arm", 5))
 
-    def test_replacing_an_existing_point_does_not_add_a_second(self):
-        editor = self._editor({5: (0.1, 0.1)})
-        editor._selected = 5
-        editor._to_fraction = lambda x, y: (0.9, 0.9)
+    def test_armed_click_places_the_selected_button(self):
+        editor = self._editor()
+        editor.arm(5)
+        editor._to_fraction = lambda x, y: (0.25, 0.5)
         editor._on_pressed(_FakeGesture(1), 1, 100, 200)
-        self.assertEqual(editor.points, {5: (0.9, 0.9)})
+        self.assertEqual(editor.points, {5: (0.25, 0.5)})
+        self.assertFalse(editor.armed)
 
     def test_placing_advances_to_the_next_unplaced_button(self):
         editor = self._editor()
-        editor._selected = 0
+        editor.arm(0)
         editor._to_fraction = lambda x, y: (0.2, 0.2)
         editor._on_pressed(_FakeGesture(1), 1, 10, 10)
         self.assertEqual(editor.selected, 1)
 
     def test_advance_skips_buttons_that_already_have_points(self):
         editor = self._editor({1: (0.5, 0.5)})
-        editor._selected = 0
+        editor.arm(0)
         editor._to_fraction = lambda x, y: (0.2, 0.2)
         editor._on_pressed(_FakeGesture(1), 1, 10, 10)
         self.assertEqual(editor.selected, 2)
 
-    def test_clicking_an_existing_marker_selects_it(self):
+    # --- the bug: clicking a marker must not move anything ------------
+
+    def test_clicking_a_marker_selects_it_and_moves_nothing(self):
         editor = self._editor({7: (0.5, 0.5)})
         editor._selected = 0
-        cx, cy = editor._image_rect()[0] + 0.5 * 1024, 0.5 * 555
+        cx, cy = self._image_rect_centre(editor, 0.5, 0.5)
         editor._on_pressed(_FakeGesture(1), 1, cx, cy)
         self.assertEqual(editor.selected, 7)
         self.assertEqual(editor.points, {7: (0.5, 0.5)})
 
+    def test_clicking_a_marker_does_not_restamp_even_when_armed(self):
+        """The old bug: an armed button stamped itself onto the clicked marker."""
+        editor = self._editor({7: (0.5, 0.5)})
+        editor.arm(2)
+        cx, cy = self._image_rect_centre(editor, 0.5, 0.5)
+        editor._on_pressed(_FakeGesture(1), 1, cx, cy)
+        self.assertEqual(editor.points, {7: (0.5, 0.5)})
+
+    def test_clicking_empty_space_leaves_other_markers_alone(self):
+        editor = self._editor({7: (0.5, 0.5), 8: (0.2, 0.2)})
+        editor._to_fraction = lambda x, y: (0.9, 0.9)
+        editor._on_pressed(_FakeGesture(1), 1, 900, 500)
+        self.assertEqual(editor.points, {7: (0.5, 0.5), 8: (0.2, 0.2)})
+
+    # --- dragging -----------------------------------------------------
+
+    def test_drag_moves_only_the_dragged_marker(self):
+        editor = self._editor({7: (0.5, 0.5), 8: (0.2, 0.2)})
+        editor._on_drag_begin(_FakeGesture(1), *self._image_rect_centre(editor, 0.5, 0.5))
+        self.assertEqual(editor._drag, 7)
+        editor._on_drag_update(_FakeGesture(1), 102.4, 55.5)  # +10% of the width
+        self.assertEqual(editor.points[8], (0.2, 0.2))
+        self.assertAlmostEqual(editor.points[7][0], 0.6, places=3)
+        self.assertAlmostEqual(editor.points[7][1], 0.6, places=3)
+
+    def test_drag_offsets_are_relative_to_the_drag_origin(self):
+        """A regression here makes the marker jump by the origin on each move."""
+        editor = self._editor({3: (0.4, 0.4)})
+        editor._on_drag_begin(_FakeGesture(1), *self._image_rect_centre(editor, 0.4, 0.4))
+        editor._on_drag_update(_FakeGesture(1), 51.2, 0)
+        editor._on_drag_update(_FakeGesture(1), 51.2, 0)
+        # Both updates apply the same absolute offset, so the value is stable.
+        self.assertAlmostEqual(editor.points[3][0], 0.45, places=3)
+
+    def test_drag_outside_the_image_does_not_move_the_marker(self):
+        editor = self._editor({3: (0.9, 0.9)})
+        editor._on_drag_begin(_FakeGesture(1), *self._image_rect_centre(editor, 0.9, 0.9))
+        editor._on_drag_update(_FakeGesture(1), 500, 500)
+        self.assertEqual(editor.points[3], (0.9, 0.9))
+
+    # --- removing -----------------------------------------------------
+
     def test_right_click_removes_the_marker_under_the_cursor(self):
         editor = self._editor({3: (0.5, 0.5)})
-        cx = editor._image_rect()[0] + 0.5 * 1024
-        cy = editor._image_rect()[1] + 0.5 * 555
+        cx, cy = self._image_rect_centre(editor, 0.5, 0.5)
         editor._on_pressed(_FakeGesture(3), 1, cx, cy)
         self.assertEqual(editor.points, {})
 
+    def test_remove_ignores_buttons_that_have_no_point(self):
+        editor = self._editor({3: (0.5, 0.5)})
+        editor.remove(9)
+        self.assertEqual(editor.points, {3: (0.5, 0.5)})
+
+    def test_backspace_path_removes_the_selected_button(self):
+        """The window used to mutate a copy, so Backspace did nothing."""
+        editor = self._editor({0: (0.1, 0.1), 1: (0.2, 0.2)})
+        editor.select(1)
+        editor.remove(editor.selected)
+        self.assertEqual(editor.points, {0: (0.1, 0.1)})
+
+    # --- misc ---------------------------------------------------------
+
     def test_clicks_outside_the_image_are_ignored(self):
         editor = self._editor()
+        editor.arm(0)
         editor._to_fraction = lambda x, y: None
         editor._on_pressed(_FakeGesture(1), 1, 0, 0)
         self.assertEqual(editor.points, {})
@@ -340,7 +405,14 @@ class HotspotEditorTests(unittest.TestCase):
         editor = self._editor()
         editor.select(4)
         editor.select(4)
-        self.assertEqual(len(editor._emitted), 1)
+        self.assertEqual(len([e for e in editor._emitted if e[0] == "selection-changed"]), 1)
+
+    def test_selecting_disarms(self):
+        editor = self._editor()
+        editor.arm(2)
+        self.assertTrue(editor.armed)
+        editor.select(5)
+        self.assertFalse(editor.armed)
 
     def test_load_points_is_keyed_by_index(self):
         import json
@@ -366,6 +438,11 @@ class HotspotEditorTests(unittest.TestCase):
         from linghub.ui.hotspot_editor import load_points
 
         self.assertEqual(load_points(Path("/nonexistent/hotspots.json")), {})
+
+    @staticmethod
+    def _image_rect_centre(editor, fx, fy):
+        ox, oy, dw, dh = editor._image_rect()
+        return ox + fx * dw, oy + fy * dh
 
 
 class _FakeGesture:

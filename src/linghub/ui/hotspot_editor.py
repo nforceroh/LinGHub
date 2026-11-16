@@ -46,6 +46,8 @@ class HotspotEditor(Gtk.DrawingArea):
     __gsignals__ = {
         "selection-changed": (GObject.SignalFlags.RUN_FIRST, None, (int,)),
         "points-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        "needs-arm": (GObject.SignalFlags.RUN_FIRST, None, (int,)),
+        "armed-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
     def __init__(self, image_path: Path, points: dict[int, tuple[float, float]]):
@@ -56,6 +58,11 @@ class HotspotEditor(Gtk.DrawingArea):
         self._points: dict[int, tuple[float, float]] = dict(points)
         self._selected: int = NAMES[0][0]
         self._hover: tuple[float, float] | None = None
+        # Dropping a point needs the button to be armed first, so clicking a
+        # marker never silently restamps it under a different button.
+        self._armed: bool = False
+        self._drag: int | None = None
+        self._drag_origin: tuple[float, float] | None = None
 
         self.set_hexpand(True)
         self.set_vexpand(True)
@@ -64,7 +71,15 @@ class HotspotEditor(Gtk.DrawingArea):
         click = Gtk.GestureClick()
         click.set_button(0)
         click.connect("pressed", self._on_pressed)
+        click.connect("released", self._on_released)
         self.add_controller(click)
+
+        drag = Gtk.GestureDrag()
+        drag.set_button(1)
+        drag.connect("drag-begin", self._on_drag_begin)
+        drag.connect("drag-update", self._on_drag_update)
+        drag.connect("drag-end", self._on_drag_end)
+        self.add_controller(drag)
 
         motion = Gtk.EventControllerMotion()
         motion.connect("motion", self._on_motion)
@@ -79,10 +94,54 @@ class HotspotEditor(Gtk.DrawingArea):
     def selected(self) -> int:
         return self._selected
 
+    @property
+    def armed(self) -> bool:
+        return self._armed
+
     def select(self, index: int) -> None:
-        if index != self._selected:
+        changed = index != self._selected
+        # Any explicit selection change disarms: you must ask to place again.
+        if changed and self._armed:
+            self._armed = False
+            self.emit("armed-changed")
+        if changed:
             self._selected = index
             self.emit("selection-changed", index)
+        self.queue_draw()
+
+    def arm(self, index: int | None = None) -> None:
+        """Prepare to place the selected (or given) button's point."""
+        if index is not None and index != self._selected:
+            self._selected = index
+            self.emit("selection-changed", index)
+        self._armed = True
+        self.emit("armed-changed")
+        self.queue_draw()
+
+    def disarm(self) -> None:
+        if self._armed:
+            self._armed = False
+            self.emit("armed-changed")
+            self.queue_draw()
+
+    def place(self, index: int, frac: tuple[float, float]) -> None:
+        self._points[index] = frac
+        if self._armed:
+            self._armed = False
+            self.emit("armed-changed")
+        self.emit("points-changed")
+        self.queue_draw()
+
+    def remove(self, index: int) -> None:
+        if index in self._points:
+            del self._points[index]
+            self.emit("points-changed")
+            self.queue_draw()
+
+    def move(self, index: int, frac: tuple[float, float]) -> None:
+        if index in self._points:
+            self._points[index] = frac
+            self.emit("points-changed")
             self.queue_draw()
 
     def next_unplaced(self) -> None:
@@ -94,6 +153,7 @@ class HotspotEditor(Gtk.DrawingArea):
 
     def clear(self) -> None:
         self._points.clear()
+        self._armed = False
         self.emit("points-changed")
         self.queue_draw()
 
@@ -138,25 +198,52 @@ class HotspotEditor(Gtk.DrawingArea):
         if button == 3:
             index = self._marker_at(x, y)
             if index is not None:
-                del self._points[index]
-                self.emit("points-changed")
-                self.queue_draw()
+                self.remove(index)
             return
 
-        # Clicking an existing marker selects its button instead of dropping a
-        # second point on top of it.
         existing = self._marker_at(x, y)
         if existing is not None:
+            # Select it, and let the drag controller take over if the pointer
+            # moves. Never place here: that would restamp another button's
+            # point under this one.
             self.select(existing)
+            self._drag = existing
             return
 
         frac = self._to_fraction(x, y)
-        if frac is None:
+        if frac is not None and self._armed:
+            self.place(self._selected, frac)
+            self.next_unplaced()
+        elif frac is not None:
+            # Not armed: just tell the user what to do instead of guessing.
+            self.emit("needs-arm", self._selected)
+
+    def _on_released(self, _gesture, _n, _x, _y) -> None:
+        self._drag = None
+
+    def _on_drag_begin(self, _gesture, x, y) -> None:
+        self._drag = self._marker_at(x, y)
+        # GestureDrag reports the offset from the drag origin on every update,
+        # so the starting fraction has to be captured once. Applying it to the
+        # already-moved point would make the marker accelerate away.
+        self._drag_origin: tuple[float, float] | None = (
+            self._points[self._drag] if self._drag is not None else None
+        )
+
+    def _on_drag_update(self, _gesture, offset_x, offset_y) -> None:
+        if self._drag is None or self._drag_origin is None:
             return
-        self._points[self._selected] = frac
-        self.emit("points-changed")
-        self.next_unplaced()
-        self.queue_draw()
+        ox, oy, dw, dh = self._image_rect()
+        if dw <= 0 or dh <= 0:
+            return
+        fx, fy = self._drag_origin
+        frac = self._to_fraction(ox + fx * dw + offset_x, oy + fy * dh + offset_y)
+        if frac is not None:
+            self.move(self._drag, frac)
+
+    def _on_drag_end(self, _gesture, _offset_x, _offset_y) -> None:
+        self._drag = None
+        self._drag_origin = None
 
     def _on_motion(self, _controller, x, y) -> None:
         self._set_hover(self._to_fraction(x, y))
@@ -184,9 +271,9 @@ class HotspotEditor(Gtk.DrawingArea):
                 style="selected" if index == self._selected else "placed",
             )
 
-        # A faint ghost follows the cursor so you can see where the point you
-        # are about to drop will land before committing to it.
-        if self._hover is not None and self._selected not in self._points:
+        # The ghost shows where a point would land. It only appears when the
+        # button is armed, so it doubles as feedback that clicking will place.
+        if self._armed and self._hover is not None:
             hx, hy = self._hover
             self._draw_marker(cr, ox + hx * dw, oy + hy * dh, self._selected, style="ghost")
 
@@ -249,6 +336,8 @@ class EditorWindow(Adw.ApplicationWindow):
         self._editor = HotspotEditor(image_path, points)
         self._editor.connect("selection-changed", lambda *_a: self._sync_rows())
         self._editor.connect("points-changed", lambda *_a: self._sync_rows())
+        self._editor.connect("armed-changed", lambda *_a: self._sync_rows())
+        self._editor.connect("needs-arm", lambda _e, _i: self._editor.arm())
 
         split = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         split.append(self._build_sidebar())
@@ -279,19 +368,26 @@ class EditorWindow(Adw.ApplicationWindow):
         box.set_margin_end(12)
         box.set_margin_top(12)
         box.set_margin_bottom(12)
-        box.set_size_request(330, -1)
+        box.set_size_request(340, -1)
 
         heading = Gtk.Label(label="Buttons", xalign=0)
         heading.add_css_class("heading")
         box.append(heading)
 
         hint = Gtk.Label(
-            label="Pick a button, then click the picture where it is.",
+            label="Click a marker to select and drag it. To put a new point "
+                  "down, press Place, then click the picture.",
             xalign=0, wrap=True,
         )
         hint.add_css_class("dim-label")
         hint.add_css_class("caption")
         box.append(hint)
+
+        self._place_button = Gtk.Button(label="Place selected button")
+        self._place_button.connect(
+            "clicked", lambda _b: self._editor.arm()
+        )
+        box.append(self._place_button)
 
         self._rows: dict[int, Gtk.Widget] = {}
         listbox = Gtk.ListBox()
@@ -301,12 +397,11 @@ class EditorWindow(Adw.ApplicationWindow):
         for index, name, g_name in NAMES:
             row = Adw.ActionRow()
             row.set_title(describe(index))
-            row.set_subtitle(f"ratbag {index} · manual {manual_number(index)}")
             row.set_activatable(True)
             check = Gtk.Image(icon_name="object-select-symbolic")
             row.add_suffix(check)
             row._check = check
-            row.connect("activated", lambda _r, i=index: self._editor.select(i))
+            row.connect("activated", lambda _r, i=index: self._editor.arm(i))
             self._rows[index] = row
             listbox.append(row)
 
@@ -320,6 +415,7 @@ class EditorWindow(Adw.ApplicationWindow):
     def _sync_rows(self) -> None:
         points = self._editor.points
         selected = self._editor.selected
+        armed = self._editor.armed
         for index, row in self._rows.items():
             placed = index in points
             row._check.set_visible(placed)
@@ -332,26 +428,34 @@ class EditorWindow(Adw.ApplicationWindow):
             else:
                 row.remove_css_class("accent")
 
+        self._place_button.set_sensitive(not armed)
+        if armed:
+            self._place_button.set_label(f"Click the picture to place {selected}")
+
         placed_count = len(points)
         missing = len(NAMES) - placed_count
         current = describe(selected)
-        if missing:
+        if armed:
             self._status.set_text(
-                f"Placing {current} · {placed_count}/{len(NAMES)} placed, "
-                f"{missing} to go · right-click a marker to remove it · Ctrl+S saves"
+                f"Placing {current} · click the picture where it is · Esc cancels"
+            )
+        elif missing:
+            self._status.set_text(
+                f"{placed_count}/{len(NAMES)} placed, {missing} to go · "
+                f"drag a marker to move it · right-click removes · Ctrl+S saves"
             )
         else:
             self._status.set_text(
-                f"All {len(NAMES)} placed · click a marker to select it · Ctrl+S saves"
+                f"All {len(NAMES)} placed · drag a marker to move it · "
+                f"right-click removes · Ctrl+S saves"
             )
 
     def _on_key(self, _c, keyval, _code, _mods) -> bool:
+        if keyval == Gdk.KEY_Escape:
+            self._editor.disarm()
+            return True
         if keyval == Gdk.KEY_BackSpace:
-            points = self._editor.points
-            if self._editor.selected in points:
-                del points[self._editor.selected]
-                self._editor.queue_draw()
-                self._sync_rows()
+            self._editor.remove(self._editor.selected)
             return True
         if keyval in (Gdk.KEY_s, Gdk.KEY_S) and _mods & Gdk.ModifierType.CONTROL_MASK:
             self._on_save(None)
