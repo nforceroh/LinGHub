@@ -59,6 +59,21 @@ class FakeDaemon:
         self.res_calls.append((profile, index, dpi, make_default, disabled))
         return self.accept
 
+    def on_create_profile(self, name, executable):
+        self.created = getattr(self, "created", [])
+        self.created.append((name, executable))
+        return self.accept
+
+    def on_rename_profile(self, old, new):
+        self.renamed = getattr(self, "renamed", [])
+        self.renamed.append((old, new))
+        return self.accept
+
+    def on_delete_profile(self, name):
+        self.deleted = getattr(self, "deleted", [])
+        self.deleted.append(name)
+        return self.accept
+
     def on_set_report_rate(self, profile, rate):
         self.rate_calls = getattr(self, "rate_calls", [])
         self.rate_calls.append((profile, rate))
@@ -79,6 +94,9 @@ def make_interface(daemon):
         get_report_rates=daemon.get_report_rates,
         on_set_resolution=daemon.on_set_resolution,
         on_set_report_rate=daemon.on_set_report_rate,
+        on_create_profile=daemon.on_create_profile,
+        on_rename_profile=daemon.on_rename_profile,
+        on_delete_profile=daemon.on_delete_profile,
     )
 
 
@@ -223,6 +241,31 @@ class DpiMethodTests(unittest.TestCase):
         self.assertEqual(daemon.rate_calls, [("wot", 500)])
 
 
+class ProfileManagementMethodTests(unittest.TestCase):
+    def test_create_routes_to_the_daemon(self):
+        daemon = FakeDaemon()
+        self.assertTrue(call(make_interface(daemon), "CreateProfile", "new", "New.exe"))
+        self.assertEqual(daemon.created, [("new", "New.exe")])
+
+    def test_create_reports_rejection(self):
+        self.assertFalse(call(make_interface(FakeDaemon(accept=False)),
+                              "CreateProfile", "new", ""))
+
+    def test_rename_routes_to_the_daemon(self):
+        daemon = FakeDaemon()
+        self.assertTrue(call(make_interface(daemon), "RenameProfile", "old", "new"))
+        self.assertEqual(daemon.renamed, [("old", "new")])
+
+    def test_delete_routes_to_the_daemon(self):
+        daemon = FakeDaemon()
+        self.assertTrue(call(make_interface(daemon), "DeleteProfile", "old"))
+        self.assertEqual(daemon.deleted, ["old"])
+
+    def test_delete_reports_rejection(self):
+        self.assertFalse(call(make_interface(FakeDaemon(accept=False)),
+                              "DeleteProfile", "desktop"))
+
+
 class PropertyTests(unittest.TestCase):
     def test_active_profile_reports_loaded(self):
         daemon = FakeDaemon(StateSnapshot(loaded_profile="world-of-tanks"))
@@ -259,7 +302,7 @@ class IntrospectionTests(unittest.TestCase):
             "GetBindings", "SetBinding", "ClearBinding",
             "GetLeds", "SetLeds",
             "GetResolutions", "SetResolution", "GetReportRate", "SetReportRate",
-            "GetReportRates",
+            "GetReportRates", "CreateProfile", "RenameProfile", "DeleteProfile",
             "ActiveProfile", "DetectedGame", "DesktopProfile",
             "ProfileChanged", "GameDetected", "GameExited",
         ):

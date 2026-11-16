@@ -49,6 +49,9 @@ class ManagerInterface(ServiceInterface):
         get_report_rates=None,
         on_set_resolution=None,
         on_set_report_rate=None,
+        on_create_profile=None,
+        on_rename_profile=None,
+        on_delete_profile=None,
     ):
         super().__init__(INTERFACE)
         self._on_load_profile = on_load_profile
@@ -63,6 +66,9 @@ class ManagerInterface(ServiceInterface):
         self._get_report_rates = get_report_rates
         self._on_set_resolution = on_set_resolution
         self._on_set_report_rate = on_set_report_rate
+        self._on_create_profile = on_create_profile
+        self._on_rename_profile = on_rename_profile
+        self._on_delete_profile = on_delete_profile
 
     @method()
     def LoadProfile(self, name: "s") -> "b":
@@ -122,6 +128,34 @@ class ManagerInterface(ServiceInterface):
             return False
         logger.info("ClearBinding(%r, %d) requested over D-Bus", profile, index)
         return bool(self._on_set_binding(profile, index, "disabled", None))
+
+    @method()
+    def CreateProfile(self, name: "s", executable: "s") -> "b":
+        """Add a profile, optionally bound to a game executable.
+
+        An empty executable makes a desktop-style profile: one that is never
+        matched to a game.
+        """
+        if self._on_create_profile is None:
+            return False
+        logger.info("CreateProfile(%r, %r) requested over D-Bus", name, executable)
+        return bool(self._on_create_profile(name, executable))
+
+    @method()
+    def RenameProfile(self, old: "s", new: "s") -> "b":
+        """Rename a profile and every reference to it."""
+        if self._on_rename_profile is None:
+            return False
+        logger.info("RenameProfile(%r, %r) requested over D-Bus", old, new)
+        return bool(self._on_rename_profile(old, new))
+
+    @method()
+    def DeleteProfile(self, name: "s") -> "b":
+        """Remove a profile. Refused for the desktop profile."""
+        if self._on_delete_profile is None:
+            return False
+        logger.info("DeleteProfile(%r) requested over D-Bus", name)
+        return bool(self._on_delete_profile(name))
 
     @method()
     def GetResolutions(self, profile: "s") -> "a(uuuu)":

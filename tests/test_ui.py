@@ -257,6 +257,70 @@ class LedSaveModelTests(unittest.TestCase):
         self.assertEqual(panel.mode, "off")
 
 
+@unittest.skipUnless(_has_cairo(), "needs pycairo and Gtk 4")
+class ProfileManagementUiTests(unittest.TestCase):
+    """The desktop profile must never be deletable, from any entry point."""
+
+    def _window(self):
+        from gi.repository import Adw, Gtk
+
+        from linghub.ui.client import DaemonState
+        from linghub.ui.window import MainWindow
+
+        window = MainWindow.__new__(MainWindow)
+        Adw.ApplicationWindow.__init__(window)
+        window._state = DaemonState()
+        window._title = Adw.WindowTitle(title="t")
+        window._status = Gtk.Label()
+        window._profile_list = Gtk.ListBox()
+        window._profile_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        window._profile_rows = {}
+        window._table_rows = {}
+        window._binding_rows = {}
+        window._bindings = {}
+        window._leds = {}
+        window._resolutions = []
+        window._report_rates = ()
+        window._report_rate = 0
+        window._led_panel = None
+        window._dpi_panel = None
+        window._selected_button = None
+        window._apply_state(DaemonState(
+            active_profile="desktop",
+            profiles=("desktop", "wot"),
+            desktop_profile="desktop",
+        ))
+        return window
+
+    def test_selected_profile_is_read_from_the_list(self):
+        window = self._window()
+        window._profile_list.select_row(window._profile_list.get_row_at_index(1))
+        self.assertEqual(window._selected_profile(), "wot")
+
+    def test_no_selection_returns_none(self):
+        self.assertIsNone(self._window()._selected_profile())
+
+    def test_deleting_the_desktop_profile_is_refused_before_the_daemon(self):
+        calls = []
+
+        class FakeClient:
+            async def delete_profile(self, name):
+                calls.append(name)
+                return True
+
+        window = self._window()
+        window._client = FakeClient()
+        window._profile_list.select_row(window._profile_list.get_row_at_index(0))
+        window._prompt_delete_profile()
+        self.assertEqual(calls, [], "the desktop profile was sent to the daemon")
+        self.assertIn("cannot be deleted", window._status.get_text().lower())
+
+    def test_delete_without_a_selection_says_so(self):
+        window = self._window()
+        window._prompt_delete_profile()
+        self.assertIn("select a profile", window._status.get_text().lower())
+
+
 class SignalHandlingTests(unittest.TestCase):
     def setUp(self):
         self.calls = 0

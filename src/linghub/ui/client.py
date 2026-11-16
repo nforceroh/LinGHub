@@ -128,6 +128,15 @@ class DaemonClient:
     async def clear_binding(self, profile: str, index: int) -> bool:
         return bool(await self._call("ClearBinding", "si", [profile, index]))
 
+    async def create_profile(self, name: str, executable: str = "") -> bool:
+        return bool(await self._call("CreateProfile", "ss", [name, executable]))
+
+    async def rename_profile(self, old: str, new: str) -> bool:
+        return bool(await self._call("RenameProfile", "ss", [old, new]))
+
+    async def delete_profile(self, name: str) -> bool:
+        return bool(await self._call("DeleteProfile", "s", [name]))
+
     async def get_resolutions(self, profile: str) -> list[dict]:
         """A profile's DPI slots in order."""
         raw = await self._call("GetResolutions", "s", [profile]) or ()

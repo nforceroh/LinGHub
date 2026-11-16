@@ -123,6 +123,9 @@ class Daemon:
             get_report_rates=self._get_report_rates,
             on_set_resolution=self._request_set_resolution,
             on_set_report_rate=self._request_set_report_rate,
+            on_create_profile=self._request_create_profile,
+            on_rename_profile=self._request_rename_profile,
+            on_delete_profile=self._request_delete_profile,
         )
         self._session_bus.export(PATH, self._interface)
         await self._session_bus.request_name(SERVICE)
@@ -287,6 +290,24 @@ class Daemon:
         return self._apply_and_save(
             lambda: self._state.set_report_rate(profile_name, rate),
             f"SetReportRate({profile_name!r}, {rate})",
+        )
+
+    def _request_create_profile(self, name: str, executable: str) -> bool:
+        return self._apply_and_save(
+            lambda: self._state.create_profile(name, executable),
+            f"CreateProfile({name!r})",
+        )
+
+    def _request_rename_profile(self, old: str, new: str) -> bool:
+        return self._apply_and_save(
+            lambda: self._state.rename_profile(old, new),
+            f"RenameProfile({old!r}, {new!r})",
+        )
+
+    def _request_delete_profile(self, name: str) -> bool:
+        return self._apply_and_save(
+            lambda: self._state.delete_profile(name),
+            f"DeleteProfile({name!r})",
         )
 
     def _apply_and_save(self, change, description: str) -> bool:

@@ -117,7 +117,31 @@ class MainWindow(Adw.ApplicationWindow):
         top.set_margin_start(12)
         top.set_margin_end(12)
 
-        top.append(self._section_label("Profiles"))
+        profile_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        heading = self._section_label("Profiles")
+        heading.set_hexpand(True)
+        profile_header.append(heading)
+
+        self._new_profile_button = Gtk.Button(icon_name="list-add-symbolic")
+        self._new_profile_button.set_tooltip_text("Add a profile")
+        self._new_profile_button.add_css_class("flat")
+        self._new_profile_button.connect("clicked", lambda _b: self._prompt_new_profile())
+        profile_header.append(self._new_profile_button)
+
+        self._rename_profile_button = Gtk.Button(icon_name="document-edit-symbolic")
+        self._rename_profile_button.set_tooltip_text("Rename the selected profile")
+        self._rename_profile_button.add_css_class("flat")
+        self._rename_profile_button.connect("clicked", lambda _b: self._prompt_rename_profile())
+        profile_header.append(self._rename_profile_button)
+
+        self._delete_profile_button = Gtk.Button(icon_name="user-trash-symbolic")
+        self._delete_profile_button.set_tooltip_text("Delete the selected profile")
+        self._delete_profile_button.add_css_class("flat")
+        self._delete_profile_button.connect("clicked", lambda _b: self._prompt_delete_profile())
+        profile_header.append(self._delete_profile_button)
+
+        top.append(profile_header)
+
         self._profile_list = Gtk.ListBox()
         self._profile_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self._profile_list.connect("row-activated", self._on_profile_activated)
@@ -393,6 +417,155 @@ class MainWindow(Adw.ApplicationWindow):
     def _apply_bindings(self, bindings: dict[int, tuple[str, str]]) -> None:
         self._bindings = dict(bindings)
         self._rebuild_bindings()
+
+    # --- profile management ----------------------------------------------
+
+    def _selected_profile(self) -> str | None:
+        """The profile the list currently highlights."""
+        row = self._profile_list.get_selected_row()
+        return row.get_title() if row is not None else None
+
+    def _prompt_new_profile(self) -> None:
+        self._ask_for_text(
+            title="New profile",
+            label="Profile name",
+            secondary="Game executable (optional)",
+            on_accept=self._create_profile,
+        )
+
+    def _create_profile(self, name: str, executable: str, dialog) -> None:
+        if not name.strip():
+            dialog.show_error("A profile needs a name.")
+            return
+        run_and_report(
+            self._do_create_profile(name.strip(), executable.strip(), dialog),
+            self._on_async_error,
+        )
+
+    async def _do_create_profile(self, name: str, executable: str, dialog) -> None:
+        try:
+            ok = await self._client.create_profile(name, executable)
+        except (RuntimeError, OSError) as exc:
+            dialog.show_error(str(exc))
+            return
+        if not ok:
+            dialog.show_error(
+                f"Cannot create {name!r}. The name may already be in use."
+            )
+            return
+        dialog.close()
+        self._status.set_text(f"Created profile {name}.")
+        await self._refresh()
+
+    def _prompt_rename_profile(self) -> None:
+        old = self._selected_profile()
+        if old is None:
+            self._status.set_text("Select a profile to rename.")
+            return
+        self._ask_for_text(
+            title="Rename profile",
+            label="New name",
+            initial=old,
+            on_accept=lambda new, _exec, dialog: run_and_report(
+                self._do_rename_profile(old, new.strip(), dialog),
+                self._on_async_error,
+            ),
+        )
+
+    async def _do_rename_profile(self, old: str, new: str, dialog) -> None:
+        if not new or new == old:
+            dialog.show_error("Enter a different name.")
+            return
+        try:
+            ok = await self._client.rename_profile(old, new)
+        except (RuntimeError, OSError) as exc:
+            dialog.show_error(str(exc))
+            return
+        if not ok:
+            dialog.show_error(f"Cannot rename to {new!r}. The name may be in use.")
+            return
+        dialog.close()
+        self._status.set_text(f"Renamed {old} to {new}.")
+        await self._refresh()
+
+    def _prompt_delete_profile(self) -> None:
+        name = self._selected_profile()
+        if name is None:
+            self._status.set_text("Select a profile to delete.")
+            return
+        if name == self._state.desktop_profile:
+            self._status.set_text("The desktop profile cannot be deleted.")
+            return
+
+        dialog = Adw.MessageDialog(
+            transient_for=self,
+            heading=f"Delete {name}?",
+            body="Its bindings, DPI and lighting settings are lost.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("delete", "Delete")
+        dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.connect(
+            "response",
+            lambda _d, response: (
+                run_and_report(
+                    self._do_delete_profile(name), self._on_async_error
+                )
+                if response == "delete"
+                else None
+            ),
+        )
+        dialog.present()
+
+    async def _do_delete_profile(self, name: str) -> None:
+        try:
+            ok = await self._client.delete_profile(name)
+        except (RuntimeError, OSError) as exc:
+            self._status.set_text(f"Could not delete {name}: {exc}")
+            return
+        if not ok:
+            self._status.set_text(f"The daemon refused to delete {name}.")
+            return
+        self._status.set_text(f"Deleted profile {name}.")
+        await self._refresh()
+
+    def _ask_for_text(
+        self, *, title: str, label: str, on_accept, initial: str = "",
+        secondary: str | None = None,
+    ) -> None:
+        """A small text prompt, reused by create and rename."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+
+        entry = Gtk.Entry(text=initial)
+        entry.set_activates_default(True)
+        box.append(Gtk.Label(label=label, xalign=0))
+        box.append(entry)
+
+        extra = None
+        if secondary is not None:
+            extra = Gtk.Entry()
+            box.append(Gtk.Label(label=secondary, xalign=0))
+            box.append(extra)
+
+        dialog = Adw.MessageDialog(transient_for=self, heading=title, extra_child=box)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("ok", "OK")
+        dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("ok")
+        dialog.set_close_response("cancel")
+
+        def on_response(_dialog, response):
+            if response != "ok":
+                dialog.close()
+                return
+            on_accept(entry.get_text(), extra.get_text() if extra else "", dialog)
+
+        dialog.connect("response", on_response)
+        dialog.present()
 
     def _open_editor(self, index: int) -> None:
         """Open the binding editor for one button."""

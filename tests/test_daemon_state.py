@@ -375,6 +375,99 @@ class ResolutionTests(unittest.TestCase):
         self.assertTrue(state.needs_write)
 
 
+class ProfileManagementTests(unittest.TestCase):
+    """Creating, renaming and deleting profiles.
+
+    These are structural changes to the config, so the rules that matter are
+    about what must never be broken: the desktop profile has to exist, names
+    have to stay unique, and the loaded profile must survive a rename.
+    """
+
+    def _state(self):
+        return DaemonState(config=make_config(DESKTOP, WOT, SC))
+
+    def test_create_adds_a_profile(self):
+        state = self._state()
+        self.assertTrue(state.create_profile("new-game"))
+        self.assertIsNotNone(state.config.profile_named("new-game"))
+
+    def test_create_rejects_a_duplicate_name(self):
+        state = self._state()
+        self.assertFalse(state.create_profile("world-of-tanks"))
+        self.assertEqual(len(state.config.profiles), 3)
+
+    def test_create_rejects_an_empty_name(self):
+        self.assertFalse(self._state().create_profile("   "))
+
+    def test_create_with_a_game_records_it(self):
+        state = self._state()
+        state.create_profile("new-game", executable="NewGame.exe")
+        profile = state.config.profile_named("new-game")
+        self.assertEqual(profile.games[0].executable, "NewGame.exe")
+
+    def test_create_without_a_game_is_the_desktop_kind(self):
+        state = self._state()
+        state.create_profile("spare")
+        self.assertTrue(state.config.profile_named("spare").is_desktop)
+
+    def test_rename_keeps_the_bindings(self):
+        state = self._state()
+        state.set_binding("world-of-tanks", 3, Binding("key", "KEY_F"))
+        self.assertTrue(state.rename_profile("world-of-tanks", "wot"))
+        self.assertEqual(
+            state.config.profile_named("wot").bindings[3].value, "KEY_F"
+        )
+
+    def test_rename_rejects_an_existing_name(self):
+        state = self._state()
+        self.assertFalse(state.rename_profile("world-of-tanks", "star-citizen"))
+
+    def test_rename_updates_the_desktop_pointer(self):
+        """Otherwise the desktop profile would vanish."""
+        state = self._state()
+        self.assertTrue(state.rename_profile("desktop", "everyday"))
+        self.assertEqual(state.config.desktop_profile, "everyday")
+        self.assertIsNotNone(state.config.desktop)
+
+    def test_rename_updates_the_loaded_profile_name(self):
+        """Otherwise needs_write would compare against a profile that is gone."""
+        state = self._state()
+        state.stack = ["world-of-tanks"]
+        state.mark_loaded("world-of-tanks")
+        state.rename_profile("world-of-tanks", "wot")
+        self.assertEqual(state.loaded_profile, "wot")
+        self.assertFalse(state.needs_write)
+
+    def test_rename_updates_a_manual_override(self):
+        state = self._state()
+        state.stack = ["world-of-tanks"]
+        state.rename_profile("world-of-tanks", "wot")
+        self.assertEqual(state.stack, ["wot"])
+
+    def test_delete_removes_a_profile(self):
+        state = self._state()
+        self.assertTrue(state.delete_profile("star-citizen"))
+        self.assertIsNone(state.config.profile_named("star-citizen"))
+
+    def test_delete_refuses_the_desktop_profile(self):
+        state = self._state()
+        self.assertFalse(state.delete_profile("desktop"))
+        self.assertIsNotNone(state.config.profile_named("desktop"))
+
+    def test_delete_refuses_the_last_profile(self):
+        state = DaemonState(config=make_config(DESKTOP))
+        self.assertFalse(state.delete_profile("desktop"))
+        self.assertEqual(len(state.config.profiles), 1)
+
+    def test_delete_drops_it_from_the_stack(self):
+        state = self._state()
+        state.stack = ["star-citizen"]
+        state.mark_loaded("star-citizen")
+        state.delete_profile("star-citizen")
+        self.assertEqual(state.stack, [])
+        self.assertIsNone(state.loaded_profile)
+
+
 class FingerprintTests(unittest.TestCase):
     """Editing a profile's contents must trigger a rewrite, not just a rename."""
 

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field, replace
 
 from ..config import Config
 from ..discovery.detector import Detection
-from ..domain.profile import Binding, Profile
+from ..domain.profile import Binding, Game, Profile
 
 
 def fingerprint(profile: Profile) -> str:
@@ -167,6 +167,62 @@ class DaemonState:
         if profile is None:
             return False
         self._replace_profile(profile_name, replace(profile, report_rate=int(rate)))
+        return True
+
+    def create_profile(self, name: str, executable: str = "") -> bool:
+        """Add a profile, optionally bound to a game executable."""
+        name = name.strip()
+        if not name or self.config.profile_named(name) is not None:
+            return False
+        games = (Game(executable),) if executable.strip() else ()
+        self.config = replace(
+            self.config,
+            profiles=[*self.config.profiles, Profile(name=name, games=games)],
+        )
+        return True
+
+    def rename_profile(self, old: str, new: str) -> bool:
+        """Rename a profile and every reference to it.
+
+        The desktop pointer, the loaded profile name and the game stack all
+        hold profile names; leaving any of them stale would either lose the
+        desktop profile or make the daemon rewrite the wrong slot.
+        """
+        new = new.strip()
+        if not new or old == new:
+            return False
+        profile = self.config.profile_named(old)
+        if profile is None or self.config.profile_named(new) is not None:
+            return False
+
+        renamed = replace(profile, name=new)
+        desktop = new if self.config.desktop_profile == old else self.config.desktop_profile
+        self.config = replace(
+            self.config,
+            profiles=[renamed if p.name == old else p for p in self.config.profiles],
+            desktop_profile=desktop,
+        )
+
+        if self.loaded_profile == old:
+            self.loaded_profile = new
+        self.stack = [new if name == old else name for name in self.stack]
+        return True
+
+    def delete_profile(self, name: str) -> bool:
+        """Remove a profile, unless it is the desktop one or the only one."""
+        if name == self.config.desktop_profile:
+            return False
+        if self.config.profile_named(name) is None:
+            return False
+        remaining = [p for p in self.config.profiles if p.name != name]
+        if not remaining:
+            return False
+
+        self.config = replace(self.config, profiles=remaining)
+        self.stack = [entry for entry in self.stack if entry != name]
+        if self.loaded_profile == name:
+            self.loaded_profile = None
+            self.loaded_fingerprint = None
         return True
 
     def _replace_profile(self, profile_name: str, updated: Profile) -> None:
