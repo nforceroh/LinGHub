@@ -8,6 +8,15 @@ test's fake.
 The methods fall into three groups by what they act on, so the adapter takes
 three collaborators instead. Each is a Protocol, so the daemon does not have to
 inherit anything and a test can pass a plain object.
+
+The Protocols are load-bearing: `writes.py` implements them and
+`tests/test_collaborators.py` checks the implementations against them by
+comparing signatures. `runtime_checkable` alone would only compare method
+names, so a drifted parameter list would pass unnoticed.
+
+Delete a Protocol and the D-Bus adapter loses its statement of what it needs;
+delete an implementation and the daemon has nothing to call. Neither is a
+comment with a syntax cost.
 """
 
 from __future__ import annotations
