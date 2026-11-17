@@ -278,6 +278,17 @@ class MainWindow(Adw.ApplicationWindow):
             self._refresh_loop(), self._on_async_error
         )
 
+    async def _refresh_now(self) -> None:
+        """Refresh and wait for it, for callers whose message must survive.
+
+        A write reports its outcome on the status line, and applying a view
+        overwrites that line. The write path therefore has to let the refresh
+        finish before it reports, or the user never sees the message.
+        """
+        self._refresh()
+        if self._refresh_task is not None:
+            await self._refresh_task
+
     async def _refresh_loop(self) -> None:
         while True:
             await self._read_and_apply()
@@ -392,7 +403,7 @@ class MainWindow(Adw.ApplicationWindow):
             return False
         if not ok:
             return False
-        self._refresh()
+        await self._refresh_now()
         return True
 
     async def _dialog_write(self, dialog, rejected: str, change) -> bool:
@@ -412,7 +423,7 @@ class MainWindow(Adw.ApplicationWindow):
             dialog.show_error(rejected)
             return False
         dialog.close()
-        self._refresh()
+        await self._refresh_now()
         return True
 
     def _rebuild_profiles(self) -> None:

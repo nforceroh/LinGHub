@@ -14,6 +14,18 @@ or a patched module global.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
+
+
+class OverrideEnded(Enum):
+    """Why a manual override stopped applying.
+
+    A value rather than a sentence: the decision module says what happened,
+    and the caller decides how to say it.
+    """
+
+    GAME_CHANGED = "game_changed"
+    NO_GAME = "no_game"
 
 
 @dataclass(frozen=True)
@@ -26,8 +38,8 @@ class TickDecision:
     detected: str | None = None
     # The game that stopped, if one did.
     exited: str | None = None
-    # Why the override changed, for the log. None when it did not change.
-    reason: str | None = None
+    # Why the override ended, or None when it did not.
+    ended: OverrideEnded | None = None
 
 
 def decide(
@@ -49,10 +61,10 @@ def decide(
     """
     detected = None
     exited = None
-    reason = None
+    ended = None
     if detected_game != previous_game:
         if override is not None:
-            reason = "the detected game changed"
+            ended = OverrideEnded.GAME_CHANGED
         override = None
         if detected_game is not None:
             detected = detected_game
@@ -60,9 +72,9 @@ def decide(
             exited = previous_game
 
     if override is not None and detected_game is None:
-        reason = "no game is running"
+        ended = OverrideEnded.NO_GAME
         override = None
 
     return TickDecision(
-        override=override, detected=detected, exited=exited, reason=reason,
+        override=override, detected=detected, exited=exited, ended=ended,
     )

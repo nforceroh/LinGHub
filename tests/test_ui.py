@@ -281,6 +281,118 @@ class LedSaveModelTests(unittest.TestCase):
         )
 
 
+def _same_loop_scheduler():
+    """Make run_and_report schedule on the running loop.
+
+    In production the window's asyncio loop is the one GTK drives, so a task
+    scheduled by _refresh and awaited by _refresh_now share a loop. A test
+    that drives a coroutine with asyncio.run has a different loop, so the
+    scheduler is patched to use the running one.
+    """
+    import asyncio
+    import contextlib
+
+    import linghub.ui.window as window_module
+
+    @contextlib.contextmanager
+    def patched():
+        original = window_module.run_and_report
+
+        def schedule(coro, on_error=None):
+            task = asyncio.ensure_future(coro)
+
+            def _done(t):
+                if t.cancelled():
+                    return
+                exc = t.exception()
+                if exc is not None and on_error is not None:
+                    on_error(exc)
+
+            task.add_done_callback(_done)
+            return task
+
+        window_module.run_and_report = schedule
+        try:
+            yield
+        finally:
+            window_module.run_and_report = original
+
+    return patched()
+
+
+@unittest.skipUnless(_has_cairo(), "needs pycairo and Gtk 4")
+class WriteStatusTests(unittest.TestCase):
+    """A write's message must survive the refresh that follows it.
+
+    Applying a view overwrites the status line, so a write that reports its
+    outcome and then refreshes in the background loses the message. The write
+    path has to wait for the refresh before it reports.
+    """
+
+    def _window(self):
+        from gi.repository import Adw, Gtk
+
+        from linghub.ui.client import DaemonState, DaemonView, ProfileView
+        from linghub.ui.window import MainWindow
+
+        window = MainWindow.__new__(MainWindow)
+        Adw.ApplicationWindow.__init__(window)
+        window._state = DaemonState()
+        window._title = Adw.WindowTitle(title="t")
+        window._status = Gtk.Label()
+        window._profile_list = Gtk.ListBox()
+        window._profile_rows = {}
+        window._table_rows = {}
+        window._binding_rows = {}
+        window._bindings = {}
+        window._view = None
+        window._refresh_task = None
+        window._refresh_pending = False
+        window._led_panel = None
+        window._dpi_panel = None
+        window._selected_button = None
+        window._editing = "desktop"
+        window._apply_view(DaemonView(
+            state=DaemonState(
+                active_profile="desktop", profiles=("desktop",),
+                desktop_profile="desktop",
+            ),
+            profile=ProfileView(),
+        ))
+        return window
+
+    def test_a_write_message_survives_the_refresh(self):
+        import asyncio
+
+        from linghub.ui.client import DaemonState, DaemonView, ProfileView
+
+        class FakeClient:
+            async def load_profile(self, name):
+                return True
+
+            async def get_view(self, _profile):
+                return DaemonView(
+                    state=DaemonState(
+                        active_profile="desktop", profiles=("desktop",),
+                        desktop_profile="desktop",
+                    ),
+                    profile=ProfileView(),
+                )
+
+        window = self._window()
+        window._client = FakeClient()
+
+        async def run():
+            await window._load_profile("desktop")
+
+        with _same_loop_scheduler():
+            asyncio.run(run())
+        self.assertIn(
+            "Loaded desktop", window._status.get_text(),
+            "the refresh overwrote the write's message",
+        )
+
+
 @unittest.skipUnless(_has_cairo(), "needs pycairo and Gtk 4")
 class ProfileManagementUiTests(unittest.TestCase):
     """The desktop profile must never be deletable, from any entry point."""
@@ -445,11 +557,18 @@ class SelectionVersusLoadingTests(unittest.TestCase):
 
         window = self._window()
         window._client = FakeClient()
-        window._select_profile("world-of-tanks")
         # _load_selected goes through the GLib bridge, which needs a main loop;
-        # drive the coroutine it would run instead.
-        asyncio.run(window._load_profile(window._editing_profile()))
+        # drive the coroutine it would run instead. The scheduler is patched
+        # for the whole test so the refresh _select_profile starts shares the
+        # loop that _load_profile awaits on.
+        async def run():
+            window._select_profile("world-of-tanks")
+            await window._load_profile(window._editing_profile())
+
+        with _same_loop_scheduler():
+            asyncio.run(run())
         self.assertEqual(calls, ["world-of-tanks"])
+
 
 
 class GetViewDecodeTests(unittest.TestCase):

@@ -109,8 +109,11 @@ class Tray:
     def _start_refresh(self) -> None:
         """Read the daemon in a thread, unless a read is already running.
 
-        A read already in flight is skipped: it will deliver a fresh snapshot,
-        so a second one would only duplicate the work.
+        A read already in flight wins: this request is dropped rather than
+        queued, because the running read will deliver a fresh snapshot. The
+        cost is that a change arriving mid-read waits for the next signal or
+        the next fallback tick — up to thirty seconds if the daemon is quiet.
+        That is acceptable for a tray menu, and cheaper than a second thread.
         """
         if self._busy:
             return
