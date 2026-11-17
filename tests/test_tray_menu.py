@@ -33,6 +33,8 @@ print("ITEMS", ",".join(i.get_label() for i in tray._profile_items))
 print("ITEM_VISIBLE", ",".join(str(i.get_visible()) for i in tray._profile_items))
 print("SENSITIVE", ",".join(str(i.get_sensitive()) for i in tray._profile_items))
 print("STATUS", tray._status_item.get_label())
+print("FALLBACK_REPEATS", tray._refresh())
+print("ONCE_REMOVES", tray._refresh_once())
 """
 
 
@@ -76,6 +78,14 @@ class TrayMenuTests(unittest.TestCase):
 
     def test_the_status_line_names_the_active_profile(self):
         self.assertIn("desktop", self.menu["STATUS"])
+
+    def test_the_fallback_timer_stays_armed(self):
+        """Returning SOURCE_REMOVE would kill the poll after its first fire."""
+        self.assertEqual(self.menu["FALLBACK_REPEATS"], "True")
+
+    def test_a_signal_refresh_does_not_rearm(self):
+        """idle_add removes the source; a truthy return would repeat forever."""
+        self.assertEqual(self.menu["ONCE_REMOVES"], "False")
 
 
 if __name__ == "__main__":

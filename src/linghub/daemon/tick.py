@@ -26,6 +26,8 @@ class TickDecision:
     detected: str | None = None
     # The game that stopped, if one did.
     exited: str | None = None
+    # Why the override changed, for the log. None when it did not change.
+    reason: str | None = None
 
 
 def decide(
@@ -47,7 +49,10 @@ def decide(
     """
     detected = None
     exited = None
+    reason = None
     if detected_game != previous_game:
+        if override is not None:
+            reason = "the detected game changed"
         override = None
         if detected_game is not None:
             detected = detected_game
@@ -55,6 +60,9 @@ def decide(
             exited = previous_game
 
     if override is not None and detected_game is None:
+        reason = "no game is running"
         override = None
 
-    return TickDecision(override=override, detected=detected, exited=exited)
+    return TickDecision(
+        override=override, detected=detected, exited=exited, reason=reason,
+    )

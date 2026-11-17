@@ -289,9 +289,10 @@ class Daemon:
         # The override's fate and the game events are one pure decision; the
         # effects it implies are this method's job.
         decision = tick.decide(previous_game, self._detected_game, self._manual_override)
-        if decision.override != self._manual_override:
+        if decision.reason is not None:
             logger.info(
-                "clearing the manual override for %r", self._manual_override,
+                "clearing the manual override for %r: %s",
+                self._manual_override, decision.reason,
             )
         self._manual_override = decision.override
 

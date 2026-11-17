@@ -96,21 +96,26 @@ class Tray:
 
     def _refresh_once(self) -> bool:
         """Read the daemon once, off the GTK loop."""
-        if self._busy:
-            return GLib.SOURCE_REMOVE
-        self._busy = True
-        threading.Thread(target=self._refresh_thread, daemon=True).start()
+        self._start_refresh()
         return GLib.SOURCE_REMOVE
 
     # --- daemon access ---------------------------------------------------
 
     def _refresh(self) -> bool:
         """The slow fallback poll, in case a signal was missed."""
+        self._start_refresh()
+        return GLib.SOURCE_CONTINUE
+
+    def _start_refresh(self) -> None:
+        """Read the daemon in a thread, unless a read is already running.
+
+        A read already in flight is skipped: it will deliver a fresh snapshot,
+        so a second one would only duplicate the work.
+        """
         if self._busy:
-            return GLib.SOURCE_CONTINUE
+            return
         self._busy = True
         threading.Thread(target=self._refresh_thread, daemon=True).start()
-        return GLib.SOURCE_CONTINUE
 
     def _refresh_thread(self) -> None:
         try:

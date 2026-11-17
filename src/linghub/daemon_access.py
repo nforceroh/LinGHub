@@ -86,8 +86,6 @@ class Watcher:
 
     def __init__(self, on_change: Callable[[], None]):
         self._on_change = on_change
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._client = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
 
@@ -97,20 +95,23 @@ class Watcher:
         self._thread.start()
 
     def stop(self) -> None:
-        """Ask the watch loop to finish and close its connection."""
+        """Ask the watch loop to finish and close its connection.
+
+        Only the event is set: the loop polls it, so it exits its own way and
+        the connection closes in the `finally`. Stopping the loop directly
+        would abort `run_until_complete` mid-await and raise.
+        """
         self._stop.set()
-        if self._loop is not None:
-            self._loop.call_soon_threadsafe(self._loop.stop)
 
     def _run(self) -> None:
-        self._loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self._loop)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
-            self._loop.run_until_complete(self._watch())
+            loop.run_until_complete(self._watch())
         except Exception:  # noqa: BLE001 - a tray must not die on a bad watch
             logger.exception("daemon watch failed")
         finally:
-            self._loop.close()
+            loop.close()
 
     async def _watch(self) -> None:
         """Hold the connection open until stopped.
@@ -124,7 +125,6 @@ class Watcher:
         if not await client.connect():
             logger.debug("daemon unavailable; the tray will poll instead")
             return
-        self._client = client
         client.set_change_handler(self._on_change)
         try:
             while not self._stop.is_set():

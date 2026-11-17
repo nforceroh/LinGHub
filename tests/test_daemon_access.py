@@ -183,6 +183,35 @@ class WatcherTests(unittest.TestCase):
         asyncio.run(watcher._watch())
         self.assertTrue(FakeClient.instances[-1].disconnected)
 
+    def test_start_then_stop_exits_cleanly(self):
+        """The lifecycle the tray actually uses.
+
+        Stopping used to call loop.stop(), which aborted run_until_complete
+        mid-await and logged a traceback on every quit. The thread must exit
+        on its own and the connection must close.
+        """
+        import time
+
+        watcher = daemon_access.Watcher(lambda: None)
+        watcher.start()
+        time.sleep(0.3)
+        watcher.stop()
+        watcher._thread.join(timeout=2)
+
+        self.assertFalse(watcher._thread.is_alive(), "the watch thread did not exit")
+        self.assertTrue(FakeClient.instances[-1].disconnected)
+
+    def test_stopping_does_not_log_an_error(self):
+        """A clean quit must not look like a failure in the journal."""
+        import time
+
+        watcher = daemon_access.Watcher(lambda: None)
+        with self.assertNoLogs("linghub.daemon_access", level="ERROR"):
+            watcher.start()
+            time.sleep(0.3)
+            watcher.stop()
+            watcher._thread.join(timeout=2)
+
 
 if __name__ == "__main__":
     unittest.main()

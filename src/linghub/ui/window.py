@@ -22,7 +22,6 @@ from .asyncbridge import run_and_report
 from .binding_editor import BindingEditor
 from .buttonmap import BUTTONS, describe, manual_number
 from .client import DaemonClient, DaemonState, DaemonView
-from .refresh import RefreshGuard
 from .diagram import MouseDiagram
 from . import presentation
 from .dpi_panel import DpiPanel
@@ -48,7 +47,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._led_panel: LedPanel | None = None
         self._dpi_panel: DpiPanel | None = None
         self._view: DaemonView | None = None
-        self._refresh_guard = RefreshGuard()
+        self._refresh_task = None
+        self._refresh_pending = False
 
         self.set_default_size(980, 620)
 
@@ -250,37 +250,40 @@ class MainWindow(Adw.ApplicationWindow):
     # --- state -----------------------------------------------------------
 
     def _poll(self) -> bool:
-        run_and_report(self._refresh(), self._on_async_error)
+        self._refresh()
         return GLib.SOURCE_CONTINUE
 
     def _on_daemon_change(self) -> None:
         GLib.idle_add(self._refresh_from_idle)
 
     def _refresh_from_idle(self) -> bool:
-        run_and_report(self._refresh(), self._on_async_error)
+        self._refresh()
         return GLib.SOURCE_REMOVE
 
     def _on_async_error(self, exc: Exception) -> None:
         self._status.set_text(f"Error: {exc}")
 
-    async def _refresh(self) -> None:
+    def _refresh(self) -> None:
         """Read the daemon once, coalescing requests that arrive mid-flight.
 
         Three triggers call this: the poll, the daemon's change signals, and
-        every successful write. Without the guard a slow read could land after
-        a newer one and show a stale view.
+        every successful write. A read already in flight means this request
+        collapses into one repeat when it finishes, so a slow read cannot land
+        after a newer one.
         """
-        if not self._refresh_guard.begin():
+        if self._refresh_task is not None and not self._refresh_task.done():
+            self._refresh_pending = True
             return
-        try:
-            while True:
-                await self._read_and_apply()
-                if not self._refresh_guard.end():
-                    return
-                self._refresh_guard.begin()
-        except BaseException:
-            self._refresh_guard.end()
-            raise
+        self._refresh_task = run_and_report(
+            self._refresh_loop(), self._on_async_error
+        )
+
+    async def _refresh_loop(self) -> None:
+        while True:
+            await self._read_and_apply()
+            if not self._refresh_pending:
+                return
+            self._refresh_pending = False
 
     async def _read_and_apply(self) -> None:
         try:
@@ -389,7 +392,7 @@ class MainWindow(Adw.ApplicationWindow):
             return False
         if not ok:
             return False
-        await self._refresh()
+        self._refresh()
         return True
 
     async def _dialog_write(self, dialog, rejected: str, change) -> bool:
@@ -409,7 +412,7 @@ class MainWindow(Adw.ApplicationWindow):
             dialog.show_error(rejected)
             return False
         dialog.close()
-        await self._refresh()
+        self._refresh()
         return True
 
     def _rebuild_profiles(self) -> None:
@@ -662,7 +665,7 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._editing = name
         self._status.set_text(f"Editing {name}.")
-        run_and_report(self._refresh(), self._on_async_error)
+        self._refresh()
 
     def _load_selected(self) -> None:
         """Load the selected profile onto the mouse. A deliberate action."""

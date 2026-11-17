@@ -18,25 +18,36 @@ class OverrideLifetimeTests(unittest.TestCase):
         self.assertEqual(decision.override, "wot")
         self.assertIsNone(decision.detected)
         self.assertIsNone(decision.exited)
+        self.assertIsNone(decision.reason, "an unchanged override has no reason")
 
     def test_an_override_is_cleared_when_the_game_changes(self):
         decision = decide("wot", "star-citizen", "wot")
         self.assertIsNone(decision.override)
         self.assertEqual(decision.detected, "star-citizen")
+        self.assertEqual(decision.reason, "the detected game changed")
 
     def test_an_override_is_cleared_when_the_game_exits(self):
         decision = decide("wot", None, "wot")
         self.assertIsNone(decision.override)
         self.assertEqual(decision.exited, "wot")
+        self.assertEqual(decision.reason, "the detected game changed")
 
     def test_an_override_with_no_game_running_is_cleared(self):
         """The bug this rule exists for: a stuck override with nothing running."""
         decision = decide(None, None, "wot")
         self.assertIsNone(decision.override)
+        self.assertEqual(decision.reason, "no game is running")
 
     def test_an_override_survives_a_tick_that_detects_nothing_new(self):
         decision = decide(None, None, None)
         self.assertIsNone(decision.override)
+        self.assertIsNone(decision.reason)
+
+    def test_no_reason_when_there_was_no_override_to_clear(self):
+        """A game starting with no override is not a clearing."""
+        decision = decide(None, "wot", None)
+        self.assertEqual(decision.detected, "wot")
+        self.assertIsNone(decision.reason)
 
 
 class GameEventTests(unittest.TestCase):
