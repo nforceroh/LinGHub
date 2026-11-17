@@ -17,6 +17,7 @@ from linghub.ui.buttonmap import (
     manual_number,
 )
 from linghub.ui.client import INTERFACE, DaemonClient
+from linghub.ui.refresh import RefreshGuard
 
 
 def _has_cairo() -> bool:
@@ -107,6 +108,7 @@ class ProfileListTests(unittest.TestCase):
         window._led_panel = None
         window._dpi_panel = None
         window._view = None
+        window._refresh_guard = RefreshGuard()
 
         window._title = Adw.WindowTitle(title="t")
         window._status = Gtk.Label()
@@ -210,6 +212,7 @@ class LedSaveModelTests(unittest.TestCase):
         window._binding_rows = {}
         window._bindings = {}
         window._view = None
+        window._refresh_guard = RefreshGuard()
         window._selected_button = None
         window._editing = None
         from linghub.ui.led_panel import LedPanel
@@ -219,6 +222,7 @@ class LedSaveModelTests(unittest.TestCase):
 
         window._dpi_panel = DpiPanel(on_save=lambda *a: None)
         window._view = None
+        window._refresh_guard = RefreshGuard()
         window._apply_view(self._view(active="desktop", profiles=("desktop",)))
         return window
 
@@ -297,6 +301,7 @@ class ProfileManagementUiTests(unittest.TestCase):
         window._binding_rows = {}
         window._bindings = {}
         window._view = None
+        window._refresh_guard = RefreshGuard()
         window._led_panel = None
         window._dpi_panel = None
         window._selected_button = None
@@ -367,6 +372,7 @@ class SelectionVersusLoadingTests(unittest.TestCase):
         window._binding_rows = {}
         window._bindings = {}
         window._view = None
+        window._refresh_guard = RefreshGuard()
         window._led_panel = None
         window._dpi_panel = None
         window._selected_button = None

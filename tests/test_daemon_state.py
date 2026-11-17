@@ -687,33 +687,28 @@ class ManualOverrideTests(unittest.TestCase):
     The override used to clear only when the detected game changed, so picking
     a profile while no game was running left it stuck forever: the mouse stayed
     on a gaming profile with nothing running.
+
+    The rule itself is tested directly in test_tick.py. These tests keep the
+    integration honest: the daemon must ask the decision and act on it.
     """
 
-    def _daemon(self):
+    def _daemon(self, detection):
         from linghub.daemon.service import Daemon
 
-        daemon = Daemon()
+        daemon = Daemon(detector=lambda _profiles: detection)
         daemon._state = DaemonState(config=make_config(DESKTOP, WOT))
         return daemon
 
     def test_an_override_is_cleared_when_no_game_is_running(self):
         import asyncio
 
-        daemon = self._daemon()
+        from linghub.discovery.detector import Detection
+
+        daemon = self._daemon(Detection(matches=[], rejections=[], considered=0))
         daemon._manual_override = "world-of-tanks"
         daemon._detected_game = None
 
-        def no_detection(_profiles):
-            from linghub.discovery.detector import Detection
-            return Detection(matches=[], rejections=[], considered=0)
-
-        import linghub.daemon.service as svc
-        original = svc.detect
-        svc.detect = no_detection
-        try:
-            asyncio.run(daemon._tick_once())
-        finally:
-            svc.detect = original
+        asyncio.run(daemon._tick_once())
 
         self.assertIsNone(daemon._manual_override)
         self.assertEqual(daemon._state.target_profile.name, "desktop")
@@ -729,11 +724,7 @@ class ManualOverrideTests(unittest.TestCase):
         from linghub.discovery.detector import Detection, Match
         from linghub.discovery.processes import ProcessInfo
 
-        daemon = self._daemon()
-        daemon._detected_game = "world-of-tanks"
-        daemon._manual_override = "world-of-tanks"
-
-        profile = daemon._state.config.profile_named("world-of-tanks")
+        profile = Profile(name="world-of-tanks", games=(Game("x.exe"),))
         process = ProcessInfo(pid=1, name="p", executable_path="x.exe",
                               real_executable_path="x.exe", command="x.exe")
         detection = Detection(
@@ -741,16 +732,11 @@ class ManualOverrideTests(unittest.TestCase):
             rejections=[], considered=1,
         )
 
-        def detected(_profiles):
-            return detection
+        daemon = self._daemon(detection)
+        daemon._detected_game = "world-of-tanks"
+        daemon._manual_override = "world-of-tanks"
 
-        import linghub.daemon.service as svc
-        original = svc.detect
-        svc.detect = detected
-        try:
-            asyncio.run(daemon._tick_once())
-        finally:
-            svc.detect = original
+        asyncio.run(daemon._tick_once())
 
         self.assertEqual(daemon._manual_override, "world-of-tanks")
 

@@ -9,19 +9,20 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
+from typing import Callable
 
 from dbus_fast import BusType
 from dbus_fast.aio import MessageBus
 
 from .. import config as config_module
-from ..discovery.detector import detect
+from ..discovery.detector import Detection, detect
 from ..discovery.gamemode import GameModeClient
 from dbus_fast import DBusError as DBusFastError
 
 from ..hardware.ratbag import DeviceNotFound, RatbagClient
 from ..hardware.writer import ProfileWriter, WriteError
 from ..notify import Notifier, profile_message
-from . import slots
+from . import slots, tick
 from .dbus_service import PATH, SERVICE, ManagerInterface
 from .snapshot import StateSnapshot
 from .state import DaemonState
@@ -44,13 +45,16 @@ class Daemon:
         self,
         config_path: Path | str = config_module.DEFAULT_CONFIG_PATH,
         poll_interval: float | None = None,
+        detector: Callable[[list], Detection] = detect,
     ):
         self._config_path = Path(config_path)
         self._poll_interval = poll_interval
+        # Detection is a collaborator like the write adapters: injected so a
+        # test can say what is running without patching a module global.
+        self._detector = detector
         self._state: DaemonState | None = None
         self._writer: ProfileWriter | None = None
         self._bus: MessageBus | None = None
-        self._pending: str | None = None
         self._watcher = ConfigWatcher(self._config_path)
         self._wakeup = asyncio.Event()
         self._gamemode: GameModeClient | None = None
@@ -244,9 +248,10 @@ class Daemon:
             result = await self._writer.apply(target, slot)
         except WriteError as exc:
             # A refused write is not a missing device: keep the writer and
-            # retry on the next tick.
+            # retry on the next tick. The retry needs no queue: mark_loaded
+            # was not reached, so the fingerprint still disagrees and
+            # needs_write stays true.
             logger.error("failed to load profile %r: %s", target.name, exc)
-            self._pending = target.name
             return
         except (RuntimeError, OSError, DBusFastError) as exc:
             # The device object is gone: a KVM switch, an unplugged cable, a
@@ -254,11 +259,9 @@ class Daemon:
             # rather than letting this escape and killing the daemon.
             logger.warning("lost the device while writing: %s", exc)
             self._writer = None
-            self._pending = target.name
             return
 
         self._state.mark_loaded(target.name)
-        self._pending = None
         logger.info("loaded profile %r into slot %d (%d changes)", target.name, slot, len(result.changed))
 
         if self._interface is not None:
@@ -277,31 +280,26 @@ class Daemon:
     async def _tick_once(self) -> None:
         assert self._state is not None
         self._reload_if_changed()
-        detection = detect(self._state.config.profiles)
+        detection = self._detector(self._state.config.profiles)
 
         previous_game = self._detected_game
         self._state.observe(detection)
         self._detected_game = detection.game.profile.name if detection.game else None
 
-        # A manual choice lasts until the detected game changes, then detection
-        # takes over again.
-        if self._detected_game != previous_game:
-            self._manual_override = None
-            if self._interface is not None:
-                if self._detected_game is not None:
-                    self._interface.GameDetected(self._detected_game)
-                elif previous_game is not None:
-                    self._interface.GameExited(previous_game)
-
-        # A manual choice with no game running has nothing to override: the
-        # desktop profile is what should be loaded. Without this the override
-        # stuck forever, leaving a gaming profile on the mouse with no game.
-        if self._manual_override is not None and self._detected_game is None:
+        # The override's fate and the game events are one pure decision; the
+        # effects it implies are this method's job.
+        decision = tick.decide(previous_game, self._detected_game, self._manual_override)
+        if decision.override != self._manual_override:
             logger.info(
-                "clearing the manual override for %r: no game is running",
-                self._manual_override,
+                "clearing the manual override for %r", self._manual_override,
             )
-            self._manual_override = None
+        self._manual_override = decision.override
+
+        if self._interface is not None:
+            if decision.detected is not None:
+                self._interface.GameDetected(decision.detected)
+            elif decision.exited is not None:
+                self._interface.GameExited(decision.exited)
 
         if self._manual_override is not None:
             self._state.stack = [self._manual_override]

@@ -28,6 +28,9 @@ class FakeClient:
     async def state(self):
         return "state"
 
+    def set_change_handler(self, handler):
+        self._on_change = handler
+
     def disconnect(self):
         self.disconnected = True
 
@@ -123,6 +126,62 @@ class CallTests(unittest.TestCase):
 
     def test_state_is_a_convenience_for_the_common_case(self):
         self.assertEqual(daemon_access.state(), "state")
+
+
+class WatcherTests(unittest.TestCase):
+    """The tray's long-lived subscription.
+
+    The watcher owns a connection on its own thread and reports changes; the
+    GTK caller hops to the main loop itself. These tests pin the lifecycle
+    without a bus: connect, register the handler, disconnect on stop.
+    """
+
+    def setUp(self):
+        FakeClient.instances = []
+        import linghub.ui.client as real_client
+        self._real = real_client.DaemonClient
+        real_client.DaemonClient = FakeClient
+
+    def tearDown(self):
+        import linghub.ui.client as real_client
+        real_client.DaemonClient = self._real
+
+    def test_the_handler_is_registered_on_the_client(self):
+        import asyncio
+
+        calls = []
+        watcher = daemon_access.Watcher(lambda: calls.append(1))
+        watcher._stop.set()  # return from the loop immediately
+        asyncio.run(watcher._watch())
+        client = FakeClient.instances[-1]
+        self.assertIsNotNone(client._on_change)
+        client._on_change()
+        self.assertEqual(calls, [1])
+
+    def test_a_missing_daemon_does_not_raise(self):
+        """The tray falls back to its slow poll rather than dying."""
+        import asyncio
+
+        original_init = FakeClient.__init__
+
+        def failing_init(self):
+            original_init(self)
+            self.fail_connect = True
+
+        FakeClient.__init__ = failing_init
+        try:
+            watcher = daemon_access.Watcher(lambda: None)
+            asyncio.run(watcher._watch())  # must not raise
+        finally:
+            FakeClient.__init__ = original_init
+
+    def test_stopping_disconnects(self):
+        import asyncio
+
+        watcher = daemon_access.Watcher(lambda: None)
+        watcher._stop.set()
+        asyncio.run(watcher._watch())
+        self.assertTrue(FakeClient.instances[-1].disconnected)
 
 
 if __name__ == "__main__":

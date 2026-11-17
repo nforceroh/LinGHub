@@ -22,6 +22,7 @@ from .asyncbridge import run_and_report
 from .binding_editor import BindingEditor
 from .buttonmap import BUTTONS, describe, manual_number
 from .client import DaemonClient, DaemonState, DaemonView
+from .refresh import RefreshGuard
 from .diagram import MouseDiagram
 from . import presentation
 from .dpi_panel import DpiPanel
@@ -47,6 +48,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._led_panel: LedPanel | None = None
         self._dpi_panel: DpiPanel | None = None
         self._view: DaemonView | None = None
+        self._refresh_guard = RefreshGuard()
 
         self.set_default_size(980, 620)
 
@@ -262,6 +264,25 @@ class MainWindow(Adw.ApplicationWindow):
         self._status.set_text(f"Error: {exc}")
 
     async def _refresh(self) -> None:
+        """Read the daemon once, coalescing requests that arrive mid-flight.
+
+        Three triggers call this: the poll, the daemon's change signals, and
+        every successful write. Without the guard a slow read could land after
+        a newer one and show a stale view.
+        """
+        if not self._refresh_guard.begin():
+            return
+        try:
+            while True:
+                await self._read_and_apply()
+                if not self._refresh_guard.end():
+                    return
+                self._refresh_guard.begin()
+        except BaseException:
+            self._refresh_guard.end()
+            raise
+
+    async def _read_and_apply(self) -> None:
         try:
             view = await self._client.get_view(self._editing_profile() or "")
         except (RuntimeError, OSError) as exc:

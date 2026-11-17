@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from typing import Any, Callable, TypeVar
 
 from .ui.client import DaemonState
@@ -70,3 +71,63 @@ def state() -> DaemonState:
         return await client.state()
 
     return call(read)
+
+
+class Watcher:
+    """A long-lived connection that reports when the daemon changes.
+
+    The tray cannot await a client: its GTK3 loop is not an asyncio loop. But
+    it can keep one connection open on a thread with its own loop, and be told
+    when something happens instead of asking every two seconds.
+
+    `on_change` is called from that thread, so a GTK caller must hand off to
+    the main loop itself (the tray uses GLib.idle_add).
+    """
+
+    def __init__(self, on_change: Callable[[], None]):
+        self._on_change = on_change
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._client = None
+        self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
+
+    def start(self) -> None:
+        """Connect and begin watching, on a thread of its own."""
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        """Ask the watch loop to finish and close its connection."""
+        self._stop.set()
+        if self._loop is not None:
+            self._loop.call_soon_threadsafe(self._loop.stop)
+
+    def _run(self) -> None:
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+        try:
+            self._loop.run_until_complete(self._watch())
+        except Exception:  # noqa: BLE001 - a tray must not die on a bad watch
+            logger.exception("daemon watch failed")
+        finally:
+            self._loop.close()
+
+    async def _watch(self) -> None:
+        """Hold the connection open until stopped.
+
+        The connection is what makes the subscription work: the client's
+        message handler fires on this loop, so the loop must keep running.
+        """
+        from .ui.client import DaemonClient
+
+        client = DaemonClient()
+        if not await client.connect():
+            logger.debug("daemon unavailable; the tray will poll instead")
+            return
+        self._client = client
+        client.set_change_handler(self._on_change)
+        try:
+            while not self._stop.is_set():
+                await asyncio.sleep(0.2)
+        finally:
+            client.disconnect()

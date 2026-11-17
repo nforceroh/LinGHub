@@ -59,7 +59,7 @@ class Tray:
         self._menu.append(open_item)
 
         quit_item = Gtk.MenuItem(label="Quit tray")
-        quit_item.connect("activate", lambda _w: Gtk.main_quit())
+        quit_item.connect("activate", lambda _w: self._quit())
         self._menu.append(quit_item)
 
         self._menu.show_all()
@@ -68,16 +68,44 @@ class Tray:
 
         self._state = None
         self._busy = False
+        self._watcher: daemon_access.Watcher | None = None
 
     def start(self) -> None:
-        """Begin polling the daemon, then run the GTK main loop."""
-        GLib.timeout_add_seconds(2, self._refresh)
+        """Watch for daemon changes, then run the GTK main loop.
+
+        The daemon announces every change the tray cares about, so the tray
+        subscribes instead of asking every two seconds. The timer stays as a
+        slow fallback: a missed signal (a daemon restart, a dropped match)
+        must not leave the menu stale forever.
+        """
+        self._watcher = daemon_access.Watcher(self._on_daemon_change)
+        self._watcher.start()
+        GLib.timeout_add_seconds(30, self._refresh)
+        self._refresh()
         Gtk.main()
+
+    def _on_daemon_change(self) -> None:
+        """A signal arrived on the watcher's thread; hop to the GTK loop."""
+        GLib.idle_add(self._refresh_once)
+
+    def _quit(self) -> None:
+        """Close the subscription before leaving the main loop."""
+        if self._watcher is not None:
+            self._watcher.stop()
+        Gtk.main_quit()
+
+    def _refresh_once(self) -> bool:
+        """Read the daemon once, off the GTK loop."""
+        if self._busy:
+            return GLib.SOURCE_REMOVE
+        self._busy = True
+        threading.Thread(target=self._refresh_thread, daemon=True).start()
+        return GLib.SOURCE_REMOVE
 
     # --- daemon access ---------------------------------------------------
 
     def _refresh(self) -> bool:
-        """Poll the daemon in a thread, so the menu never blocks."""
+        """The slow fallback poll, in case a signal was missed."""
         if self._busy:
             return GLib.SOURCE_CONTINUE
         self._busy = True
