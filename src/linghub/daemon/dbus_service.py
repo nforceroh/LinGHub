@@ -64,17 +64,64 @@ class ManagerInterface(ServiceInterface):
         return list(self._get_state().profile_names)
 
     @method()
-    def GetBindings(self, profile: "s") -> "a(iss)":
-        """Every binding in a profile, as (button index, type, value).
+    def GetView(self, profile: "s") -> "(sssasa(iss)a(us(uuu)uu)a(uuuu)auu)":
+        """Everything a UI poll needs, in one read.
 
-        Returned as a flat list rather than a dict because D-Bus has no
-        integer-keyed map, and the value's type depends on the binding type,
-        so it is always a string here and decoded by the caller.
+        Returns (active profile, detected game, desktop profile, profile
+        names; then the named profile's bindings, LEDs, DPI slots, accepted
+        report rates, and its current report rate). An unknown profile yields
+        empty sections rather than an error: the UI may ask about a profile
+        that has just been deleted, and "nothing there yet" is the answer it
+        wants, not a failure.
+
+        One read replaces the five per-section members the client used to
+        call in sequence, so a poll costs one round trip and a partial read
+        cannot leave the UI showing a state pieced together from two ticks.
         """
+        snapshot = self._get_state()
+        return (
+            snapshot.loaded_profile or "",
+            snapshot.detected_game or "",
+            snapshot.desktop_profile,
+            list(snapshot.profile_names),
+            self._view_bindings(profile),
+            self._view_leds(profile),
+            self._view_resolutions(profile),
+            [int(rate) for rate in (self._settings.get_report_rates(profile) or ())],
+            int(self._settings.get_report_rate(profile) or 0),
+        )
+
+    def _view_bindings(self, profile: str) -> list:
         bindings = self._bindings.get(profile) or {}
         return [
             (int(index), str(kind), "" if value is None else str(value))
             for index, (kind, value) in sorted(bindings.items())
+        ]
+
+    def _view_leds(self, profile: str) -> list:
+        leds = self._settings.get_leds(profile) or {}
+        result = []
+        for index, settings in sorted(leds.items()):
+            color = settings.get("color") or (0, 0, 0)
+            result.append((
+                int(index),
+                str(settings.get("mode", "off")),
+                (int(color[0]), int(color[1]), int(color[2])),
+                int(settings.get("brightness", 255)),
+                int(settings.get("duration", 0)),
+            ))
+        return result
+
+    def _view_resolutions(self, profile: str) -> list:
+        slots = self._settings.get_resolutions(profile) or ()
+        return [
+            (
+                int(index),
+                int(dpi),
+                1 if default else 0,
+                1 if disabled else 0,
+            )
+            for index, (dpi, default, disabled) in enumerate(slots)
         ]
 
     @method()
@@ -122,25 +169,6 @@ class ManagerInterface(ServiceInterface):
         return bool(self._profiles.delete(name))
 
     @method()
-    def GetResolutions(self, profile: "s") -> "a(uuuu)":
-        """A profile's DPI slots as (index, dpi, is_default, is_disabled).
-
-        The flags are 0/1 rather than D-Bus booleans: dbus-fast rejects `bool`
-        inside a struct when the value came from a Python int, and the caller
-        only needs to know whether each is set.
-        """
-        slots = self._settings.get_resolutions(profile) or ()
-        return [
-            (
-                int(index),
-                int(dpi),
-                1 if default else 0,
-                1 if disabled else 0,
-            )
-            for index, (dpi, default, disabled) in enumerate(slots)
-        ]
-
-    @method()
     def SetResolution(
         self, profile: "s", index: "i", dpi: "u", make_default: "b", disabled: "b"
     ) -> "b":
@@ -152,45 +180,10 @@ class ManagerInterface(ServiceInterface):
         return bool(self._settings.set_resolution(profile, index, dpi, make_default, disabled))
 
     @method()
-    def GetReportRate(self, profile: "s") -> "u":
-        """The profile's report rate in Hz, or 0 if unset."""
-        return int(self._settings.get_report_rate(profile) or 0)
-
-    @method()
-    def GetReportRates(self, profile: "s") -> "au":
-        """The report rates the device accepts, in Hz.
-
-        Read from hardware rather than hard-coded, so a device that offers a
-        different set is not presented with the wrong choices.
-        """
-        return [int(rate) for rate in (self._settings.get_report_rates(profile) or ())]
-
-    @method()
     def SetReportRate(self, profile: "s", rate: "u") -> "b":
         """Change the profile's report rate."""
         logger.info("SetReportRate(%r, %d) requested over D-Bus", profile, rate)
         return bool(self._settings.set_report_rate(profile, rate))
-
-    @method()
-    def GetLeds(self, profile: "s") -> "a(us(uuu)uu)":
-        """A profile's LED settings, one entry per zone.
-
-        Returns (index, mode, colour, brightness, duration). The zones are
-        separate in the hardware even when the UI drives them together, so the
-        shape stays honest about that.
-        """
-        leds = self._settings.get_leds(profile) or {}
-        result = []
-        for index, settings in sorted(leds.items()):
-            color = settings.get("color") or (0, 0, 0)
-            result.append((
-                int(index),
-                str(settings.get("mode", "off")),
-                (int(color[0]), int(color[1]), int(color[2])),
-                int(settings.get("brightness", 255)),
-                int(settings.get("duration", 0)),
-            ))
-        return result
 
     @method()
     def SetLeds(

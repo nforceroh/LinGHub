@@ -87,7 +87,7 @@ class ProfileListTests(unittest.TestCase):
     """
 
     def _window(self, active="desktop"):
-        from linghub.ui.client import DaemonState
+        from linghub.ui.client import DaemonState, DaemonView, ProfileView
         from linghub.ui.window import MainWindow
 
         window = MainWindow.__new__(MainWindow)
@@ -106,19 +106,19 @@ class ProfileListTests(unittest.TestCase):
         window._profile_rows = {}
         window._led_panel = None
         window._dpi_panel = None
-        window._leds = {}
-        window._resolutions = []
-        window._report_rates = ()
-        window._report_rate = 0
+        window._view = None
 
         window._title = Adw.WindowTitle(title="t")
         window._status = Gtk.Label()
         window._profile_list = Gtk.ListBox()
         window._profile_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        window._apply_state(DaemonState(
-            active_profile=active,
-            profiles=("desktop", "world-of-tanks", "star-citizen"),
-            desktop_profile="desktop",
+        window._apply_view(DaemonView(
+            state=DaemonState(
+                active_profile=active,
+                profiles=("desktop", "world-of-tanks", "star-citizen"),
+                desktop_profile="desktop",
+            ),
+            profile=ProfileView(),
         ))
         return window
 
@@ -130,16 +130,19 @@ class ProfileListTests(unittest.TestCase):
         self.assertEqual(selected.get_title(), "star-citizen")
 
     def test_a_poll_does_not_clear_the_selection(self):
-        from linghub.ui.client import DaemonState
+        from linghub.ui.client import DaemonState, DaemonView, ProfileView
 
         window = self._window()
         window._profile_list.select_row(window._profile_list.get_row_at_index(2))
 
         # Same state again, as the poll would deliver.
-        window._apply_state(DaemonState(
-            active_profile="desktop",
-            profiles=("desktop", "world-of-tanks", "star-citizen"),
-            desktop_profile="desktop",
+        window._apply_view(DaemonView(
+            state=DaemonState(
+                active_profile="desktop",
+                profiles=("desktop", "world-of-tanks", "star-citizen"),
+                desktop_profile="desktop",
+            ),
+            profile=ProfileView(),
         ))
 
         selected = window._profile_list.get_selected_row()
@@ -148,30 +151,36 @@ class ProfileListTests(unittest.TestCase):
 
     def test_rows_are_not_recreated_on_every_poll(self):
         """Recreating rows is what loses focus and selection."""
-        from linghub.ui.client import DaemonState
+        from linghub.ui.client import DaemonState, DaemonView, ProfileView
 
         window = self._window()
         first = window._profile_list.get_row_at_index(1)
 
-        window._apply_state(DaemonState(
-            active_profile="desktop",
-            profiles=("desktop", "world-of-tanks", "star-citizen"),
-            desktop_profile="desktop",
+        window._apply_view(DaemonView(
+            state=DaemonState(
+                active_profile="desktop",
+                profiles=("desktop", "world-of-tanks", "star-citizen"),
+                desktop_profile="desktop",
+            ),
+            profile=ProfileView(),
         ))
         self.assertIs(window._profile_list.get_row_at_index(1), first)
 
     def test_active_marker_moves_without_rebuilding(self):
-        from linghub.ui.client import DaemonState
+        from linghub.ui.client import DaemonState, DaemonView, ProfileView
 
         window = self._window(active="desktop")
         self.assertIn(
             "on the mouse",
             window._profile_list.get_row_at_index(0).get_subtitle(),
         )
-        window._apply_state(DaemonState(
-            active_profile="world-of-tanks",
-            profiles=("desktop", "world-of-tanks", "star-citizen"),
-            desktop_profile="desktop",
+        window._apply_view(DaemonView(
+            state=DaemonState(
+                active_profile="world-of-tanks",
+                profiles=("desktop", "world-of-tanks", "star-citizen"),
+                desktop_profile="desktop",
+            ),
+            profile=ProfileView(),
         ))
         self.assertIn(
             "on the mouse",
@@ -200,7 +209,7 @@ class LedSaveModelTests(unittest.TestCase):
         window._table_rows = {}
         window._binding_rows = {}
         window._bindings = {}
-        window._leds = {}
+        window._view = None
         window._selected_button = None
         window._editing = None
         from linghub.ui.led_panel import LedPanel
@@ -209,14 +218,8 @@ class LedSaveModelTests(unittest.TestCase):
         from linghub.ui.dpi_panel import DpiPanel
 
         window._dpi_panel = DpiPanel(on_save=lambda *a: None)
-        window._resolutions = []
-        window._report_rates = ()
-        window._report_rate = 0
-        window._apply_state(DaemonState(
-            active_profile="desktop",
-            profiles=("desktop",),
-            desktop_profile="desktop",
-        ))
+        window._view = None
+        window._apply_view(self._view(active="desktop", profiles=("desktop",)))
         return window
 
     def test_editing_does_not_call_the_client(self):
@@ -243,9 +246,9 @@ class LedSaveModelTests(unittest.TestCase):
         self.assertTrue(panel.dirty)
 
         # A poll arrives with the old values from disk.
-        window._leds = {0: {"mode": "on", "color": (255, 0, 0),
-                            "brightness": 100, "duration": 0}}
-        window._apply_state(window._state)
+        leds = {0: {"mode": "on", "color": (255, 0, 0),
+                    "brightness": 100, "duration": 0}}
+        window._apply_view(self._view(active="desktop", profiles=("desktop",), leds=leds))
 
         self.assertEqual(panel.brightness, 222, "the poll reverted the edit")
         self.assertTrue(panel.dirty)
@@ -255,10 +258,21 @@ class LedSaveModelTests(unittest.TestCase):
         panel = window._led_panel
         panel.load({0: {"mode": "on", "color": (255, 0, 0),
                         "brightness": 100, "duration": 0}})
-        window._leds = {0: {"mode": "off", "color": (0, 0, 0),
-                            "brightness": 50, "duration": 0}}
-        window._apply_state(window._state)
+        leds = {0: {"mode": "off", "color": (0, 0, 0),
+                    "brightness": 50, "duration": 0}}
+        window._apply_view(self._view(active="desktop", profiles=("desktop",), leds=leds))
         self.assertEqual(panel.mode, "off")
+
+    @staticmethod
+    def _view(*, active, profiles, leds=None):
+        from linghub.ui.client import DaemonState, DaemonView, ProfileView
+
+        return DaemonView(
+            state=DaemonState(
+                active_profile=active, profiles=profiles, desktop_profile="desktop",
+            ),
+            profile=ProfileView(leds=leds or {}),
+        )
 
 
 @unittest.skipUnless(_has_cairo(), "needs pycairo and Gtk 4")
@@ -268,7 +282,7 @@ class ProfileManagementUiTests(unittest.TestCase):
     def _window(self):
         from gi.repository import Adw, Gtk
 
-        from linghub.ui.client import DaemonState
+        from linghub.ui.client import DaemonState, DaemonView, ProfileView
         from linghub.ui.window import MainWindow
 
         window = MainWindow.__new__(MainWindow)
@@ -282,18 +296,18 @@ class ProfileManagementUiTests(unittest.TestCase):
         window._table_rows = {}
         window._binding_rows = {}
         window._bindings = {}
-        window._leds = {}
-        window._resolutions = []
-        window._report_rates = ()
-        window._report_rate = 0
+        window._view = None
         window._led_panel = None
         window._dpi_panel = None
         window._selected_button = None
         window._editing = None
-        window._apply_state(DaemonState(
-            active_profile="desktop",
-            profiles=("desktop", "wot"),
-            desktop_profile="desktop",
+        window._apply_view(DaemonView(
+            state=DaemonState(
+                active_profile="desktop",
+                profiles=("desktop", "wot"),
+                desktop_profile="desktop",
+            ),
+            profile=ProfileView(),
         ))
         return window
 
@@ -338,7 +352,7 @@ class SelectionVersusLoadingTests(unittest.TestCase):
     def _window(self):
         from gi.repository import Adw, Gtk
 
-        from linghub.ui.client import DaemonState
+        from linghub.ui.client import DaemonState, DaemonView, ProfileView
         from linghub.ui.window import MainWindow
 
         window = MainWindow.__new__(MainWindow)
@@ -352,19 +366,18 @@ class SelectionVersusLoadingTests(unittest.TestCase):
         window._table_rows = {}
         window._binding_rows = {}
         window._bindings = {}
-        window._leds = {}
-        window._resolutions = []
-        window._report_rates = ()
-        window._report_rate = 0
+        window._view = None
         window._led_panel = None
         window._dpi_panel = None
         window._selected_button = None
         window._editing = None
-        window._editing = None
-        window._apply_state(DaemonState(
-            active_profile="desktop",
-            profiles=("desktop", "world-of-tanks"),
-            desktop_profile="desktop",
+        window._apply_view(DaemonView(
+            state=DaemonState(
+                active_profile="desktop",
+                profiles=("desktop", "world-of-tanks"),
+                desktop_profile="desktop",
+            ),
+            profile=ProfileView(),
         ))
         return window
 
@@ -403,34 +416,22 @@ class SelectionVersusLoadingTests(unittest.TestCase):
 
         calls = []
 
-        from linghub.ui.client import DaemonState
+        from linghub.ui.client import DaemonState, DaemonView, ProfileView
 
         class FakeClient:
             async def load_profile(self, name):
                 calls.append(name)
                 return True
 
-            async def state(self):
-                return DaemonState(
-                    active_profile="desktop",
-                    profiles=("desktop", "world-of-tanks"),
-                    desktop_profile="desktop",
+            async def get_view(self, _profile):
+                return DaemonView(
+                    state=DaemonState(
+                        active_profile="desktop",
+                        profiles=("desktop", "world-of-tanks"),
+                        desktop_profile="desktop",
+                    ),
+                    profile=ProfileView(),
                 )
-
-            async def get_bindings(self, _profile):
-                return {}
-
-            async def get_leds(self, _profile):
-                return {}
-
-            async def get_resolutions(self, _profile):
-                return []
-
-            async def get_report_rates(self, _profile):
-                return ()
-
-            async def get_report_rate(self, _profile):
-                return 0
 
         window = self._window()
         window._client = FakeClient()
@@ -439,6 +440,85 @@ class SelectionVersusLoadingTests(unittest.TestCase):
         # drive the coroutine it would run instead.
         asyncio.run(window._load_profile(window._editing_profile()))
         self.assertEqual(calls, ["world-of-tanks"])
+
+
+class GetViewDecodeTests(unittest.TestCase):
+    """The D-Bus struct decodes to the view the window's panels consume.
+
+    GetView carries the most complex signature in the contract, so the
+    round trip is pinned here: raw struct in, DaemonView out, every shape
+    the panels expect present.
+    """
+
+    def _raw(self):
+        return (
+            "wot", "x.exe", "desktop", ["desktop", "wot"],
+            [(0, "key", "KEY_F"), (3, "button", "4")],
+            [(0, "breathing", (255, 0, 0), 128, 3000)],
+            [(0, 800, 1, 0), (1, 1600, 0, 1)],
+            [125, 250, 500, 1000],
+            500,
+        )
+
+    def test_the_struct_decodes_to_the_view(self):
+        import asyncio
+
+        from linghub.ui.client import DaemonClient, DaemonView
+
+        client = DaemonClient()
+
+        async def fake_invoke(member, *args):
+            self.assertIs(member, __import__(
+                "linghub.dbus_contract", fromlist=["GET_VIEW"]
+            ).GET_VIEW)
+            self.assertEqual(args, ("wot",))
+            return self._raw()
+
+        client._invoke = fake_invoke
+        view = asyncio.run(client.get_view("wot"))
+
+        self.assertIsInstance(view, DaemonView)
+        self.assertEqual(view.state.active_profile, "wot")
+        self.assertEqual(view.state.detected_game, "x.exe")
+        self.assertEqual(view.state.desktop_profile, "desktop")
+        self.assertEqual(view.state.profiles, ("desktop", "wot"))
+        self.assertEqual(
+            view.profile.bindings,
+            {0: ("key", "KEY_F"), 3: ("button", "4")},
+        )
+        self.assertEqual(
+            view.profile.leds,
+            {0: {"mode": "breathing", "color": (255, 0, 0),
+                 "brightness": 128, "duration": 3000}},
+        )
+        self.assertEqual(
+            view.profile.resolutions,
+            [
+                {"index": 0, "dpi": 800, "default": True, "disabled": False},
+                {"index": 1, "dpi": 1600, "default": False, "disabled": True},
+            ],
+        )
+        self.assertEqual(view.profile.report_rates, (125, 250, 500, 1000))
+        self.assertEqual(view.profile.report_rate, 500)
+
+    def test_empty_sections_decode_to_empty_collections(self):
+        """An unknown profile yields empty sections, not an error."""
+        import asyncio
+
+        from linghub.ui.client import DaemonClient
+
+        client = DaemonClient()
+
+        async def fake_invoke(_member, *args):
+            return ("", "", "desktop", [], [], [], [], [], 0)
+
+        client._invoke = fake_invoke
+        view = asyncio.run(client.get_view("gone"))
+        self.assertEqual(view.profile.bindings, {})
+        self.assertEqual(view.profile.leds, {})
+        self.assertEqual(view.profile.resolutions, [])
+        self.assertEqual(view.profile.report_rates, ())
+        self.assertEqual(view.profile.report_rate, 0)
 
 
 class SignalHandlingTests(unittest.TestCase):

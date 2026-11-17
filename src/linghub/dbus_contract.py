@@ -52,26 +52,25 @@ def _arity(signature: str) -> int:
 LOAD_PROFILE = Member("LoadProfile", "s", "b")
 RELOAD = Member("Reload", "", "b")
 LIST_PROFILES = Member("ListProfiles", "", "as")
-GET_BINDINGS = Member("GetBindings", "s", "a(iss)")
+GET_VIEW = Member(
+    "GetView", "s",
+    "(sssasa(iss)a(us(uuu)uu)a(uuuu)auu)",
+)
 SET_BINDING = Member("SetBinding", "siss", "b")
 CLEAR_BINDING = Member("ClearBinding", "si", "b")
-GET_LEDS = Member("GetLeds", "s", "a(us(uuu)uu)")
 SET_LEDS = Member("SetLeds", "ssuuuuu", "b")
-GET_RESOLUTIONS = Member("GetResolutions", "s", "a(uuuu)")
 SET_RESOLUTION = Member("SetResolution", "siubb", "b")
-GET_REPORT_RATE = Member("GetReportRate", "s", "u")
-GET_REPORT_RATES = Member("GetReportRates", "s", "au")
 SET_REPORT_RATE = Member("SetReportRate", "su", "b")
 CREATE_PROFILE = Member("CreateProfile", "ss", "b")
 RENAME_PROFILE = Member("RenameProfile", "ss", "b")
 DELETE_PROFILE = Member("DeleteProfile", "s", "b")
 
 METHODS: tuple[Member, ...] = (
-    LOAD_PROFILE, RELOAD, LIST_PROFILES,
-    GET_BINDINGS, SET_BINDING, CLEAR_BINDING,
-    GET_LEDS, SET_LEDS,
-    GET_RESOLUTIONS, SET_RESOLUTION,
-    GET_REPORT_RATE, GET_REPORT_RATES, SET_REPORT_RATE,
+    LOAD_PROFILE, RELOAD, LIST_PROFILES, GET_VIEW,
+    SET_BINDING, CLEAR_BINDING,
+    SET_LEDS,
+    SET_RESOLUTION,
+    SET_REPORT_RATE,
     CREATE_PROFILE, RENAME_PROFILE, DELETE_PROFILE,
 )
 

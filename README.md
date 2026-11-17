@@ -169,15 +169,11 @@ editing the config file.
 | `ListProfiles` | method → `as` | Every profile name in the config |
 | `LoadProfile(s)` | method → `b` | Load a profile now; false if it does not exist |
 | `Reload` | method → `b` | Re-read the config file |
-| `GetBindings(s)` | method → `a(iss)` | Every binding as (index, type, value) |
+| `GetView(s)` | method → `(sssasa(iss)a(us(uuu)uu)a(uuuu)auu)` | Everything a poll needs in one read: active profile, detected game, desktop profile, profile names; then the named profile's bindings (index, type, value), LED zones (index, mode, colour, brightness, duration), DPI slots (index, dpi, is_default, is_disabled), accepted report rates, and its current report rate. Unknown profile: empty sections |
 | `SetBinding(s,i,s,s)` → `siss` | method → `b` | Assign one button's binding |
 | `ClearBinding(s,i)` → `si` | method → `b` | Record a button as doing nothing |
-| `GetLeds(s)` | method → `a(us(uuu)uu)` | LED zones as (index, mode, colour, brightness, duration) |
 | `SetLeds(s,s,u,u,u,u,u)` → `ssuuuuu` | method → `b` | Set every LED zone to one effect |
-| `GetResolutions(s)` | method → `a(uuuu)` | DPI slots as (index, dpi, is_default, is_disabled) |
 | `SetResolution(s,i,u,b,b)` → `siubb` | method → `b` | Change one DPI slot |
-| `GetReportRate(s)` | method → `u` | The profile's report rate in Hz |
-| `GetReportRates(s)` | method → `au` | The rates the device accepts |
 | `SetReportRate(s,u)` | method → `b` | Change the report rate |
 | `CreateProfile(s,s)` | method → `b` | Add a profile; second argument is a game executable or empty |
 | `RenameProfile(s,s)` | method → `b` | Rename a profile and every reference to it |

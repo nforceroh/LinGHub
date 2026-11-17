@@ -21,7 +21,7 @@ from gi.repository import Adw, GLib, Gtk
 from .asyncbridge import run_and_report
 from .binding_editor import BindingEditor
 from .buttonmap import BUTTONS, describe, manual_number
-from .client import DaemonClient, DaemonState
+from .client import DaemonClient, DaemonState, DaemonView
 from .diagram import MouseDiagram
 from . import presentation
 from .dpi_panel import DpiPanel
@@ -46,10 +46,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._profile_rows: dict[str, Adw.ActionRow] = {}
         self._led_panel: LedPanel | None = None
         self._dpi_panel: DpiPanel | None = None
-        self._leds: dict[int, dict] = {}
-        self._resolutions: list[dict] = []
-        self._report_rates: tuple[int, ...] = ()
-        self._report_rate: int = 0
+        self._view: DaemonView | None = None
 
         self.set_default_size(980, 620)
 
@@ -266,16 +263,18 @@ class MainWindow(Adw.ApplicationWindow):
 
     async def _refresh(self) -> None:
         try:
-            state = await self._client.state()
+            view = await self._client.get_view(self._editing_profile() or "")
         except (RuntimeError, OSError) as exc:
             self._status.set_text(f"Daemon unavailable: {exc}")
             return
-        await self._refresh_bindings()
-        self._apply_state(state)
+        self._apply_view(view)
 
-    def _apply_state(self, state: DaemonState) -> None:
-        self._state = state
+    def _apply_view(self, view: DaemonView) -> None:
+        self._view = view
+        self._state = view.state
+        self._bindings = view.profile.bindings
 
+        state = view.state
         if state.detected_game:
             self._title.set_subtitle(f"Playing {state.detected_game}")
         else:
@@ -293,10 +292,12 @@ class MainWindow(Adw.ApplicationWindow):
             # two seconds and would silently discard whatever the user is in
             # the middle of choosing.
             if not self._led_panel.dirty:
-                self._led_panel.load(self._leds)
+                self._led_panel.load(view.profile.leds)
         if self._dpi_panel is not None and not self._dpi_panel.dirty:
             self._dpi_panel.load(
-                self._resolutions, self._report_rates, self._report_rate
+                view.profile.resolutions,
+                view.profile.report_rates,
+                view.profile.report_rate,
             )
 
     def _on_dpi_saved(self, slots: list, rate: int) -> None:
@@ -389,31 +390,6 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.close()
         await self._refresh()
         return True
-
-    async def _refresh_bindings(self) -> None:
-        """Read the edited profile's bindings and lighting."""
-        profile = self._editing_profile()
-        if profile is None:
-            self._bindings = {}
-            self._leds = {}
-            return
-        try:
-            self._bindings = await self._client.get_bindings(profile)
-        except (RuntimeError, OSError) as exc:
-            logger.warning("cannot read bindings: %s", exc)
-            self._bindings = {}
-        try:
-            self._leds = await self._client.get_leds(profile)
-        except (RuntimeError, OSError) as exc:
-            logger.warning("cannot read lighting: %s", exc)
-            self._leds = {}
-        try:
-            self._resolutions = await self._client.get_resolutions(profile)
-            self._report_rates = await self._client.get_report_rates(profile)
-            self._report_rate = await self._client.get_report_rate(profile)
-        except (RuntimeError, OSError) as exc:
-            logger.warning("cannot read DPI: %s", exc)
-            self._resolutions = []
 
     def _rebuild_profiles(self) -> None:
         """Make the profile list match the daemon's state, reusing rows.

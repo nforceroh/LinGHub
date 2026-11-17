@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from dbus_fast import BusType, Message, MessageType, Variant
 from dbus_fast.aio import MessageBus
@@ -30,6 +30,30 @@ class DaemonState:
     detected_game: str = ""
     desktop_profile: str = "desktop"
     profiles: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ProfileView:
+    """One profile's editable sections, as the window's panels consume them."""
+
+    bindings: dict[int, tuple[str, str]] = field(default_factory=dict)
+    leds: dict[int, dict] = field(default_factory=dict)
+    resolutions: list[dict] = field(default_factory=list)
+    report_rates: tuple[int, ...] = ()
+    report_rate: int = 0
+
+
+@dataclass(frozen=True)
+class DaemonView:
+    """Everything a poll needs, from one D-Bus read.
+
+    The state section is what the tray and the title bar show; the profile
+    section is what the panels edit. One read means a poll cannot piece a
+    view together from two ticks.
+    """
+
+    state: DaemonState
+    profile: ProfileView
 
 
 class DaemonClient:
@@ -119,19 +143,58 @@ class DaemonClient:
             profiles=tuple(await self._invoke(contract.LIST_PROFILES) or ()),
         )
 
+    async def get_view(self, profile: str) -> DaemonView:
+        """Read the state and one profile's editable sections, in one call.
+
+        An unknown profile comes back with empty sections rather than an
+        error: the window may be polling a profile that was just deleted, and
+        "nothing there" is the answer it needs.
+        """
+        raw = await self._invoke(contract.GET_VIEW, profile)
+        (
+            active, detected, desktop, names,
+            bindings, leds, resolutions, rates, rate,
+        ) = raw
+        return DaemonView(
+            state=DaemonState(
+                active_profile=active,
+                detected_game=detected,
+                desktop_profile=desktop,
+                profiles=tuple(names),
+            ),
+            profile=ProfileView(
+                bindings={
+                    int(index): (str(kind), str(value))
+                    for index, kind, value in bindings
+                },
+                leds={
+                    int(index): {
+                        "mode": str(mode),
+                        "color": tuple(int(c) for c in color),
+                        "brightness": int(brightness),
+                        "duration": int(duration),
+                    }
+                    for index, mode, color, brightness, duration in leds
+                },
+                resolutions=[
+                    {
+                        "index": int(index),
+                        "dpi": int(dpi),
+                        "default": bool(is_default),
+                        "disabled": bool(is_disabled),
+                    }
+                    for index, dpi, is_default, is_disabled in resolutions
+                ],
+                report_rates=tuple(int(r) for r in rates),
+                report_rate=int(rate),
+            ),
+        )
+
     async def load_profile(self, name: str) -> bool:
         return bool(await self._invoke(contract.LOAD_PROFILE, name))
 
     async def reload(self) -> bool:
         return bool(await self._invoke(contract.RELOAD))
-
-    async def get_bindings(self, profile: str) -> dict[int, tuple[str, str]]:
-        """Every binding in a profile, as {button index: (type, value)}."""
-        raw = await self._invoke(contract.GET_BINDINGS, profile) or ()
-        return {
-            int(index): (str(kind), str(value))
-            for index, kind, value in raw
-        }
 
     async def set_binding(self, profile: str, index: int, kind: str, value: str | None) -> bool:
         return bool(await self._invoke(contract.SET_BINDING, profile, index, kind, value or ""))
@@ -148,19 +211,6 @@ class DaemonClient:
     async def delete_profile(self, name: str) -> bool:
         return bool(await self._invoke(contract.DELETE_PROFILE, name))
 
-    async def get_resolutions(self, profile: str) -> list[dict]:
-        """A profile's DPI slots in order."""
-        raw = await self._invoke(contract.GET_RESOLUTIONS, profile) or ()
-        return [
-            {
-                "index": int(index),
-                "dpi": int(dpi),
-                "default": bool(is_default),
-                "disabled": bool(is_disabled),
-            }
-            for index, dpi, is_default, is_disabled in raw
-        ]
-
     async def set_resolution(
         self, profile: str, index: int, dpi: int, *,
         make_default: bool = False, disabled: bool = False,
@@ -169,27 +219,8 @@ class DaemonClient:
             contract.SET_RESOLUTION, profile, index, dpi, make_default, disabled
         ))
 
-    async def get_report_rate(self, profile: str) -> int:
-        return int(await self._invoke(contract.GET_REPORT_RATE, profile) or 0)
-
-    async def get_report_rates(self, profile: str) -> tuple[int, ...]:
-        return tuple(int(r) for r in await self._invoke(contract.GET_REPORT_RATES, profile) or ())
-
     async def set_report_rate(self, profile: str, rate: int) -> bool:
         return bool(await self._invoke(contract.SET_REPORT_RATE, profile, rate))
-
-    async def get_leds(self, profile: str) -> dict[int, dict]:
-        """A profile's LED zones, as {index: {mode, color, brightness, duration}}."""
-        raw = await self._invoke(contract.GET_LEDS, profile) or ()
-        return {
-            int(index): {
-                "mode": str(mode),
-                "color": tuple(int(c) for c in color),
-                "brightness": int(brightness),
-                "duration": int(duration),
-            }
-            for index, mode, color, brightness, duration in raw
-        }
 
     async def set_leds(
         self,

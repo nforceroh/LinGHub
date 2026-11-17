@@ -24,7 +24,7 @@ from linghub.daemon.writes import (
 from linghub.domain.profile import Binding, Game, Profile
 
 
-def make_config(bindings: dict | None = None) -> Config:
+def make_config(bindings: dict | None = None, report_rate: int | None = None) -> Config:
     return Config(
         profiles=[
             Profile(name="desktop"),
@@ -36,6 +36,7 @@ def make_config(bindings: dict | None = None) -> Config:
                 },
                 resolutions=({"dpi": 800}, {"dpi": 1600}),
                 leds=({"index": 0, "mode": "on"},),
+                report_rate=report_rate,
             ),
         ],
         desktop_profile="desktop",
@@ -154,18 +155,6 @@ class MethodTests(unittest.TestCase):
 
 
 class BindingMethodTests(unittest.TestCase):
-    def test_get_bindings_returns_pairs(self):
-        daemon = FakeDaemon(bindings={0: ("key", "KEY_F"), 3: ("special", "resolution-up")})
-        interface = make_interface(daemon)
-        self.assertEqual(
-            sorted(call(interface, "GetBindings", "wot")),
-            [(0, "key", "KEY_F"), (3, "special", "resolution-up")],
-        )
-
-    def test_get_bindings_returns_empty_for_an_unknown_profile(self):
-        daemon = FakeDaemon()
-        self.assertEqual(call(make_interface(daemon), "GetBindings", "nope"), [])
-
     def test_set_binding_routes_to_the_daemon(self):
         daemon = FakeDaemon()
         interface = make_interface(daemon)
@@ -188,17 +177,6 @@ class BindingMethodTests(unittest.TestCase):
 
 
 class LedMethodTests(unittest.TestCase):
-    def test_get_leds_returns_settings(self):
-        daemon = FakeDaemon()
-        interface = make_interface(daemon)
-        self.assertEqual(
-            call(interface, "GetLeds", "wot"),
-            [(0, "on", (0, 0, 0), 255, 0)],
-        )
-
-    def test_get_leds_empty_for_unknown_profile(self):
-        self.assertEqual(call(make_interface(FakeDaemon()), "GetLeds", "nope"), [])
-
     def test_set_leds_routes_to_the_daemon(self):
         daemon = FakeDaemon()
         interface = make_interface(daemon)
@@ -217,28 +195,52 @@ class LedMethodTests(unittest.TestCase):
         self.assertFalse(ok)
 
 
-class DpiMethodTests(unittest.TestCase):
-    def test_get_resolutions_returns_slots(self):
-        daemon = FakeDaemon()
-        interface = make_interface(daemon)
-        self.assertEqual(
-            call(interface, "GetResolutions", "wot"),
-            [(0, 800, 0, 0), (1, 1600, 0, 0)],
+class GetViewTests(unittest.TestCase):
+    """One read for everything a poll needs.
+
+    Before GetView the client made nine sequential round trips per poll,
+    with three separate failure policies. These tests pin the one struct
+    that replaced them.
+    """
+
+    def test_view_returns_state_and_profile_sections(self):
+        daemon = FakeDaemon(
+            StateSnapshot(
+                loaded_profile="wot", detected_game="x.exe",
+                desktop_profile="desktop", profile_names=("desktop", "wot"),
+            ),
+            bindings={0: ("key", "KEY_F"), 3: ("special", "resolution-up")},
         )
-
-    def test_get_resolutions_empty_for_unknown_profile(self):
-        self.assertEqual(call(make_interface(FakeDaemon()), "GetResolutions", "nope"), [])
-
-    def test_report_rate_is_exposed(self):
-        daemon = FakeDaemon()
-        self.assertEqual(call(make_interface(daemon), "GetReportRate", "wot"), 0)
-
-    def test_report_rates_are_exposed(self):
-        daemon = FakeDaemon()
+        view = call(make_interface(daemon), "GetView", "wot")
+        active, detected, desktop, names, bindings, leds, res, rates, rate = view
+        self.assertEqual(active, "wot")
+        self.assertEqual(detected, "x.exe")
+        self.assertEqual(desktop, "desktop")
+        self.assertEqual(list(names), ["desktop", "wot"])
         self.assertEqual(
-            call(make_interface(daemon), "GetReportRates", "wot"),
-            [125, 250, 500, 1000],
+            sorted(bindings),
+            [(0, "key", "KEY_F"), (3, "special", "resolution-up")],
         )
+        self.assertEqual(leds, [(0, "on", (0, 0, 0), 255, 0)])
+        self.assertEqual(res, [(0, 800, 0, 0), (1, 1600, 0, 0)])
+        self.assertEqual(list(rates), [125, 250, 500, 1000])
+        self.assertEqual(rate, 0)
+
+    def test_view_of_an_unknown_profile_has_empty_sections(self):
+        """The UI may poll a profile that was just deleted."""
+        view = call(make_interface(FakeDaemon()), "GetView", "nope")
+        _active, _detected, _desktop, _names, bindings, leds, res, rates, rate = view
+        self.assertEqual(bindings, [])
+        self.assertEqual(leds, [])
+        self.assertEqual(res, [])
+        self.assertEqual(list(rates), [125, 250, 500, 1000])
+        self.assertEqual(rate, 0)
+
+    def test_view_report_rate_reports_the_profile(self):
+        daemon = FakeDaemon()
+        daemon.state.config = make_config(report_rate=500)
+        view = call(make_interface(daemon), "GetView", "wot")
+        self.assertEqual(view[-1], 500)
 
     def test_set_resolution_routes_to_the_daemon(self):
         daemon = FakeDaemon()
@@ -358,11 +360,11 @@ class IntrospectionTests(unittest.TestCase):
             | {s.name for s in introspected.signals}
         )
         for member in (
-            "LoadProfile", "Reload", "ListProfiles",
-            "GetBindings", "SetBinding", "ClearBinding",
-            "GetLeds", "SetLeds",
-            "GetResolutions", "SetResolution", "GetReportRate", "SetReportRate",
-            "GetReportRates", "CreateProfile", "RenameProfile", "DeleteProfile",
+            "LoadProfile", "Reload", "ListProfiles", "GetView",
+            "SetBinding", "ClearBinding",
+            "SetLeds",
+            "SetResolution", "SetReportRate",
+            "CreateProfile", "RenameProfile", "DeleteProfile",
             "ActiveProfile", "DetectedGame", "DesktopProfile",
             "ProfileChanged", "GameDetected", "GameExited",
         ):
