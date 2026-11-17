@@ -34,9 +34,12 @@ IMAGE = Path(__file__).resolve().parents[3] / "images" / "g502_trans.png"
 
 
 class MainWindow(Adw.ApplicationWindow):
-    def __init__(self, application, client: DaemonClient):
+    def __init__(self, application, client: DaemonClient, schedule=run_and_report):
         super().__init__(application=application, title="LinGHub")
         self._client = client
+        # How a coroutine is put on the loop. Injected so a test can drive the
+        # window on its own loop instead of patching this module's global.
+        self._schedule = schedule
         self._state = DaemonState()
         self._selected_button: int | None = None
         # Which profile the panels show. Deliberately separate from which
@@ -274,7 +277,7 @@ class MainWindow(Adw.ApplicationWindow):
         if self._refresh_task is not None and not self._refresh_task.done():
             self._refresh_pending = True
             return
-        self._refresh_task = run_and_report(
+        self._refresh_task = self._schedule(
             self._refresh_loop(), self._on_async_error
         )
 

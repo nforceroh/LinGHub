@@ -33,14 +33,6 @@ from .writes import Bindings, ConfigWrites, DeviceSettings, ProfileLifecycle
 logger = logging.getLogger("linghub.daemon")
 
 
-# How each reason reads in the log. The decision module names the reason; the
-# wording belongs to whoever writes it out.
-_OVERRIDE_ENDED = {
-    tick.OverrideEnded.GAME_CHANGED: "the detected game changed",
-    tick.OverrideEnded.NO_GAME: "no game is running",
-}
-
-
 class ConfigStartupError(RuntimeError):
     """The config is missing or invalid, so the daemon cannot start.
 
@@ -297,10 +289,15 @@ class Daemon:
         # The override's fate and the game events are one pure decision; the
         # effects it implies are this method's job.
         decision = tick.decide(previous_game, self._detected_game, self._manual_override)
-        if decision.ended is not None:
+        if decision.ended is tick.OverrideEnded.GAME_CHANGED:
             logger.info(
-                "clearing the manual override for %r: %s",
-                self._manual_override, _OVERRIDE_ENDED[decision.ended],
+                "clearing the manual override for %r: the detected game changed",
+                self._manual_override,
+            )
+        elif decision.ended is tick.OverrideEnded.NO_GAME:
+            logger.info(
+                "clearing the manual override for %r: no game is running",
+                self._manual_override,
             )
         self._manual_override = decision.override
 
