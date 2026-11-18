@@ -14,12 +14,7 @@ import unittest
 
 from linghub.config import Config
 from linghub.daemon.state import DaemonState
-from linghub.daemon.writes import (
-    Bindings,
-    ConfigWrites,
-    DeviceSettings,
-    ProfileLifecycle,
-)
+from linghub.daemon.writes import build_collaborators
 from linghub.domain.profile import Binding, Game, Profile
 
 
@@ -49,24 +44,17 @@ class _Harness:
         self.reloads = 0
         self._save_ok = save_ok
 
-        writes = ConfigWrites(
+        wired = build_collaborators(
             state=lambda: self.state,
             save=self._save,
             wake=self._wake,
             announce=self._announce,
-        )
-        self.profiles = ProfileLifecycle(
-            state=lambda: self.state,
-            writes=writes,
             request_load=self._load,
             request_reload=self._reload,
         )
-        self.bindings = Bindings(state=lambda: self.state, writes=writes)
-        self.settings = DeviceSettings(
-            state=lambda: self.state,
-            writes=writes,
-            report_rates=lambda: (125, 250, 500, 1000),
-        )
+        self.profiles = wired.profiles
+        self.bindings = wired.bindings
+        self.settings = wired.settings
 
     def _save(self) -> bool:
         self.saved += 1
@@ -185,41 +173,6 @@ class ValidationTests(unittest.TestCase):
         h = _Harness()
         self.assertFalse(h.bindings.set("nope", 1, "key", "KEY_B"))
         self.assertEqual(h.saved, 0)
-
-
-class ReadPathTests(unittest.TestCase):
-    """The read paths answer for a known profile and shrug at an unknown one."""
-
-    def test_bindings_are_returned_by_ratbag_index(self):
-        self.assertEqual(_Harness().bindings.get("wot"), {0: ("key", "KEY_A")})
-
-    def test_bindings_are_empty_for_an_unknown_profile(self):
-        self.assertEqual(_Harness().bindings.get("nope"), {})
-
-    def test_resolutions_are_returned_in_order(self):
-        self.assertEqual(
-            _Harness().settings.get_resolutions("wot"),
-            ((800, False, False), (1600, False, False)),
-        )
-
-    def test_resolutions_are_empty_for_an_unknown_profile(self):
-        self.assertEqual(_Harness().settings.get_resolutions("nope"), ())
-
-    def test_report_rate_is_zero_when_unset(self):
-        self.assertEqual(_Harness().settings.get_report_rate("wot"), 0)
-
-    def test_report_rates_come_from_the_device(self):
-        self.assertEqual(
-            _Harness().settings.get_report_rates("wot"), (125, 250, 500, 1000)
-        )
-
-    def test_leds_are_keyed_by_index(self):
-        self.assertEqual(
-            _Harness().settings.get_leds("wot"), {0: {"index": 0, "mode": "on"}}
-        )
-
-    def test_leds_are_empty_for_an_unknown_profile(self):
-        self.assertEqual(_Harness().settings.get_leds("nope"), {})
 
 
 class LoadTests(unittest.TestCase):

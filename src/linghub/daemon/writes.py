@@ -12,11 +12,14 @@ put. The methods moved here; the names alone did not.
 
 Nothing in this module knows about slots, ticks, or D-Bus. It takes a way to
 read the current state, a way to persist it, and a way to ask for a redraw.
+The collaborators only change things: every read goes through
+`snapshot.read_view`.
 """
 
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Callable
 
 from .. import config as config_module
@@ -78,20 +81,7 @@ class ConfigWrites:
         return True
 
 
-class _Reader:
-    """Shared plumbing for the collaborators' read paths."""
-
-    def __init__(self, state: StateProvider):
-        self._state = state
-
-    def _profile(self, name: str):
-        state = self._state()
-        if state is None:
-            return None
-        return state.config.profile_named(name)
-
-
-class ProfileLifecycle(_Reader):
+class ProfileLifecycle:
     """Which profiles exist, and which one is loaded."""
 
     def __init__(
@@ -101,7 +91,7 @@ class ProfileLifecycle(_Reader):
         request_load: Callable[[str], bool],
         request_reload: Callable[[], bool],
     ):
-        super().__init__(state)
+        self._state = state
         self._writes = writes
         self._request_load = request_load
         self._request_reload = request_reload
@@ -113,7 +103,8 @@ class ProfileLifecycle(_Reader):
         caller expects to learn that its request was wrong, and a queued bad
         name would only fail again on the next tick.
         """
-        if self._profile(name) is None:
+        state = self._state()
+        if state is None or state.config.profile_named(name) is None:
             logger.warning("LoadProfile(%r): no such profile", name)
             return False
         return self._request_load(name)
@@ -141,22 +132,11 @@ class ProfileLifecycle(_Reader):
         )
 
 
-class Bindings(_Reader):
+class Bindings:
     """What each button does in a profile."""
 
-    def __init__(self, state: StateProvider, writes: ConfigWrites):
-        super().__init__(state)
+    def __init__(self, writes: ConfigWrites):
         self._writes = writes
-
-    def get(self, profile: str) -> dict[int, tuple[str, object]]:
-        """Every binding, keyed by ratbag index."""
-        found = self._profile(profile)
-        if found is None:
-            return {}
-        return {
-            index: (binding.type, binding.value)
-            for index, binding in found.bindings.items()
-        }
 
     def set(self, profile: str, index: int, kind: str, value: object) -> bool:
         """Assign one button's binding, persist it, and let the next tick push it."""
@@ -185,32 +165,11 @@ class Bindings(_Reader):
         return self.set(profile, index, "disabled", None)
 
 
-class DeviceSettings(_Reader):
+class DeviceSettings:
     """DPI, report rate and lighting for a profile."""
 
-    def __init__(
-        self,
-        state: StateProvider,
-        writes: ConfigWrites,
-        report_rates: Callable[[], tuple[int, ...]],
-    ):
-        super().__init__(state)
+    def __init__(self, writes: ConfigWrites):
         self._writes = writes
-        self._report_rates = report_rates
-
-    def get_resolutions(self, profile: str) -> tuple:
-        """DPI slots as (dpi, is_default, is_disabled), in order."""
-        found = self._profile(profile)
-        if found is None:
-            return ()
-        return tuple(
-            (
-                int(slot.get("dpi", 0)),
-                bool(slot.get("default")),
-                bool(slot.get("disabled")),
-            )
-            for slot in found.resolutions
-        )
 
     def set_resolution(
         self, profile: str, index: int, dpi: int,
@@ -224,31 +183,11 @@ class DeviceSettings(_Reader):
             f"SetResolution({profile!r}, {index}, {dpi})",
         )
 
-    def get_report_rate(self, profile: str) -> int:
-        """The profile's report rate in Hz, or 0 if unset."""
-        found = self._profile(profile)
-        return int(found.report_rate or 0) if found is not None else 0
-
-    def get_report_rates(self, profile: str) -> tuple[int, ...]:
-        """The rates the device accepts.
-
-        Read from the device rather than hard-coded, so a variant offering a
-        different set is not presented with the wrong choices.
-        """
-        return tuple(self._report_rates())
-
     def set_report_rate(self, profile: str, rate: int) -> bool:
         return self._writes.apply(
             lambda state: state.set_report_rate(profile, rate),
             f"SetReportRate({profile!r}, {rate})",
         )
-
-    def get_leds(self, profile: str) -> dict[int, dict]:
-        """A profile's LED zones, keyed by index."""
-        found = self._profile(profile)
-        if found is None:
-            return {}
-        return {int(entry["index"]): dict(entry) for entry in found.leds}
 
     def set_leds(self, profile: str, settings: dict) -> bool:
         """Set every LED zone of a profile to one effect."""
@@ -264,3 +203,38 @@ class DeviceSettings(_Reader):
             lambda state: state.set_leds(profile, settings),
             f"SetLeds({profile!r}, {settings!r})",
         )
+
+
+@dataclass(frozen=True)
+class Collaborators:
+    """The three things the D-Bus adapter calls, sharing one write rule."""
+
+    profiles: ProfileLifecycle
+    bindings: Bindings
+    settings: DeviceSettings
+
+
+def build_collaborators(
+    state: StateProvider,
+    save: Callable[[], bool],
+    wake: Callable[[], None],
+    announce: Callable[[], None],
+    request_load: Callable[[str], bool],
+    request_reload: Callable[[], bool],
+) -> Collaborators:
+    """Wire the collaborators to one ConfigWrites.
+
+    The daemon and the tests build them the same way, so a new dependency is
+    added here once rather than in every place that wires them.
+    """
+    writes = ConfigWrites(state=state, save=save, wake=wake, announce=announce)
+    return Collaborators(
+        profiles=ProfileLifecycle(
+            state=state,
+            writes=writes,
+            request_load=request_load,
+            request_reload=request_reload,
+        ),
+        bindings=Bindings(writes),
+        settings=DeviceSettings(writes),
+    )

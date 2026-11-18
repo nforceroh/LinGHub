@@ -33,18 +33,22 @@ class ManagerInterface(ServiceInterface):
     the callbacks it is given, so it can be tested without a bus.
     """
 
-    def __init__(self, profiles, bindings, settings, get_state):
-        """Take the three collaborators the methods act on, plus a state reader.
+    def __init__(self, profiles, bindings, settings, get_view):
+        """Take the three collaborators the methods act on, plus one reader.
 
         Grouping by what each method acts on keeps the interface small: adding
         a member means adding it to one collaborator, not to a fifteen-argument
-        constructor.
+        constructor. Every read goes through `get_view(profile)`, which
+        returns a `snapshot.View`; this class only turns it into D-Bus types.
         """
         super().__init__(INTERFACE)
         self._profiles = profiles
         self._bindings = bindings
         self._settings = settings
-        self._get_state = get_state
+        self._get_view = get_view
+
+    def _state(self):
+        return self._get_view("").state
 
     @method()
     def LoadProfile(self, name: "s") -> "b":
@@ -61,7 +65,7 @@ class ManagerInterface(ServiceInterface):
     @method()
     def ListProfiles(self) -> "as":
         """Every profile name in the config."""
-        return list(self._get_state().profile_names)
+        return list(self._state().profile_names)
 
     @method()
     def GetView(self, profile: "s") -> "(sssasa(iss)a(us(uuu)uu)a(uuuu)auu)":
@@ -78,51 +82,25 @@ class ManagerInterface(ServiceInterface):
         call in sequence, so a refresh costs one round trip and a partial read
         cannot leave the UI showing a state pieced together from two ticks.
         """
-        snapshot = self._get_state()
+        view = self._get_view(profile)
+        state, sections = view.state, view.profile
         return (
-            snapshot.loaded_profile or "",
-            snapshot.detected_game or "",
-            snapshot.desktop_profile,
-            list(snapshot.profile_names),
-            self._view_bindings(profile),
-            self._view_leds(profile),
-            self._view_resolutions(profile),
-            [int(rate) for rate in (self._settings.get_report_rates(profile) or ())],
-            int(self._settings.get_report_rate(profile) or 0),
+            state.loaded_profile or "",
+            state.detected_game or "",
+            state.desktop_profile,
+            list(state.profile_names),
+            [
+                (int(index), str(kind), "" if value is None else str(value))
+                for index, kind, value in sections.bindings
+            ],
+            [_marshal_led(settings) for settings in sections.leds],
+            [
+                (index, int(dpi), 1 if default else 0, 1 if disabled else 0)
+                for index, (dpi, default, disabled) in enumerate(sections.resolutions)
+            ],
+            [int(rate) for rate in sections.report_rates],
+            int(sections.report_rate),
         )
-
-    def _view_bindings(self, profile: str) -> list:
-        bindings = self._bindings.get(profile) or {}
-        return [
-            (int(index), str(kind), "" if value is None else str(value))
-            for index, (kind, value) in sorted(bindings.items())
-        ]
-
-    def _view_leds(self, profile: str) -> list:
-        leds = self._settings.get_leds(profile) or {}
-        result = []
-        for index, settings in sorted(leds.items()):
-            color = settings.get("color") or (0, 0, 0)
-            result.append((
-                int(index),
-                str(settings.get("mode", "off")),
-                (int(color[0]), int(color[1]), int(color[2])),
-                int(settings.get("brightness", 255)),
-                int(settings.get("duration", 0)),
-            ))
-        return result
-
-    def _view_resolutions(self, profile: str) -> list:
-        slots = self._settings.get_resolutions(profile) or ()
-        return [
-            (
-                int(index),
-                int(dpi),
-                1 if default else 0,
-                1 if disabled else 0,
-            )
-            for index, (dpi, default, disabled) in enumerate(slots)
-        ]
 
     @method()
     def SetBinding(self, profile: "s", index: "i", kind: "s", value: "s") -> "b":
@@ -216,17 +194,17 @@ class ManagerInterface(ServiceInterface):
     @dbus_property(access=PropertyAccess.READ)
     def ActiveProfile(self) -> "s":
         """The profile currently loaded on the mouse, or empty if unknown."""
-        return self._get_state().loaded_profile or ""
+        return self._state().loaded_profile or ""
 
     @dbus_property(access=PropertyAccess.READ)
     def DetectedGame(self) -> "s":
         """The game currently detected, or empty."""
-        return self._get_state().detected_game or ""
+        return self._state().detected_game or ""
 
     @dbus_property(access=PropertyAccess.READ)
     def DesktopProfile(self) -> "s":
         """The name of the profile used when no game is running."""
-        return self._get_state().desktop_profile
+        return self._state().desktop_profile
 
     @signal()
     def ProfileChanged(self, name: "s") -> "s":
@@ -247,6 +225,18 @@ class ManagerInterface(ServiceInterface):
     def ConfigChanged(self) -> None:
         """Emitted after the config changes: an edit, or the file reloaded."""
         return None
+
+
+def _marshal_led(settings: dict) -> tuple:
+    """One LED zone as (index, mode, colour, brightness, duration)."""
+    color = settings.get("color") or (0, 0, 0)
+    return (
+        int(settings["index"]),
+        str(settings.get("mode", "off")),
+        (int(color[0]), int(color[1]), int(color[2])),
+        int(settings.get("brightness", 255)),
+        int(settings.get("duration", 0)),
+    )
 
 
 class BusAnnouncer:

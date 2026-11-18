@@ -232,7 +232,7 @@ src/linghub/
 │   ├── slots.py     which slot a profile belongs in (ADR-0001)
 │   ├── collaborators.py  what the D-Bus adapter needs from the daemon
 │   ├── dbus_service.py   the D-Bus surface itself
-│   └── snapshot.py  a read-only view for the interface
+│   └── snapshot.py  the one read a client makes: state plus a profile
 ├── ui/
 │   ├── window.py    the main window
 │   ├── presentation.py   what the window should show, decided without a widget

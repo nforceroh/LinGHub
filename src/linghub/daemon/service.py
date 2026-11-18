@@ -25,10 +25,10 @@ from ..hardware.writer import RatbagConnector, WriteError, WriteResult
 from ..notify import Notifier, profile_message
 from . import slots
 from .dbus_service import PATH, SERVICE, BusAnnouncer, ManagerInterface
-from .snapshot import StateSnapshot
+from .snapshot import View, read_view
 from .state import DaemonState
 from .watcher import ConfigWatcher
-from .writes import Bindings, ConfigWrites, DeviceSettings, ProfileLifecycle
+from .writes import build_collaborators
 
 
 logger = logging.getLogger("linghub.daemon")
@@ -107,24 +107,17 @@ class Daemon:
         # The three collaborators the D-Bus adapter calls. They hold the config
         # edits; this class keeps the run loop and the device. Which profile
         # should be on the mouse is DaemonState's decision.
-        writes = ConfigWrites(
+        wired = build_collaborators(
             state=lambda: self._state,
             save=self._save_config,
             wake=self._wake,
             announce=self._announce.config_changed,
-        )
-        self.profiles = ProfileLifecycle(
-            state=lambda: self._state,
-            writes=writes,
             request_load=self._request_load,
             request_reload=self._request_reload,
         )
-        self.bindings = Bindings(state=lambda: self._state, writes=writes)
-        self.settings = DeviceSettings(
-            state=lambda: self._state,
-            writes=writes,
-            report_rates=lambda: tuple(self._report_rates),
-        )
+        self.profiles = wired.profiles
+        self.bindings = wired.bindings
+        self.settings = wired.settings
 
     def _request_load(self, name: str) -> bool:
         """Load a named profile, overriding detection until the game changes."""
@@ -180,22 +173,17 @@ class Daemon:
             profiles=self.profiles,
             bindings=self.bindings,
             settings=self.settings,
-            get_state=self.snapshot,
+            get_view=self.view,
         )
         self._session_bus.export(PATH, self._interface)
         self._bus_announcer.attach(self._interface)
         await self._session_bus.request_name(SERVICE)
         logger.info("published %s on the session bus", SERVICE)
 
-    def snapshot(self) -> StateSnapshot:
-        """What the daemon believes now, as the D-Bus adapter reports it."""
+    def view(self, profile: str = "") -> View:
+        """What the daemon believes now, and one profile's sections."""
         assert self._state is not None
-        return StateSnapshot(
-            profile_names=tuple(p.name for p in self._state.config.profiles),
-            loaded_profile=self._state.loaded_profile,
-            detected_game=self._state.current_game,
-            desktop_profile=self._state.config.desktop_profile,
-        )
+        return read_view(self._state, profile, tuple(self._report_rates))
 
     def _save_config(self) -> bool:
         assert self._state is not None

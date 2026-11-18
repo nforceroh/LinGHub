@@ -156,11 +156,11 @@ class WhatGetsWrittenTests(unittest.TestCase):
         h.tick()
         self.assertEqual(h.written[-1], ("world-of-tanks", 1))
 
-    def test_the_snapshot_reports_the_game_and_the_loaded_profile(self):
+    def test_the_view_reports_the_game_and_the_loaded_profile(self):
         h = DaemonHarness(self)
         h.detection = running(WOT)
         h.tick()
-        snapshot = h.daemon.snapshot()
+        snapshot = h.daemon.view().state
         self.assertEqual(snapshot.detected_game, "world-of-tanks")
         self.assertEqual(snapshot.loaded_profile, "world-of-tanks")
 
@@ -325,7 +325,7 @@ class ReloadTests(unittest.TestCase):
         h.tick()
         h.path.write_text(self.BROKEN, encoding="utf-8")
         h.tick()  # must return, not raise
-        self.assertIn("world-of-tanks", h.daemon.snapshot().profile_names)
+        self.assertIn("world-of-tanks", h.daemon.view().state.profile_names)
 
     def test_a_valid_edit_is_picked_up(self):
         h = DaemonHarness(self)
@@ -334,7 +334,7 @@ class ReloadTests(unittest.TestCase):
             profiles=[DESKTOP], desktop_profile="desktop", poll_interval=2.0,
         ))
         h.tick()
-        self.assertEqual(h.daemon.snapshot().profile_names, ("desktop",))
+        self.assertEqual(h.daemon.view().state.profile_names, ("desktop",))
 
 
 class StartupTests(unittest.TestCase):

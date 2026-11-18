@@ -24,7 +24,7 @@ def make_interface():
         profiles=_Stub(),
         bindings=_Stub(),
         settings=_Stub(),
-        get_state=lambda: None,
+        get_view=lambda profile: None,
     )
 
 

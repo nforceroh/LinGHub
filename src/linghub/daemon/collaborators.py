@@ -46,9 +46,6 @@ class ProfileLifecycle(Protocol):
 class Bindings(Protocol):
     """What each button does in a profile."""
 
-    def get(self, profile: str) -> dict[int, tuple[str, object]]:
-        """Every binding, keyed by ratbag index."""
-
     def set(self, profile: str, index: int, kind: str, value: object) -> bool:
         """Assign one button's binding."""
 
@@ -59,26 +56,14 @@ class Bindings(Protocol):
 class DeviceSettings(Protocol):
     """DPI, report rate and lighting for a profile."""
 
-    def get_resolutions(self, profile: str) -> tuple:
-        """DPI slots as (dpi, is_default, is_disabled), in order."""
-
     def set_resolution(
         self, profile: str, index: int, dpi: int,
         make_default: bool, disabled: bool,
     ) -> bool:
         """Change one DPI slot."""
 
-    def get_report_rate(self, profile: str) -> int:
-        """The profile's report rate in Hz, or 0 if unset."""
-
-    def get_report_rates(self, profile: str) -> tuple[int, ...]:
-        """The rates the device accepts."""
-
     def set_report_rate(self, profile: str, rate: int) -> bool:
         """Change the report rate."""
-
-    def get_leds(self, profile: str) -> dict[int, dict]:
-        """LED zones, keyed by index."""
 
     def set_leds(self, profile: str, settings: dict) -> bool:
         """Set every LED zone to one effect."""
