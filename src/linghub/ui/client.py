@@ -10,7 +10,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 
-from dbus_fast import BusType, Message, MessageType, Variant
+from dbus_fast import BusType, Message, MessageType
 from dbus_fast.aio import MessageBus
 
 
@@ -56,10 +56,10 @@ class ProfileView:
 
 @dataclass(frozen=True)
 class DaemonView:
-    """Everything a poll needs, from one D-Bus read.
+    """Everything a client shows, from one D-Bus read.
 
     The state section is what the tray and the title bar show; the profile
-    section is what the panels edit. One read means a poll cannot piece a
+    section is what the panels edit. One read means a refresh cannot piece a
     view together from two ticks.
     """
 
@@ -84,15 +84,24 @@ class DaemonClient:
             return False
 
         self._bus.add_message_handler(self._handle_signal)
+        # The daemon's own signals, and its name gaining or losing an owner:
+        # with no poll, the second is how a client notices the daemon started
+        # or stopped.
+        rules = (
+            f"type='signal',interface='{INTERFACE}'",
+            "type='signal',interface='org.freedesktop.DBus',"
+            f"member='NameOwnerChanged',arg0='{SERVICE}'",
+        )
         try:
-            await self._bus.call(Message(
-                destination="org.freedesktop.DBus",
-                path="/org/freedesktop/DBus",
-                interface="org.freedesktop.DBus",
-                member="AddMatch",
-                signature="s",
-                body=[f"type='signal',interface='{INTERFACE}'"],
-            ))
+            for rule in rules:
+                await self._bus.call(Message(
+                    destination="org.freedesktop.DBus",
+                    path="/org/freedesktop/DBus",
+                    interface="org.freedesktop.DBus",
+                    member="AddMatch",
+                    signature="s",
+                    body=[rule],
+                ))
         except (OSError, asyncio.TimeoutError):
             return False
         return True
@@ -103,7 +112,12 @@ class DaemonClient:
     def _handle_signal(self, message: Message) -> None:
         if message.message_type != MessageType.SIGNAL:
             return
-        if message.interface != INTERFACE:
+        ours = message.interface == INTERFACE
+        daemon_came_or_went = (
+            message.member == "NameOwnerChanged"
+            and bool(message.body) and message.body[0] == SERVICE
+        )
+        if not (ours or daemon_came_or_went):
             return
         if self._on_change is not None:
             self._on_change()
@@ -129,34 +143,11 @@ class DaemonClient:
         _raise_for_error(reply, member)
         return reply.body[0] if reply.body else None
 
-    async def _property(self, name: str) -> str:
-        if self._bus is None:
-            raise RuntimeError("not connected to the daemon")
-        reply = await asyncio.wait_for(
-            self._bus.call(Message(
-                destination=SERVICE, path=PATH,
-                interface="org.freedesktop.DBus.Properties", member="Get",
-                signature="ss", body=[INTERFACE, name],
-            )),
-            timeout=5,
-        )
-        _raise_for_error(reply, f"reading {name}")
-        value = reply.body[0]
-        return value.value if isinstance(value, Variant) else ""
-
-    async def state(self) -> DaemonState:
-        return DaemonState(
-            active_profile=await self._property("ActiveProfile"),
-            detected_game=await self._property("DetectedGame"),
-            desktop_profile=await self._property("DesktopProfile"),
-            profiles=tuple(await self._invoke(contract.LIST_PROFILES) or ()),
-        )
-
     async def get_view(self, profile: str) -> DaemonView:
         """Read the state and one profile's editable sections, in one call.
 
         An unknown profile comes back with empty sections rather than an
-        error: the window may be polling a profile that was just deleted, and
+        error: the window may be reading a profile that was just deleted, and
         "nothing there" is the answer it needs.
         """
         raw = await self._invoke(contract.GET_VIEW, profile)

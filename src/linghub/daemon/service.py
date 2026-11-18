@@ -24,7 +24,7 @@ from ..hardware.ratbag import DeviceNotFound
 from ..hardware.writer import RatbagConnector, WriteError, WriteResult
 from ..notify import Notifier, profile_message
 from . import slots
-from .dbus_service import PATH, SERVICE, ManagerInterface
+from .dbus_service import PATH, SERVICE, BusAnnouncer, ManagerInterface
 from .snapshot import StateSnapshot
 from .state import DaemonState
 from .watcher import ConfigWatcher
@@ -63,6 +63,18 @@ class MouseConnector(Protocol):
     def disconnect(self) -> None: ...
 
 
+class Announcer(Protocol):
+    """Who the daemon tells about what it did, so clients need not poll."""
+
+    def profile_loaded(self, name: str) -> None: ...
+
+    def game_started(self, name: str) -> None: ...
+
+    def game_stopped(self, name: str) -> None: ...
+
+    def config_changed(self) -> None: ...
+
+
 class Daemon:
     def __init__(
         self,
@@ -70,6 +82,7 @@ class Daemon:
         poll_interval: float | None = None,
         detector: Callable[[list], Detection] = detect,
         mouse: MouseConnector | None = None,
+        announce: Announcer | None = None,
         reconnect_delay: float = 1.0,
     ):
         self._config_path = Path(config_path)
@@ -78,6 +91,8 @@ class Daemon:
         # running and what the hardware does without a bus or a device.
         self._detector = detector
         self._mouse = mouse if mouse is not None else RatbagConnector()
+        self._bus_announcer = BusAnnouncer()
+        self._announce = announce if announce is not None else self._bus_announcer
         self._reconnect_delay = reconnect_delay
         self._state: DaemonState | None = None
         self._writer: Mouse | None = None
@@ -96,6 +111,7 @@ class Daemon:
             state=lambda: self._state,
             save=self._save_config,
             wake=self._wake,
+            announce=self._announce.config_changed,
         )
         self.profiles = ProfileLifecycle(
             state=lambda: self._state,
@@ -167,6 +183,7 @@ class Daemon:
             get_state=self.snapshot,
         )
         self._session_bus.export(PATH, self._interface)
+        self._bus_announcer.attach(self._interface)
         await self._session_bus.request_name(SERVICE)
         logger.info("published %s on the session bus", SERVICE)
 
@@ -225,6 +242,7 @@ class Daemon:
         assert self._state is not None
         self._state.config = config
         logger.info("reloaded config: %d profile(s)", len(config.profiles))
+        self._announce.config_changed()
 
     async def _reconnect(self, attempts: int = 3) -> None:
         """Try to reconnect to the device after it disappeared.
@@ -283,8 +301,7 @@ class Daemon:
         self._state.mark_loaded(target.name)
         logger.info("loaded profile %r into slot %d (%d changes)", target.name, slot, len(result.changed))
 
-        if self._interface is not None:
-            self._interface.ProfileChanged(target.name)
+        self._announce.profile_loaded(target.name)
         await self._notify_switch(target.name)
 
     async def tick(self) -> None:
@@ -311,11 +328,10 @@ class Daemon:
         if change is not None:
             if override is not None:
                 logger.info("clearing the manual override for %r: the current game changed", override)
-            if self._interface is not None:
-                if change.started is not None:
-                    self._interface.GameDetected(change.started)
-                elif change.stopped is not None:
-                    self._interface.GameExited(change.stopped)
+            if change.started is not None:
+                self._announce.game_started(change.started)
+            elif change.stopped is not None:
+                self._announce.game_stopped(change.stopped)
 
         await self._observe_active_slot()
         await self._apply_target()

@@ -25,8 +25,10 @@ class FakeClient:
         self.connected = True
         return True
 
-    async def state(self):
-        return "state"
+    async def get_view(self, profile):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(state="state")
 
     def set_change_handler(self, handler):
         self._on_change = handler
@@ -49,7 +51,7 @@ class RunWithClientTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_runs_the_action_and_returns_its_result(self):
         async def action(client):
-            return await client.state()
+            return (await client.get_view("")).state
 
         self.assertEqual(await daemon_access.run_with_client(action), "state")
 
@@ -249,14 +251,14 @@ class MissingDaemonTests(unittest.TestCase):
 
         client = self._client("org.freedesktop.DBus.Error.ServiceUnknown")
         with self.assertRaises(daemon_access.DaemonUnavailable):
-            asyncio.run(client.state())
+            asyncio.run(client.get_view(""))
 
     def test_a_name_with_no_owner_is_also_a_missing_daemon(self):
         import asyncio
 
         client = self._client("org.freedesktop.DBus.Error.NameHasNoOwner")
         with self.assertRaises(daemon_access.DaemonUnavailable):
-            asyncio.run(client.state())
+            asyncio.run(client.get_view(""))
 
     def test_the_windows_read_reports_a_missing_daemon_too(self):
         import asyncio
@@ -271,7 +273,7 @@ class MissingDaemonTests(unittest.TestCase):
 
         client = self._client("org.freedesktop.DBus.Error.UnknownMethod")
         with self.assertRaises(RuntimeError) as caught:
-            asyncio.run(client.state())
+            asyncio.run(client.get_view(""))
         self.assertNotIsInstance(caught.exception, daemon_access.DaemonUnavailable)
         self.assertIn("UnknownMethod", str(caught.exception))
 

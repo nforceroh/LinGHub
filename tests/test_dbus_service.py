@@ -103,6 +103,7 @@ class FakeDaemon:
     def _writes(self) -> ConfigWrites:
         return ConfigWrites(
             state=lambda: self.state, save=self.save, wake=self.wake,
+            announce=lambda: None,
         )
 
     def get_state(self):
@@ -350,6 +351,50 @@ class ReadmeTests(unittest.TestCase):
             )
 
 
+class BusAnnouncerTests(unittest.TestCase):
+    """The daemon's events become the interface's signals."""
+
+    class Interface:
+        def __init__(self):
+            self.emitted = []
+
+        def ProfileChanged(self, name):
+            self.emitted.append(("ProfileChanged", name))
+
+        def GameDetected(self, name):
+            self.emitted.append(("GameDetected", name))
+
+        def GameExited(self, name):
+            self.emitted.append(("GameExited", name))
+
+        def ConfigChanged(self):
+            self.emitted.append(("ConfigChanged",))
+
+    def test_each_event_is_its_signal(self):
+        from linghub.daemon.dbus_service import BusAnnouncer
+
+        interface = self.Interface()
+        announcer = BusAnnouncer()
+        announcer.attach(interface)
+        announcer.profile_loaded("wot")
+        announcer.game_started("wot")
+        announcer.game_stopped("wot")
+        announcer.config_changed()
+        self.assertEqual(interface.emitted, [
+            ("ProfileChanged", "wot"),
+            ("GameDetected", "wot"),
+            ("GameExited", "wot"),
+            ("ConfigChanged",),
+        ])
+
+    def test_nothing_is_announced_before_the_interface_is_published(self):
+        from linghub.daemon.dbus_service import BusAnnouncer
+
+        announcer = BusAnnouncer()
+        announcer.config_changed()  # must not raise
+        announcer.profile_loaded("wot")
+
+
 class IntrospectionTests(unittest.TestCase):
     def test_interface_exposes_expected_members(self):
         interface = make_interface(FakeDaemon())
@@ -366,7 +411,7 @@ class IntrospectionTests(unittest.TestCase):
             "SetResolution", "SetReportRate",
             "CreateProfile", "RenameProfile", "DeleteProfile",
             "ActiveProfile", "DetectedGame", "DesktopProfile",
-            "ProfileChanged", "GameDetected", "GameExited",
+            "ProfileChanged", "GameDetected", "GameExited", "ConfigChanged",
         ):
             self.assertIn(member, names, f"{member} missing from introspection")
 

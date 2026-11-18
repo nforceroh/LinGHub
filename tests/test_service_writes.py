@@ -44,6 +44,7 @@ class _Harness:
         self.state: DaemonState | None = DaemonState(config=make_config())
         self.saved = 0
         self.woken = 0
+        self.announced = 0
         self.loaded: list[str] = []
         self.reloads = 0
         self._save_ok = save_ok
@@ -52,6 +53,7 @@ class _Harness:
             state=lambda: self.state,
             save=self._save,
             wake=self._wake,
+            announce=self._announce,
         )
         self.profiles = ProfileLifecycle(
             state=lambda: self.state,
@@ -72,6 +74,9 @@ class _Harness:
 
     def _wake(self) -> None:
         self.woken += 1
+
+    def _announce(self) -> None:
+        self.announced += 1
 
     def _load(self, name: str) -> bool:
         self.loaded.append(name)
@@ -117,6 +122,14 @@ class WritePathTests(unittest.TestCase):
                 _paths(h)[name]()
                 self.assertEqual(h.woken, 1, f"{name} did not wake the loop")
 
+    def test_every_path_announces_the_change(self):
+        """The tray's profile menu and the window rely on hearing about it."""
+        for name, write in _paths(_Harness()).items():
+            with self.subTest(path=name):
+                h = _Harness()
+                _paths(h)[name]()
+                self.assertEqual(h.announced, 1, f"{name} was not announced")
+
     def test_every_path_rolls_back_when_saving_fails(self):
         for name, write in _paths(_Harness()).items():
             with self.subTest(path=name):
@@ -134,6 +147,13 @@ class WritePathTests(unittest.TestCase):
                 h = _Harness(save_ok=False)
                 _paths(h)[name]()
                 self.assertEqual(h.woken, 0, f"{name} woke the loop anyway")
+
+    def test_a_failed_save_announces_nothing(self):
+        for name, write in _paths(_Harness()).items():
+            with self.subTest(path=name):
+                h = _Harness(save_ok=False)
+                _paths(h)[name]()
+                self.assertEqual(h.announced, 0, f"{name} announced a change it undid")
 
     def test_a_write_with_no_config_yet_is_refused(self):
         """Startup reads the config first, but a race must not crash."""

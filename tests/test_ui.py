@@ -179,6 +179,23 @@ class SignalHandlingTests(unittest.TestCase):
         client = DaemonClient()
         client._handle_signal(self._signal())  # must not raise
 
+    def _owner_changed(self, name):
+        return SimpleNamespace(
+            message_type=MessageType.SIGNAL, interface="org.freedesktop.DBus",
+            member="NameOwnerChanged", body=[name, "", ":1.42"],
+        )
+
+    def test_the_daemon_starting_or_stopping_triggers_change(self):
+        """With no poll, this is how a client notices the daemon came or went."""
+        from linghub.dbus_contract import SERVICE
+
+        self.client._handle_signal(self._owner_changed(SERVICE))
+        self.assertEqual(self.calls, 1)
+
+    def test_another_name_changing_owner_is_ignored(self):
+        self.client._handle_signal(self._owner_changed("org.example.Other"))
+        self.assertEqual(self.calls, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -43,10 +43,12 @@ class ConfigWrites:
         state: StateProvider,
         save: Callable[[], bool],
         wake: Callable[[], None],
+        announce: Callable[[], None],
     ):
         self._state = state
         self._save = save
         self._wake = wake
+        self._announce = announce
 
     def apply(self, change: Callable[[DaemonState], bool], description: str) -> bool:
         """Run `change`, persist it, and restore the old config if saving fails.
@@ -70,6 +72,9 @@ class ConfigWrites:
         # The change is only in the config and the file until the next tick
         # pushes it at the mouse, so ask for that tick now.
         self._wake()
+        # Clients show the profile list and the panels from the config, so
+        # they need to hear about the change; the tick only announces loads.
+        self._announce()
         return True
 
 

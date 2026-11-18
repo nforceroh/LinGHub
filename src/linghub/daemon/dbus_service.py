@@ -65,7 +65,7 @@ class ManagerInterface(ServiceInterface):
 
     @method()
     def GetView(self, profile: "s") -> "(sssasa(iss)a(us(uuu)uu)a(uuuu)auu)":
-        """Everything a UI poll needs, in one read.
+        """Everything a client shows, in one read.
 
         Returns (active profile, detected game, desktop profile, profile
         names; then the named profile's bindings, LEDs, DPI slots, accepted
@@ -75,7 +75,7 @@ class ManagerInterface(ServiceInterface):
         wants, not a failure.
 
         One read replaces the five per-section members the client used to
-        call in sequence, so a poll costs one round trip and a partial read
+        call in sequence, so a refresh costs one round trip and a partial read
         cannot leave the UI showing a state pieced together from two ticks.
         """
         snapshot = self._get_state()
@@ -242,3 +242,39 @@ class ManagerInterface(ServiceInterface):
     def GameExited(self, name: "s") -> "s":
         """Emitted when a detected game stops running."""
         return name
+
+    @signal()
+    def ConfigChanged(self) -> None:
+        """Emitted after the config changes: an edit, or the file reloaded."""
+        return None
+
+
+class BusAnnouncer:
+    """Announces the daemon's events as signals on the published interface.
+
+    The production adapter for the daemon's announcer. Silent until the
+    interface is attached: the daemon starts ticking before, or without, a
+    session bus, and has nobody to tell.
+    """
+
+    def __init__(self):
+        self._interface: ManagerInterface | None = None
+
+    def attach(self, interface: ManagerInterface) -> None:
+        self._interface = interface
+
+    def profile_loaded(self, name: str) -> None:
+        if self._interface is not None:
+            self._interface.ProfileChanged(name)
+
+    def game_started(self, name: str) -> None:
+        if self._interface is not None:
+            self._interface.GameDetected(name)
+
+    def game_stopped(self, name: str) -> None:
+        if self._interface is not None:
+            self._interface.GameExited(name)
+
+    def config_changed(self) -> None:
+        if self._interface is not None:
+            self._interface.ConfigChanged()

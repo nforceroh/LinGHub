@@ -29,18 +29,18 @@ class ProfileListTests(unittest.TestCase):
         self.assertIsNotNone(selected)
         self.assertEqual(selected.get_title(), "star-citizen")
 
-    def test_a_poll_does_not_clear_the_selection(self):
+    def test_a_refresh_does_not_clear_the_selection(self):
         window = self._window()
         window._profile_list.select_row(window._profile_list.get_row_at_index(2))
 
-        # Same state again, as the poll would deliver.
+        # Same state again, as a refresh would deliver.
         window._apply_view(view())
 
         selected = window._profile_list.get_selected_row()
-        self.assertIsNotNone(selected, "the poll cleared the selection")
+        self.assertIsNotNone(selected, "the refresh cleared the selection")
         self.assertEqual(selected.get_title(), "star-citizen")
 
-    def test_rows_are_not_recreated_on_every_poll(self):
+    def test_rows_are_not_recreated_on_every_refresh(self):
         """Recreating rows is what loses focus and selection."""
         window = self._window()
         first = window._profile_list.get_row_at_index(1)
@@ -83,7 +83,7 @@ class LedSaveModelTests(unittest.TestCase):
             panel._brightness.set_value(value)
         self.assertEqual(calls, [], "editing wrote to the daemon")
 
-    def test_a_poll_does_not_discard_unsaved_edits(self):
+    def test_a_refresh_does_not_discard_unsaved_edits(self):
         window = self._window()
         panel = window._led_panel
         panel.load({0: {"mode": "on", "color": (255, 0, 0),
@@ -91,15 +91,15 @@ class LedSaveModelTests(unittest.TestCase):
         panel._brightness.set_value(222)
         self.assertTrue(panel.dirty)
 
-        # A poll arrives with the old values from disk.
+        # A refresh arrives with the old values from disk.
         leds = {0: {"mode": "on", "color": (255, 0, 0),
                     "brightness": 100, "duration": 0}}
         window._apply_view(view(profiles=("desktop",), leds=leds))
 
-        self.assertEqual(panel.brightness, 222, "the poll reverted the edit")
+        self.assertEqual(panel.brightness, 222, "the refresh reverted the edit")
         self.assertTrue(panel.dirty)
 
-    def test_a_poll_refreshes_a_clean_panel(self):
+    def test_a_refresh_reloads_a_clean_panel(self):
         window = self._window()
         panel = window._led_panel
         panel.load({0: {"mode": "on", "color": (255, 0, 0),

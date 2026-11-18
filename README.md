@@ -70,8 +70,8 @@ only the looping ones have a speed.
 
 Between them, the DPI and lighting panels cover the whole profile. Both are
 staged rather than live: nothing reaches the mouse until Save, and Revert throws
-away unsaved edits. A poll never overwrites unsaved edits, so the two-second
-refresh cannot discard what you are in the middle of choosing.
+away unsaved edits. A refresh never overwrites unsaved edits, so a change made
+elsewhere cannot discard what you are in the middle of choosing.
 
 Profiles can be created, renamed and deleted from the buttons above the profile
 list. The desktop profile cannot be deleted, and neither can the last remaining
@@ -169,7 +169,7 @@ editing the config file.
 | `ListProfiles` | method → `as` | Every profile name in the config |
 | `LoadProfile(s)` | method → `b` | Load a profile now; false if it does not exist |
 | `Reload` | method → `b` | Re-read the config file |
-| `GetView(s)` | method → `(sssasa(iss)a(us(uuu)uu)a(uuuu)auu)` | Everything a poll needs in one read: active profile, detected game, desktop profile, profile names; then the named profile's bindings (index, type, value), LED zones (index, mode, colour, brightness, duration), DPI slots (index, dpi, is_default, is_disabled), accepted report rates, and its current report rate. Unknown profile: empty sections |
+| `GetView(s)` | method → `(sssasa(iss)a(us(uuu)uu)a(uuuu)auu)` | Everything a client shows, in one read: active profile, detected game, desktop profile, profile names; then the named profile's bindings (index, type, value), LED zones (index, mode, colour, brightness, duration), DPI slots (index, dpi, is_default, is_disabled), accepted report rates, and its current report rate. Unknown profile: empty sections |
 | `SetBinding(s,i,s,s)` → `siss` | method → `b` | Assign one button's binding |
 | `ClearBinding(s,i)` → `si` | method → `b` | Record a button as doing nothing |
 | `SetLeds(s,s,u,u,u,u,u)` → `ssuuuuu` | method → `b` | Set every LED zone to one effect |
@@ -184,6 +184,10 @@ editing the config file.
 | `ProfileChanged(s)` | signal | A profile was loaded onto the mouse |
 | `GameDetected(s)` | signal | A game started being detected |
 | `GameExited(s)` | signal | A detected game stopped running |
+| `ConfigChanged()` | signal | The config changed: an edit through this interface, or the file reloaded after a hand edit |
+
+Every change a client shows is announced by one of these signals, so clients
+re-read with `GetView` when a signal arrives rather than polling.
 
 A manual `LoadProfile` is honoured whether or not a game is running. It lasts
 until the current game changes, meaning a game starts or stops, and then

@@ -70,8 +70,10 @@ class MainWindow(Adw.ApplicationWindow):
         toolbar.set_content(self._build_content())
         self.set_content(toolbar)
 
+        # No poll: the daemon announces every change the window shows, and
+        # the client also reports the daemon starting or stopping.
         client.set_change_handler(self._on_daemon_change)
-        GLib.timeout_add_seconds(2, self._poll)
+        self._refresh()
 
     def _build_content(self) -> Gtk.Widget:
         split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
@@ -252,9 +254,9 @@ class MainWindow(Adw.ApplicationWindow):
 
     # --- state -----------------------------------------------------------
 
-    def _poll(self) -> bool:
+    def refresh(self) -> None:
+        """Read the daemon again, for a caller that knows something changed."""
         self._refresh()
-        return GLib.SOURCE_CONTINUE
 
     def _on_daemon_change(self) -> None:
         GLib.idle_add(self._refresh_from_idle)
@@ -269,8 +271,8 @@ class MainWindow(Adw.ApplicationWindow):
     def _refresh(self) -> None:
         """Read the daemon once, coalescing requests that arrive mid-flight.
 
-        Three triggers call this: the poll, the daemon's change signals, and
-        every successful write. A read already in flight means this request
+        Three triggers call this: opening the window or connecting, the
+        daemon's change signals, and every successful write. A read already in flight means this request
         collapses into one repeat when it finishes, so a slow read cannot land
         after a newer one.
         """
@@ -326,9 +328,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._rebuild_profiles()
         self._rebuild_bindings()
         if self._led_panel is not None:
-            # Never reload the panel over unsaved edits: the poll runs every
-            # two seconds and would silently discard whatever the user is in
-            # the middle of choosing.
+            # Never reload the panel over unsaved edits: any change signal
+            # refreshes the view, and would silently discard whatever the user
+            # is in the middle of choosing.
             if not self._led_panel.dirty:
                 self._led_panel.load(view.profile.leds)
         if self._dpi_panel is not None and not self._dpi_panel.dirty:
@@ -433,7 +435,7 @@ class MainWindow(Adw.ApplicationWindow):
         """Make the profile list match the daemon's state, reusing rows.
 
         Rows are updated in place rather than recreated. Rebuilding the list
-        on every two-second poll destroyed the user's selection, so clicking a
+        on every refresh destroyed the user's selection, so clicking a
         profile appeared to bounce back to the first row.
         """
         rows = presentation.profile_rows(self._state, self._editing)

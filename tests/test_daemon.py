@@ -78,6 +78,25 @@ class FakeConnector:
         pass
 
 
+class Recorder:
+    """An announcer that remembers what the daemon announced, in order."""
+
+    def __init__(self):
+        self.events: list[tuple[str, ...]] = []
+
+    def profile_loaded(self, name):
+        self.events.append(("profile_loaded", name))
+
+    def game_started(self, name):
+        self.events.append(("game_started", name))
+
+    def game_stopped(self, name):
+        self.events.append(("game_stopped", name))
+
+    def config_changed(self):
+        self.events.append(("config_changed",))
+
+
 class DaemonHarness:
     """A daemon over a temp config, with what is running set by the test."""
 
@@ -92,10 +111,12 @@ class DaemonHarness:
         ))
         self.detection = running()
         self.mouse = FakeConnector()
+        self.announced = Recorder()
         self.daemon = Daemon(
             config_path=self.path,
             detector=lambda _profiles: self.detection,
             mouse=self.mouse,
+            announce=self.announced,
             reconnect_delay=0,
         )
         case.assertTrue(self.daemon.load_config())
@@ -210,6 +231,65 @@ class MouseLossTests(unittest.TestCase):
         h.mouse.present = True
         h.tick()
         self.assertEqual(h.written, [("desktop", 0)])
+
+
+class AnnouncementTests(unittest.TestCase):
+    """What the daemon tells its clients, so they never have to poll."""
+
+    def test_a_game_starting_is_announced_before_its_profile_loads(self):
+        h = DaemonHarness(self)
+        h.tick()
+        h.announced.events.clear()
+        h.detection = running(WOT)
+        h.tick()
+        self.assertEqual(h.announced.events, [
+            ("game_started", "world-of-tanks"),
+            ("profile_loaded", "world-of-tanks"),
+        ])
+
+    def test_a_game_stopping_is_announced(self):
+        h = DaemonHarness(self)
+        h.detection = running(WOT)
+        h.tick()
+        h.announced.events.clear()
+        h.detection = running()
+        h.tick()
+        self.assertEqual(h.announced.events, [
+            ("game_stopped", "world-of-tanks"),
+            ("profile_loaded", "desktop"),
+        ])
+
+    def test_a_quiet_tick_announces_nothing(self):
+        h = DaemonHarness(self)
+        h.tick()
+        h.announced.events.clear()
+        h.tick()
+        self.assertEqual(h.announced.events, [])
+
+    def test_a_config_change_is_announced(self):
+        h = DaemonHarness(self)
+        h.tick()
+        h.announced.events.clear()
+        self.assertTrue(h.daemon.profiles.create("new", ""))
+        self.assertEqual(h.announced.events, [("config_changed",)])
+
+    def test_reloading_an_edited_file_is_announced(self):
+        h = DaemonHarness(self)
+        h.tick()
+        h.announced.events.clear()
+        config_module.save(h.path, Config(
+            profiles=[DESKTOP], desktop_profile="desktop", poll_interval=2.0,
+        ))
+        h.tick()
+        self.assertIn(("config_changed",), h.announced.events)
+
+    def test_a_broken_edit_is_not_announced(self):
+        h = DaemonHarness(self)
+        h.tick()
+        h.announced.events.clear()
+        h.path.write_text(ReloadTests.BROKEN, encoding="utf-8")
+        h.tick()
+        self.assertEqual(h.announced.events, [])
 
 
 class ReloadTests(unittest.TestCase):

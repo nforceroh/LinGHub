@@ -62,9 +62,13 @@ def call(action: Callable[[Any], T], timeout: float = 10.0) -> T:
 
 
 def state() -> DaemonState:
-    """The daemon's current state. Convenience for the common case."""
+    """The daemon's current state. Convenience for the common case.
+
+    Read through GetView, the same single call the window makes, so there is
+    one decoder for the daemon's state rather than two.
+    """
     async def read(client):
-        return await client.state()
+        return (await client.get_view("")).state
 
     return call(read)
 
