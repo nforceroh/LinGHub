@@ -64,6 +64,18 @@ _Avoid_: game run, play session
 The act of deciding that a game has started or stopped.
 _Avoid_: trigger, hook, watch
 
+**Current game**:
+The most recently started of the games running now. Its gaming profile is the
+one detection chooses, and a different current game counts as the game
+changing.
+_Avoid_: detected game, active game, running game
+
+**Manual override**:
+A profile the user loads by hand, which replaces the profile detection would
+choose. It holds whether or not a game is running, until a game starts or
+stops, or another manual load replaces it.
+_Avoid_: manual choice, pin, forced profile
+
 **Commit**:
 The asynchronous write of pending profile changes from the daemon to the
 mouse's flash memory.

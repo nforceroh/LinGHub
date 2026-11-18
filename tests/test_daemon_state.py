@@ -595,7 +595,7 @@ class ProfileManagementTests(unittest.TestCase):
         self.assertEqual(state.loaded_profile, "wot")
         self.assertFalse(state.needs_write)
 
-    def test_rename_updates_a_manual_override(self):
+    def test_rename_updates_the_running_games(self):
         state = self._state()
         state.stack = ["world-of-tanks"]
         state.rename_profile("world-of-tanks", "wot")
@@ -682,63 +682,107 @@ class ActiveSlotTests(unittest.TestCase):
 
 
 class ManualOverrideTests(unittest.TestCase):
-    """A manual profile choice must not outlive its reason.
+    """A manual override holds until the current game changes.
 
-    The override used to clear only when the detected game changed, so picking
-    a profile while no game was running left it stuck forever: the mouse stayed
-    on a gaming profile with nothing running.
-
-    The rule itself is tested directly in test_tick.py. These tests keep the
-    integration honest: the daemon must ask the decision and act on it.
+    It holds with no game running too: a profile loaded by hand at the desktop
+    stays loaded until a game starts or another profile is loaded.
     """
 
-    def _daemon(self, detection):
-        from linghub.daemon.service import Daemon
+    def _state(self):
+        return DaemonState(config=make_config(DESKTOP, WOT, SC))
 
-        daemon = Daemon(detector=lambda _profiles: detection)
-        daemon._state = DaemonState(config=make_config(DESKTOP, WOT))
-        return daemon
+    def test_a_load_with_no_game_running_is_honoured(self):
+        state = self._state()
+        self.assertTrue(state.request("world-of-tanks"))
+        state.observe(detection_for())
+        self.assertEqual(state.target_profile.name, "world-of-tanks")
 
-    def test_an_override_is_cleared_when_no_game_is_running(self):
-        import asyncio
+    def test_an_unknown_profile_is_refused(self):
+        state = self._state()
+        self.assertFalse(state.request("nope"))
+        self.assertIsNone(state.manual_override)
 
-        from linghub.discovery.detector import Detection
+    def test_a_game_starting_ends_the_override(self):
+        state = self._state()
+        state.request("world-of-tanks")
+        state.observe(detection_for(SC))
+        self.assertIsNone(state.manual_override)
+        self.assertEqual(state.target_profile.name, "star-citizen")
 
-        daemon = self._daemon(Detection(matches=[], rejections=[], considered=0))
-        daemon._manual_override = "world-of-tanks"
-        daemon._detected_game = None
+    def test_the_override_survives_while_the_same_game_runs(self):
+        """Picking a profile mid-game must not be undone by the next tick."""
+        state = self._state()
+        state.observe(detection_for(WOT))
+        state.request("desktop")
+        state.observe(detection_for(WOT))
+        self.assertEqual(state.target_profile.name, "desktop")
 
-        asyncio.run(daemon._tick_once())
+    def test_the_game_exiting_ends_the_override(self):
+        state = self._state()
+        state.observe(detection_for(WOT))
+        state.request("star-citizen")
+        state.observe(detection_for())
+        self.assertIsNone(state.manual_override)
+        self.assertEqual(state.target_profile.name, "desktop")
 
-        self.assertIsNone(daemon._manual_override)
-        self.assertEqual(daemon._state.target_profile.name, "desktop")
+    def test_the_override_does_not_disturb_the_running_games(self):
+        """Ending an override returns to the game that was underneath it."""
+        state = self._state()
+        state.observe(detection_for(WOT))
+        state.observe(detection_for(WOT, SC))
+        state.request("desktop")
+        state.observe(detection_for(WOT))
+        self.assertEqual(state.target_profile.name, "world-of-tanks")
 
-    def test_an_override_survives_while_its_game_runs(self):
-        """A manual choice holds while the game it names is running.
+    def test_the_override_follows_a_rename(self):
+        """Renaming the overriding profile must not fall back to the desktop."""
+        state = self._state()
+        state.request("world-of-tanks")
+        state.rename_profile("world-of-tanks", "wot")
+        self.assertEqual(state.manual_override, "wot")
+        self.assertEqual(state.target_profile.name, "wot")
 
-        The override is set on a later tick than the game being detected, so
-        the "detected game changed" rule does not clear it first.
-        """
-        import asyncio
+    def test_deleting_the_overriding_profile_ends_the_override(self):
+        state = self._state()
+        state.request("star-citizen")
+        state.delete_profile("star-citizen")
+        self.assertIsNone(state.manual_override)
 
-        from linghub.discovery.detector import Detection, Match
-        from linghub.discovery.processes import ProcessInfo
 
-        profile = Profile(name="world-of-tanks", games=(Game("x.exe"),))
-        process = ProcessInfo(pid=1, name="p", executable_path="x.exe",
-                              real_executable_path="x.exe", command="x.exe")
-        detection = Detection(
-            matches=[Match(game=profile.games[0], profile=profile, process=process)],
-            rejections=[], considered=1,
-        )
+class GameChangeTests(unittest.TestCase):
+    """What observe reports, so the daemon can announce it."""
 
-        daemon = self._daemon(detection)
-        daemon._detected_game = "world-of-tanks"
-        daemon._manual_override = "world-of-tanks"
+    def _state(self):
+        return DaemonState(config=make_config(DESKTOP, WOT, SC))
 
-        asyncio.run(daemon._tick_once())
+    def test_a_game_starting_is_reported(self):
+        change = self._state().observe(detection_for(WOT))
+        self.assertEqual(change.started, "world-of-tanks")
+        self.assertIsNone(change.stopped)
 
-        self.assertEqual(daemon._manual_override, "world-of-tanks")
+    def test_a_game_stopping_is_reported(self):
+        state = self._state()
+        state.observe(detection_for(WOT))
+        change = state.observe(detection_for())
+        self.assertIsNone(change.started)
+        self.assertEqual(change.stopped, "world-of-tanks")
+
+    def test_a_second_game_starting_is_a_change(self):
+        state = self._state()
+        state.observe(detection_for(WOT))
+        change = state.observe(detection_for(WOT, SC))
+        self.assertEqual(change.started, "star-citizen")
+        self.assertEqual(change.stopped, "world-of-tanks")
+
+    def test_no_change_reports_nothing(self):
+        state = self._state()
+        state.observe(detection_for(WOT))
+        self.assertIsNone(state.observe(detection_for(WOT)))
+
+    def test_a_request_is_not_a_game_change(self):
+        state = self._state()
+        state.request("world-of-tanks")
+        self.assertIsNone(state.observe(detection_for()))
 
 
 class FingerprintTests(unittest.TestCase):

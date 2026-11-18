@@ -22,7 +22,7 @@ from dbus_fast import DBusError as DBusFastError
 from ..hardware.ratbag import DeviceNotFound, RatbagClient
 from ..hardware.writer import ProfileWriter, WriteError
 from ..notify import Notifier, profile_message
-from . import slots, tick
+from . import slots
 from .dbus_service import PATH, SERVICE, ManagerInterface
 from .snapshot import StateSnapshot
 from .state import DaemonState
@@ -62,12 +62,10 @@ class Daemon:
         self._interface: ManagerInterface | None = None
         self._report_rates: list[int] = []
         self._notifier: Notifier | None = None
-        self._manual_override: str | None = None
-        self._detected_game: str | None = None
 
         # The three collaborators the D-Bus adapter calls. They hold the config
-        # edits; this class keeps the run loop, the device, and the decision of
-        # which profile should be on the mouse.
+        # edits; this class keeps the run loop and the device. Which profile
+        # should be on the mouse is DaemonState's decision.
         writes = ConfigWrites(
             state=lambda: self._state,
             save=self._save_config,
@@ -87,8 +85,9 @@ class Daemon:
         )
 
     def _request_load(self, name: str) -> bool:
-        """Load a named profile, overriding detection until that changes."""
-        self._manual_override = name
+        """Load a named profile, overriding detection until the game changes."""
+        if self._state is None or not self._state.request(name):
+            return False
         self._wake()
         return True
 
@@ -126,7 +125,7 @@ class Daemon:
         """Tell the user which profile was loaded."""
         if self._notifier is None or not self._notifier.available:
             return
-        summary, body = profile_message(profile_name, self._detected_game)
+        summary, body = profile_message(profile_name, self._state.current_game if self._state else None)
         await self._notifier.notify(summary, body, tag="profile")
 
     async def _export_interface(self) -> None:
@@ -158,7 +157,7 @@ class Daemon:
         return StateSnapshot(
             profile_names=tuple(p.name for p in self._state.config.profiles),
             loaded_profile=self._state.loaded_profile,
-            detected_game=self._detected_game,
+            detected_game=self._state.current_game,
             desktop_profile=self._state.config.desktop_profile,
         )
 
@@ -282,33 +281,16 @@ class Daemon:
         self._reload_if_changed()
         detection = self._detector(self._state.config.profiles)
 
-        previous_game = self._detected_game
-        self._state.observe(detection)
-        self._detected_game = detection.game.profile.name if detection.game else None
-
-        # The override's fate and the game events are one pure decision; the
-        # effects it implies are this method's job.
-        decision = tick.decide(previous_game, self._detected_game, self._manual_override)
-        if decision.ended is tick.OverrideEnded.GAME_CHANGED:
-            logger.info(
-                "clearing the manual override for %r: the detected game changed",
-                self._manual_override,
-            )
-        elif decision.ended is tick.OverrideEnded.NO_GAME:
-            logger.info(
-                "clearing the manual override for %r: no game is running",
-                self._manual_override,
-            )
-        self._manual_override = decision.override
-
-        if self._interface is not None:
-            if decision.detected is not None:
-                self._interface.GameDetected(decision.detected)
-            elif decision.exited is not None:
-                self._interface.GameExited(decision.exited)
-
-        if self._manual_override is not None:
-            self._state.stack = [self._manual_override]
+        override = self._state.manual_override
+        change = self._state.observe(detection)
+        if change is not None:
+            if override is not None:
+                logger.info("clearing the manual override for %r: the current game changed", override)
+            if self._interface is not None:
+                if change.started is not None:
+                    self._interface.GameDetected(change.started)
+                elif change.stopped is not None:
+                    self._interface.GameExited(change.stopped)
 
         await self._observe_active_slot()
         await self._apply_target()

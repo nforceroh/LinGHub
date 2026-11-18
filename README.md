@@ -185,8 +185,10 @@ editing the config file.
 | `GameDetected(s)` | signal | A game started being detected |
 | `GameExited(s)` | signal | A detected game stopped running |
 
-A manual `LoadProfile` lasts until the detected game changes, then detection
-takes over again.
+A manual `LoadProfile` is honoured whether or not a game is running. It lasts
+until the current game changes, meaning a game starts or stops, and then
+detection takes over again. With several games running, the current game is
+the one started most recently, and that is the one `DetectedGame` reports.
 
 ```bash
 busctl --user call org.linghub.Manager /org/linghub/Manager \
