@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review for LinGHub — fifth pass</title>
+    <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 4 4; }
+      .leak { stroke: #dc2626; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-5xl mx-auto px-4 sm:px-6 py-12 space-y-12">
+
+      <header class="border-b border-slate-300 pb-6">
+        <h1 class="font-serif text-4xl tracking-tight">Architecture review for LinGHub</h1>
+        <p class="text-sm text-slate-500 mt-2">18 November 2026 · fifth pass · 5 candidates · scope: commits since the fourth review</p>
+        <div class="flex flex-wrap gap-5 mt-5 text-xs uppercase tracking-wider text-slate-600">
+          <span class="flex items-center gap-2"><span class="inline-block w-5 h-3 border border-slate-400 bg-white"></span> module</span>
+          <span class="flex items-center gap-2"><svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" stroke="#64748b" stroke-width="2" class="seam"/></svg> seam</span>
+          <span class="flex items-center gap-2"><svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" stroke="#dc2626" stroke-width="2"/></svg> leakage</span>
+          <span class="flex items-center gap-2"><span class="inline-block w-5 h-3 deep"></span> deep module</span>
+        </div>
+      </header>
+
+      <section class="rounded-lg border border-slate-200 bg-white p-5">
+        <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Since the fourth review</p>
+        <div class="grid sm:grid-cols-2 gap-x-8 gap-y-2 text-sm">
+          <p><span class="text-emerald-700 font-semibold">Done</span> — config changes live in <span class="font-mono text-xs">writes.py</span>; one apply/save/roll-back owner</p>
+          <p><span class="text-emerald-700 font-semibold">Done</span> — collaborator Protocols checked by <span class="font-mono text-xs">test_collaborators.py</span></p>
+          <p><span class="text-emerald-700 font-semibold">Done</span> — Slot rules in <span class="font-mono text-xs">slots.py</span>, two callers</p>
+          <p><span class="text-emerald-700 font-semibold">Done</span> — panel rules in <span class="font-mono text-xs">panel_rules.py</span>, two callers</p>
+        </div>
+        <p class="text-sm text-slate-600 mt-4">The friction has moved. The write side is good. The remaining problems are in <em>which profile should be on the mouse</em>, and on the client side of the D-Bus seam.</p>
+      </section>
+
+      <section id="candidates" class="space-y-14">
+
+        <!-- 1 -->
+        <article id="c1" class="space-y-5">
+          <div>
+            <h2 class="font-serif text-2xl">1. Give the target profile one owner</h2>
+            <div class="flex flex-wrap gap-2 mt-2 text-xs">
+              <span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold">Strong</span>
+              <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">in-process</span>
+              <span class="px-2 py-0.5 rounded-full bg-red-100 text-red-800">behaviour bug</span>
+            </div>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>src/linghub/daemon/service.py:65–66, 89–93, 283–311</li>
+            <li>src/linghub/daemon/state.py:46–61, 214–239</li>
+            <li>src/linghub/daemon/tick.py:45–80</li>
+            <li>tests/test_daemon_state.py:598–602, 684–742</li>
+          </ul>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-500 mb-3">Before — four owners for one question</p>
+              <svg viewBox="0 0 400 280" class="w-full">
+                <rect x="10" y="10" width="180" height="110" fill="white" stroke="#94a3b8"/>
+                <text x="20" y="30" class="lbl" fill="#334155">Daemon</text>
+                <text x="20" y="55" font-family="monospace" font-size="11" fill="#475569">_manual_override</text>
+                <text x="20" y="72" font-family="monospace" font-size="11" fill="#475569">_detected_game</text>
+                <text x="20" y="96" font-family="monospace" font-size="11" fill="#dc2626">state.stack = [override]</text>
+
+                <rect x="210" y="10" width="180" height="110" fill="white" stroke="#94a3b8"/>
+                <text x="220" y="30" class="lbl" fill="#334155">DaemonState</text>
+                <text x="220" y="55" font-family="monospace" font-size="11" fill="#475569">stack</text>
+                <text x="220" y="72" font-family="monospace" font-size="11" fill="#475569">target_profile</text>
+                <text x="220" y="89" font-family="monospace" font-size="11" fill="#475569">rename_profile()</text>
+
+                <rect x="10" y="160" width="180" height="70" fill="white" stroke="#94a3b8"/>
+                <text x="20" y="180" class="lbl" fill="#334155">tick.decide</text>
+                <text x="20" y="202" font-family="monospace" font-size="11" fill="#475569">(prev, game, override)</text>
+
+                <rect x="210" y="160" width="180" height="70" fill="white" stroke="#94a3b8"/>
+                <text x="220" y="180" class="lbl" fill="#334155">Detection.game</text>
+                <text x="220" y="202" font-family="monospace" font-size="11" fill="#475569">first match ≠ stack top</text>
+
+                <line x1="190" y1="92" x2="210" y2="60" stroke="#dc2626" stroke-width="2"/>
+                <line x1="100" y1="120" x2="100" y2="160" stroke="#64748b" stroke-width="1.5"/>
+                <line x1="300" y1="120" x2="300" y2="160" stroke="#64748b" stroke-width="1.5"/>
+                <path d="M300 89 C 360 89, 360 130, 120 70" fill="none" stroke="#dc2626" stroke-width="1.5" class="seam"/>
+                <text x="10" y="262" font-size="11" fill="#dc2626">rename updates the stack, not the override → desktop gets written</text>
+              </svg>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-500 mb-3">After — one module answers it</p>
+              <div class="deep rounded-lg p-5 text-slate-100 h-[248px] flex flex-col justify-between">
+                <div>
+                  <p class="lbl text-slate-400">DaemonState</p>
+                  <p class="font-mono text-sm mt-2">observe(detection) → events</p>
+                  <p class="font-mono text-sm">request(name) → accepted?</p>
+                  <p class="font-mono text-sm">target_profile</p>
+                </div>
+                <div class="grid grid-cols-3 gap-2 text-[11px] text-slate-400">
+                  <div class="border border-slate-600 rounded p-2">override</div>
+                  <div class="border border-slate-600 rounded p-2">detected game</div>
+                  <div class="border border-slate-600 rounded p-2">decide() — private</div>
+                </div>
+                <p class="text-xs text-slate-400">Rename and delete update every name in one place. Daemon applies the events.</p>
+              </div>
+            </div>
+          </div>
+
+          <p><span class="font-semibold">Problem.</span> The override and detected game live on <span class="font-mono text-sm">Daemon</span>, while the stack lives on <span class="font-mono text-sm">DaemonState</span>. So <span class="font-mono text-sm">rename_profile</span> can't keep its promise to update “every reference”. Rename or delete a manually loaded profile, and the next tick writes the desktop profile.</p>
+          <p><span class="font-semibold">Solution.</span> Move the override and the detected game into <span class="font-mono text-sm">DaemonState</span>, behind <span class="font-mono text-sm">observe</span> and <span class="font-mono text-sm">request</span>. <span class="font-mono text-sm">decide</span> becomes an internal seam and keeps its 11 tests.</p>
+          <ul class="text-sm list-disc pl-5 space-y-1 text-slate-700">
+            <li>locality: every profile name in one module</li>
+            <li>the rename bug fixed by construction</li>
+            <li>tests stop setting <span class="font-mono">daemon._manual_override</span></li>
+            <li>the misleading rename test becomes honest</li>
+            <li>one notion of “the current game”</li>
+          </ul>
+          <div class="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+            <strong>[VERIFY]</strong> <span class="font-mono">decide</span> deliberately drops a Load made while no game is running, and its docstring says so. Yet <span class="font-mono">Load</span> returns true, and the window says “Loaded X.” (<span class="font-mono">window.py:692–697</span>). Is a desktop Load meant to be refused, or honoured? Once one module owns this, <span class="font-mono">request()</span> can say which.
+          </div>
+          <p class="text-xs text-slate-500">Consistent with ADR-0001: the slot rules are unchanged.</p>
+        </article>
+
+        <!-- 2 -->
+        <article id="c2" class="space-y-5">
+          <div>
+            <h2 class="font-serif text-2xl">2. Inject the device connection the way detection was injected</h2>
+            <div class="flex flex-wrap gap-2 mt-2 text-xs">
+              <span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold">Strong</span>
+              <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">ports &amp; adapters</span>
+            </div>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>src/linghub/daemon/service.py:100–114 (_connect), 316–342 (_observe_active_slot)</li>
+            <li>tests/test_daemon_state.py:215–353, 410–448, 684–742</li>
+          </ul>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-500 mb-3">Before — tests reach past the interface</p>
+              <div class="relative h-[248px]">
+                <div class="absolute inset-x-6 top-2 h-24 border border-slate-400 bg-white p-3">
+                  <p class="lbl text-slate-600">Daemon</p>
+                  <p class="font-mono text-xs text-slate-500 mt-1">_connect() builds RatbagClient + ProfileWriter</p>
+                  <p class="font-mono text-xs text-red-600 mt-1">except AttributeError: # fakes lack active_slot</p>
+                </div>
+                <div class="absolute inset-x-0 bottom-0 h-28 grid grid-cols-4 gap-1 text-[10px] font-mono text-red-700">
+                  <div class="border border-red-300 bg-red-50 p-1">_state =</div>
+                  <div class="border border-red-300 bg-red-50 p-1">_writer =</div>
+                  <div class="border border-red-300 bg-red-50 p-1">_connect =</div>
+                  <div class="border border-red-300 bg-red-50 p-1">_tick =</div>
+                  <div class="border border-red-300 bg-red-50 p-1">_export_interface =</div>
+                  <div class="border border-red-300 bg-red-50 p-1">_start_notifications =</div>
+                  <div class="border border-red-300 bg-red-50 p-1">_manual_override =</div>
+                  <div class="border border-red-300 bg-red-50 p-1">_detected_game =</div>
+                </div>
+                <svg class="absolute inset-0 w-full h-full pointer-events-none"><line x1="50%" y1="110" x2="50%" y2="136" stroke="#dc2626" stroke-width="2"/></svg>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-500 mb-3">After — two adapters, a real seam</p>
+              <pre class="mermaid">
+flowchart TB
+  D["Daemon(detector, connect_device)"]:::deep
+  D -.seam.-> P["ratbag ProfileWriter<br/>(production)"]
+  D -.seam.-> F["FakeDevice<br/>(tests: vanish, drift)"]
+  classDef deep fill:#0f172a,color:#f1f5f9,stroke:#0f172a
+              </pre>
+            </div>
+          </div>
+
+          <p><span class="font-semibold">Problem.</span> The device is the one adapter that actually fails, and it is built inline. Tests monkeypatch eight private fields. Production carries an <span class="font-mono text-sm">AttributeError</span> branch that exists only for the fakes.</p>
+          <p><span class="font-semibold">Solution.</span> <span class="font-mono text-sm">Daemon</span> accepts a <span class="font-mono text-sm">connect_device</span> callable, just as it accepts <span class="font-mono text-sm">detector</span>. The tests drive ticks through the constructor and <span class="font-mono text-sm">run</span>.</p>
+          <ul class="text-sm list-disc pl-5 space-y-1 text-slate-700">
+            <li>two adapters: production and fake</li>
+            <li>delete the AttributeError branch</li>
+            <li>drift → rewrite tested end to end</li>
+            <li>tick signals become testable</li>
+            <li>lets #1 be tested through Daemon</li>
+          </ul>
+        </article>
+
+        <!-- 3 -->
+        <article id="c3" class="space-y-5">
+          <div>
+            <h2 class="font-serif text-2xl">3. Make “daemon not running” part of the client’s interface</h2>
+            <div class="flex flex-wrap gap-2 mt-2 text-xs">
+              <span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold">Strong</span>
+              <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">in-process</span>
+              <span class="px-2 py-0.5 rounded-full bg-red-100 text-red-800">user-visible</span>
+            </div>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>src/linghub/daemon_access.py:38–55</li>
+            <li>src/linghub/ui/client.py:110–144</li>
+            <li>src/linghub/tray.py:124–131 · src/linghub/cli.py:104–115</li>
+            <li>tests/test_daemon_access.py:62–78</li>
+          </ul>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-500 mb-3">Before — the error mode is lost at the seam</p>
+              <pre class="mermaid">
+sequenceDiagram
+  participant C as cli / tray
+  participant A as daemon_access
+  participant K as DaemonClient
+  participant B as session bus
+  C->>A: run_with_client
+  A->>K: connect()
+  K-->>A: ok (bus is up)
+  A->>K: state()
+  K->>B: Get ActiveProfile
+  B-->>K: ServiceUnknown
+  K-->>C: RuntimeError("reading … failed")
+  Note over C: traceback every 30 s
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-500 mb-3">After — classified once, where the reply arrives</p>
+              <pre class="mermaid">
+sequenceDiagram
+  participant C as cli / tray
+  participant K as DaemonClient
+  participant B as session bus
+  C->>K: state()
+  K->>B: Get ActiveProfile
+  B-->>K: ServiceUnknown / NameHasNoOwner
+  K-->>C: DaemonUnavailable
+  Note over C: "daemon is not running"
+              </pre>
+            </div>
+          </div>
+
+          <p><span class="font-semibold">Problem.</span> <span class="font-mono text-sm">DaemonUnavailable</span> is raised only when the session bus is down. The ordinary case is a bus that is up with the daemon stopped. That reaches callers as a bare <span class="font-mono text-sm">RuntimeError</span> with the D-Bus error name dropped. The test fakes a failure that production never produces.</p>
+          <p><span class="font-semibold">Solution.</span> Map ServiceUnknown and NameHasNoOwner to <span class="font-mono text-sm">DaemonUnavailable</span> in the client's one call path. Test it with a reply that carries that error name.</p>
+          <ul class="text-sm list-disc pl-5 space-y-1 text-slate-700">
+            <li>the error mode joins the interface</li>
+            <li>both callers fixed at once</li>
+            <li>~10 lines, one honest test</li>
+          </ul>
+        </article>
+
+        <!-- 4 -->
+        <article id="c4" class="space-y-5">
+          <div>
+            <h2 class="font-serif text-2xl">4. One read path, one change signal</h2>
+            <div class="flex flex-wrap gap-2 mt-2 text-xs">
+              <span class="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold">Worth exploring</span>
+              <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">ports &amp; adapters (D-Bus)</span>
+            </div>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>src/linghub/ui/client.py:138–191 (state vs get_view)</li>
+            <li>src/linghub/daemon/writes.py:51–73 · service.py:190–208, 268–308</li>
+            <li>src/linghub/tray.py:74–85, 109–121, 142–147</li>
+            <li>src/linghub/ui/window.py:73, 316–324</li>
+          </ul>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-500 mb-3">Before — signals cover games, polls cover config</p>
+              <pre class="mermaid">
+flowchart LR
+  T[tick] -- GameDetected / Exited / ProfileChanged --> Tr[tray]
+  W[ConfigWrites.apply] -. no signal .-> Tr
+  R[config reload] -. no signal .-> Tr
+  Tr -- "state(): 4 round trips" --> K[client]
+  Win[window] -- "get_view: 1 round trip, every 2 s" --> K
+  linkStyle 1,2 stroke:#dc2626,stroke-width:2px
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-500 mb-3">After — the single writer announces</p>
+              <pre class="mermaid">
+flowchart LR
+  T[tick] --> S((Changed)):::deep
+  W[ConfigWrites.apply] --> S
+  R[config reload] --> S
+  S --> Tr[tray]
+  S --> Win[window]
+  Tr -- get_view --> K[client]
+  Win -- get_view --> K
+  classDef deep fill:#0f172a,color:#f1f5f9,stroke:#0f172a
+              </pre>
+            </div>
+          </div>
+
+          <p><span class="font-semibold">Problem.</span> The tray's docstring says the daemon “announces every change”, but config changes aren't announced. After a create, rename or delete, the tray's menu stays stale for up to 30 seconds. The window works around this by polling every 2 seconds. There are also two decoders for the same state: <span class="font-mono text-sm">state()</span> and <span class="font-mono text-sm">get_view</span>.</p>
+          <p><span class="font-semibold">Solution.</span> Every config change and reload emits one signal. Delete <span class="font-mono text-sm">client.state()</span> in favour of <span class="font-mono text-sm">get_view</span>. The window drops its poll.</p>
+          <ul class="text-sm list-disc pl-5 space-y-1 text-slate-700">
+            <li>leverage: one read, two callers</li>
+            <li>delete a 4-round-trip decoder</li>
+            <li>the tray's premise becomes true</li>
+            <li>the window's 2 s poll goes</li>
+          </ul>
+          <p class="text-xs text-slate-500">Follows ADR-0004: the daemon is the only writer, so it is the natural one to announce changes.</p>
+        </article>
+
+        <!-- 5 -->
+        <article id="c5" class="space-y-5">
+          <div>
+            <h2 class="font-serif text-2xl">5. Build the collaborators in one place; read the view in one call</h2>
+            <div class="flex flex-wrap gap-2 mt-2 text-xs">
+              <span class="px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 font-semibold">Speculative</span>
+              <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">in-process</span>
+            </div>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>src/linghub/daemon/service.py:71–87 · tests/test_dbus_service.py:47–110 · tests/test_service_writes.py:40–81</li>
+            <li>src/linghub/daemon/writes.py:146–154, 196–246 → dbus_service.py:81–125 → client.py:153–191</li>
+          </ul>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-500 mb-3">Before — one view, reshaped three times</p>
+              <div class="space-y-2 h-[248px] flex flex-col justify-center">
+                <div class="h-10 border-l-4 border-slate-400 bg-slate-50 px-3 flex items-center text-xs font-mono">writes.py · 5 getters → intermediate shapes</div>
+                <div class="h-10 border-l-4 border-slate-400 bg-slate-50 px-3 flex items-center text-xs font-mono">dbus_service · _view_* → tuples</div>
+                <div class="h-10 border-l-4 border-slate-400 bg-slate-50 px-3 flex items-center text-xs font-mono">client · tuples → dicts</div>
+                <div class="h-10 border-l-4 border-red-400 bg-red-50 px-3 flex items-center text-xs font-mono text-red-700">wiring copied ×3 (service, 2 test harnesses)</div>
+                <p class="text-[11px] text-slate-500">Three “state” types: DaemonState · StateSnapshot · client.DaemonState</p>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-500 mb-3">After</p>
+              <div class="space-y-2 h-[248px] flex flex-col justify-center">
+                <div class="h-14 deep rounded text-slate-100 px-3 flex items-center text-xs font-mono">build_collaborators(state, save, wake, …) — 1 copy</div>
+                <div class="h-14 deep rounded text-slate-100 px-3 flex items-center text-xs font-mono">view(profile) — one reader, one shape</div>
+                <div class="h-10 border-l-4 border-slate-400 bg-slate-50 px-3 flex items-center text-xs font-mono">dbus_service · marshal only</div>
+              </div>
+            </div>
+          </div>
+
+          <p><span class="font-semibold">Problem.</span> Adding a collaborator dependency means editing three constructors. GetView is now the getters' only caller, but they still return per-section shapes, and <span class="font-mono text-sm">get_report_rates(profile)</span> ignores its argument.</p>
+          <p><span class="font-semibold">Solution.</span> One factory builds the collaborators, and the five getters fold into one <span class="font-mono text-sm">view(profile)</span>. The Protocols stay, as the last review settled.</p>
+          <ul class="text-sm list-disc pl-5 space-y-1 text-slate-700">
+            <li>~40 lines of test wiring gone</li>
+            <li>the view's shape decided once</li>
+            <li>fakes can't make state and view disagree</li>
+          </ul>
+        </article>
+      </section>
+
+      <section id="top-recommendation" class="rounded-xl border-2 border-emerald-600 bg-white p-6 space-y-3">
+        <p class="text-xs uppercase tracking-wider text-emerald-700">Top recommendation</p>
+        <h2 class="font-serif text-3xl"><a href="#c1" class="hover:underline">Give the target profile one owner</a></h2>
+        <p class="text-slate-700">This one has a real behaviour bug (rename or delete of a manually loaded profile writes the desktop profile), plus a test that passes while describing behaviour production lacks. The cause is architectural: the names that rename has to update live in two modules. Do <a href="#c2" class="underline">#2</a> alongside it, so the fix can be tested through <span class="font-mono text-sm">Daemon</span> rather than by setting its private fields. <a href="#c3" class="underline">#3</a> is a small, separate win that users will notice.</p>
+      </section>
+
+      <section class="rounded-lg border border-slate-200 bg-white p-5 text-sm">
+        <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Checked, deliberately not proposed</p>
+        <ul class="list-disc pl-5 space-y-1 text-slate-700">
+          <li><span class="font-mono">writes.py</span> apply/save/roll back: one owner, every path tested.</li>
+          <li><span class="font-mono">slots.py</span>, <span class="font-mono">dbus_contract.py</span>, <span class="font-mono">daemon_access</span>, <span class="font-mono">collaborators.py</span>: real seams, now load-bearing.</li>
+          <li><span class="font-mono">tick.decide</span> as a pure function: the tests are good. The problem is where its inputs live (#1).</li>
+          <li>GetView as one round trip: right. Only the reshaping around it is friction (#5).</li>
+          <li>The window's refresh coalescing and the tray's GTK3 subprocess tests: correct as they are.</li>
+          <li>Small window tidy-ups, not worth a card: route the seven <span class="font-mono">run_and_report</span> calls through the injected <span class="font-mono">schedule</span>, and delete the uncalled <span class="font-mono">_apply_bindings</span> (<span class="font-mono">window.py:476</span>).</li>
+          <li><span class="font-mono">hotspot_editor.py</span> and <span class="font-mono">diagram.py</span>: out of scope, as decided last review.</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>
