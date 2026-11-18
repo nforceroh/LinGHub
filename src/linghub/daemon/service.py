@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Protocol
 
 from dbus_fast import BusType
 from dbus_fast.aio import MessageBus
@@ -19,8 +19,9 @@ from ..discovery.detector import Detection, detect
 from ..discovery.gamemode import GameModeClient
 from dbus_fast import DBusError as DBusFastError
 
-from ..hardware.ratbag import DeviceNotFound, RatbagClient
-from ..hardware.writer import ProfileWriter, WriteError
+from ..domain.profile import Profile
+from ..hardware.ratbag import DeviceNotFound
+from ..hardware.writer import RatbagConnector, WriteError, WriteResult
 from ..notify import Notifier, profile_message
 from . import slots
 from .dbus_service import PATH, SERVICE, ManagerInterface
@@ -40,21 +41,46 @@ class ConfigStartupError(RuntimeError):
     """
 
 
+class Mouse(Protocol):
+    """What the daemon needs from a connected mouse.
+
+    `apply` raises WriteError when the mouse refused a write; any other error
+    means the mouse is gone and must be reconnected.
+    """
+
+    async def apply(self, profile: Profile, slot: int) -> WriteResult: ...
+
+    async def active_slot(self) -> int | None: ...
+
+    async def report_rates(self) -> list[int]: ...
+
+
+class MouseConnector(Protocol):
+    """Connects to the mouse; `connect` raises DeviceNotFound when it is absent."""
+
+    async def connect(self) -> Mouse: ...
+
+    def disconnect(self) -> None: ...
+
+
 class Daemon:
     def __init__(
         self,
         config_path: Path | str = config_module.DEFAULT_CONFIG_PATH,
         poll_interval: float | None = None,
         detector: Callable[[list], Detection] = detect,
+        mouse: MouseConnector | None = None,
+        reconnect_delay: float = 1.0,
     ):
         self._config_path = Path(config_path)
         self._poll_interval = poll_interval
-        # Detection is a collaborator like the write adapters: injected so a
-        # test can say what is running without patching a module global.
+        # Detection and the mouse are injected so a test can say what is
+        # running and what the hardware does without a bus or a device.
         self._detector = detector
+        self._mouse = mouse if mouse is not None else RatbagConnector()
+        self._reconnect_delay = reconnect_delay
         self._state: DaemonState | None = None
-        self._writer: ProfileWriter | None = None
-        self._bus: MessageBus | None = None
+        self._writer: Mouse | None = None
         self._watcher = ConfigWatcher(self._config_path)
         self._wakeup = asyncio.Event()
         self._gamemode: GameModeClient | None = None
@@ -97,20 +123,12 @@ class Daemon:
         return True
 
     async def _connect(self) -> None:
-        if self._bus is None:
-            self._bus = await asyncio.wait_for(
-                MessageBus(bus_type=BusType.SYSTEM).connect(), timeout=5
-            )
-        client = RatbagClient(self._bus)
-        device = await client.find_device()
-        self._writer = ProfileWriter(client, device)
+        mouse = await self._mouse.connect()
         # A missing capability must not stop the daemon: an empty list just
         # means the UI offers no rate choices.
-        self._report_rates = await client.report_rates(device)
-        logger.info(
-            "using device %s at %s (report rates %s)",
-            device.name, device.path, self._report_rates,
-        )
+        self._report_rates = await mouse.report_rates()
+        self._writer = mouse
+        logger.info("using the mouse (report rates %s)", self._report_rates)
 
     async def _start_notifications(self) -> None:
         """Attach to the notification daemon, if there is one.
@@ -146,13 +164,14 @@ class Daemon:
             profiles=self.profiles,
             bindings=self.bindings,
             settings=self.settings,
-            get_state=self._snapshot,
+            get_state=self.snapshot,
         )
         self._session_bus.export(PATH, self._interface)
         await self._session_bus.request_name(SERVICE)
         logger.info("published %s on the session bus", SERVICE)
 
-    def _snapshot(self) -> StateSnapshot:
+    def snapshot(self) -> StateSnapshot:
+        """What the daemon believes now, as the D-Bus adapter reports it."""
         assert self._state is not None
         return StateSnapshot(
             profile_names=tuple(p.name for p in self._state.config.profiles),
@@ -174,7 +193,8 @@ class Daemon:
         self._watcher.resync()
         return True
 
-    def _reload_config(self) -> bool:
+    def load_config(self) -> bool:
+        """Read the config file; False, keeping any previous config, if it is invalid."""
         try:
             config = config_module.load(self._config_path)
         except config_module.ConfigError as exc:
@@ -206,7 +226,7 @@ class Daemon:
         self._state.config = config
         logger.info("reloaded config: %d profile(s)", len(config.profiles))
 
-    async def _reconnect(self, attempts: int = 3, delay: float = 1.0) -> None:
+    async def _reconnect(self, attempts: int = 3) -> None:
         """Try to reconnect to the device after it disappeared.
 
         Bounded rather than looping until the device returns: blocking here
@@ -224,7 +244,7 @@ class Daemon:
             except DeviceNotFound as exc:
                 if attempt == 0:
                     logger.warning("%s; will retry", exc)
-                await asyncio.sleep(delay * (attempt + 1))
+                await asyncio.sleep(self._reconnect_delay * (attempt + 1))
         logger.warning("device still absent; detection continues without it")
 
     async def _apply_target(self) -> None:
@@ -267,7 +287,12 @@ class Daemon:
             self._interface.ProfileChanged(target.name)
         await self._notify_switch(target.name)
 
-    async def _tick(self) -> None:
+    async def tick(self) -> None:
+        """One pass: detect games, check the mouse's slot, write if needed.
+
+        Never raises for a vanished mouse or a failed write: one bad tick must
+        not take the daemon down.
+        """
         assert self._state is not None
         try:
             await self._tick_once()
@@ -310,10 +335,6 @@ class Daemon:
         except (RuntimeError, OSError, DBusFastError) as exc:
             logger.debug("cannot read the active slot: %s", exc)
             return
-        except AttributeError:
-            # A writer without the capability cannot report drift; treat it as
-            # unknown rather than failing the tick.
-            return
 
         before = self._state.needs_write
         self._state.observe_active_slot(active)
@@ -324,7 +345,7 @@ class Daemon:
             )
 
     async def run(self) -> None:
-        if not self._reload_config():
+        if not self.load_config():
             # A bad config is not transient: restarting will not fix it, so
             # exit non-zero and let systemd's RestartPreventExitStatus stop
             # the unit rather than looping.
@@ -362,7 +383,7 @@ class Daemon:
 
         try:
             while True:
-                await self._tick()
+                await self.tick()
                 try:
                     await asyncio.wait_for(self._wakeup.wait(), timeout=interval)
                 except asyncio.TimeoutError:
@@ -374,8 +395,7 @@ class Daemon:
             self._gamemode.disconnect()
             if self._session_bus is not None:
                 self._session_bus.disconnect()
-            if self._bus is not None:
-                self._bus.disconnect()
+            self._mouse.disconnect()
 
     def _wake(self) -> None:
         """Ask the run loop to tick now rather than at the next interval."""

@@ -8,6 +8,7 @@ and a mismatch is raised rather than reported as success.
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 
 from ..domain.profile import Profile
@@ -54,6 +55,14 @@ class ProfileWriter:
     def __init__(self, client: RatbagClient, device: Device):
         self._client = client
         self._device = device
+
+    @property
+    def device(self) -> Device:
+        return self._device
+
+    async def report_rates(self) -> list[int]:
+        """The report rates this device accepts, in Hz; empty if unpublished."""
+        return await self._client.report_rates(self._device)
 
     async def _profile_path(self, slot: int) -> str:
         paths = await self._client._property(self._device.path, "Device", "Profiles")
@@ -215,3 +224,33 @@ class ProfileWriter:
                     f"button {index} value did not take effect: "
                     f"wrote {expected_payload!r}, read {actual_payload!r}"
                 )
+
+
+class RatbagConnector:
+    """Finds the G502 through ratbagd and hands back a writer for it.
+
+    The production adapter for the daemon's mouse connection. It owns the
+    system bus, reusing it across reconnects, and closes it on disconnect.
+    Raises DeviceNotFound when no G502 is attached.
+    """
+
+    def __init__(self):
+        self._bus = None
+
+    async def connect(self) -> ProfileWriter:
+        from dbus_fast import BusType
+        from dbus_fast.aio import MessageBus
+
+        if self._bus is None:
+            self._bus = await asyncio.wait_for(
+                MessageBus(bus_type=BusType.SYSTEM).connect(), timeout=5
+            )
+        client = RatbagClient(self._bus)
+        device = await client.find_device()
+        logging.getLogger(__name__).info("found %s at %s", device.name, device.path)
+        return ProfileWriter(client, device)
+
+    def disconnect(self) -> None:
+        if self._bus is not None:
+            self._bus.disconnect()
+            self._bus = None

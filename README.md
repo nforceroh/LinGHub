@@ -222,8 +222,8 @@ src/linghub/
 ├── hardware/        ratbagd: reading, encoding, writing and verifying
 ├── discovery/       /proc and GameMode: is a game running?
 ├── daemon/
-│   ├── service.py   the run loop, the device, and which profile should load
-│   ├── state.py     what the daemon believes, and what it should do next
+│   ├── service.py   the run loop; detection and the mouse are injected
+│   ├── state.py     which profile should be on the mouse, and why
 │   ├── writes.py    every config change, and the rule that persists it
 │   ├── slots.py     which slot a profile belongs in (ADR-0001)
 │   ├── collaborators.py  what the D-Bus adapter needs from the daemon
@@ -242,6 +242,11 @@ src/linghub/
 The pattern throughout: a decision that does not need a framework lives in a
 module the framework calls, so it can be tested directly. `presentation`,
 `panel_rules`, `binding_modes`, `slots` and `writes` are all that shape.
+
+The daemon itself is tested the same way: it takes its detector and its mouse
+connection as constructor arguments, so `tests/test_daemon.py` drives it one
+`tick()` at a time against a fake mouse that can vanish, refuse a write, or be
+moved to another slot. In production the mouse is `RatbagConnector`.
 
 ## Development
 
