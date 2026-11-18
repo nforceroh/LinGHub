@@ -23,6 +23,17 @@ INTERFACE = contract.INTERFACE
 
 logger = logging.getLogger("linghub.ui.client")
 
+# The bus's answers when nothing owns the daemon's name. Connecting to the bus
+# succeeds without the daemon, so these replies are the only sign it is absent.
+_NO_DAEMON = frozenset({
+    "org.freedesktop.DBus.Error.ServiceUnknown",
+    "org.freedesktop.DBus.Error.NameHasNoOwner",
+})
+
+
+class DaemonUnavailable(RuntimeError):
+    """The daemon is not running, or is not answering on the session bus."""
+
 
 @dataclass(frozen=True)
 class DaemonState:
@@ -115,8 +126,7 @@ class DaemonClient:
             )),
             timeout=5,
         )
-        if reply.message_type == MessageType.ERROR:
-            raise RuntimeError(f"{member} failed: {reply.body}")
+        _raise_for_error(reply, member)
         return reply.body[0] if reply.body else None
 
     async def _property(self, name: str) -> str:
@@ -130,8 +140,7 @@ class DaemonClient:
             )),
             timeout=5,
         )
-        if reply.message_type == MessageType.ERROR:
-            raise RuntimeError(f"reading {name} failed")
+        _raise_for_error(reply, f"reading {name}")
         value = reply.body[0]
         return value.value if isinstance(value, Variant) else ""
 
@@ -239,3 +248,17 @@ class DaemonClient:
         if self._bus is not None:
             self._bus.disconnect()
             self._bus = None
+
+
+def _raise_for_error(reply: Message, what: str) -> None:
+    """Raise if `reply` is an error: DaemonUnavailable when the daemon is absent.
+
+    Any other error is a failure of the call itself, and keeps the bus's
+    error name so the caller can see what went wrong.
+    """
+    if reply.message_type != MessageType.ERROR:
+        return
+    detail = reply.body[0] if reply.body else ""
+    if reply.error_name in _NO_DAEMON:
+        raise DaemonUnavailable(f"the daemon is not on the session bus ({detail})")
+    raise RuntimeError(f"{what} failed: {reply.error_name}: {detail}")

@@ -22,17 +22,13 @@ import logging
 import threading
 from typing import Any, Callable, TypeVar
 
-from .ui.client import DaemonState
+from .ui.client import DaemonState, DaemonUnavailable
 
 
 logger = logging.getLogger("linghub.daemon_access")
 
 
 T = TypeVar("T")
-
-
-class DaemonUnavailable(RuntimeError):
-    """The daemon is not running, or is not answering on the session bus."""
 
 
 async def run_with_client(action: Callable[[Any], T]) -> T:

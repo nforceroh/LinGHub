@@ -60,7 +60,7 @@ class RunWithClientTests(unittest.IsolatedAsyncioTestCase):
         await daemon_access.run_with_client(action)
         self.assertTrue(FakeClient.instances[-1].disconnected)
 
-    async def test_a_missing_daemon_raises_daemon_unavailable(self):
+    async def test_an_unreachable_bus_raises_daemon_unavailable(self):
         async def make_failing():
             return None
 
@@ -211,6 +211,69 @@ class WatcherTests(unittest.TestCase):
             time.sleep(0.3)
             watcher.stop()
             watcher._thread.join(timeout=2)
+
+
+class MissingDaemonTests(unittest.TestCase):
+    """The session bus is up but nothing owns the daemon's name.
+
+    This is the ordinary "daemon not running" case. Connecting to the bus
+    succeeds, so the absence only shows up as an error reply to the first
+    call - and it must reach callers as DaemonUnavailable, not a generic
+    failure, or `linghub status` and the tray cannot tell the two apart.
+    """
+
+    class Bus:
+        def __init__(self, error_name: str):
+            self.error_name = error_name
+
+        async def call(self, message):
+            from types import SimpleNamespace
+
+            from dbus_fast import MessageType
+
+            return SimpleNamespace(
+                message_type=MessageType.ERROR,
+                error_name=self.error_name,
+                body=["The name is not activatable"],
+            )
+
+    def _client(self, error_name):
+        from linghub.ui.client import DaemonClient
+
+        client = DaemonClient()
+        client._bus = self.Bus(error_name)
+        return client
+
+    def test_reading_state_with_no_daemon_raises_daemon_unavailable(self):
+        import asyncio
+
+        client = self._client("org.freedesktop.DBus.Error.ServiceUnknown")
+        with self.assertRaises(daemon_access.DaemonUnavailable):
+            asyncio.run(client.state())
+
+    def test_a_name_with_no_owner_is_also_a_missing_daemon(self):
+        import asyncio
+
+        client = self._client("org.freedesktop.DBus.Error.NameHasNoOwner")
+        with self.assertRaises(daemon_access.DaemonUnavailable):
+            asyncio.run(client.state())
+
+    def test_the_windows_read_reports_a_missing_daemon_too(self):
+        import asyncio
+
+        client = self._client("org.freedesktop.DBus.Error.ServiceUnknown")
+        with self.assertRaises(daemon_access.DaemonUnavailable):
+            asyncio.run(client.get_view(""))
+
+    def test_a_failed_call_is_not_a_missing_daemon(self):
+        """A bug in the daemon must not be reported as 'not running'."""
+        import asyncio
+
+        client = self._client("org.freedesktop.DBus.Error.UnknownMethod")
+        with self.assertRaises(RuntimeError) as caught:
+            asyncio.run(client.state())
+        self.assertNotIsInstance(caught.exception, daemon_access.DaemonUnavailable)
+        self.assertIn("UnknownMethod", str(caught.exception))
 
 
 if __name__ == "__main__":
