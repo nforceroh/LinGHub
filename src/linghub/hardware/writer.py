@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 from ..domain.profile import Profile
 from . import mapping
+from .active_slot import ActiveSlotReader, MouseSlot, mouse_for
 from .ratbag import SERVICE, RatbagClient, Device, DeviceReplaced
 
 
@@ -52,9 +53,12 @@ class WriteResult:
 class ProfileWriter:
     """Apply profiles to a device through an existing RatbagClient."""
 
-    def __init__(self, client: RatbagClient, device: Device):
+    def __init__(self, client: RatbagClient, device: Device, mouse: MouseSlot | None = None):
+        """`mouse` reads the active slot from the mouse itself (#2); without
+        one, ratbagd's answer is the only one."""
         self._client = client
         self._device = device
+        self._slots = ActiveSlotReader(self._believed_slot, mouse)
 
     @property
     def device(self) -> Device:
@@ -136,12 +140,17 @@ class ProfileWriter:
         return WriteResult(slot=slot, changed=tuple(changed))
 
     async def active_slot(self) -> int | None:
-        """Which slot the device says is active, or None if none is.
+        """The active slot, as the mouse reports it.
 
-        Read from hardware rather than remembered, so the daemon can notice
-        when something outside it changed the active profile.
+        Read each time rather than remembered, so the daemon notices when
+        something outside it moved the mouse. Raises SlotUnknown when the
+        mouse cannot say; see `active_slot` for the rules.
         """
         await self._check_identity()
+        return await self._slots.read()
+
+    async def _believed_slot(self) -> int | None:
+        """Which slot ratbagd believes is active, or None if none is."""
         paths = await self._get(self._device.path, "Device", "Profiles")
         for index, path in enumerate(paths):
             if await self._get(path, "Profile", "IsActive"):
@@ -263,7 +272,7 @@ class RatbagConnector:
         client = RatbagClient(self._bus)
         device = await client.find_device()
         logging.getLogger(__name__).info("found %s at %s", device.name, device.path)
-        return ProfileWriter(client, device)
+        return ProfileWriter(client, device, mouse=mouse_for(device.path))
 
     def disconnect(self) -> None:
         if self._bus is not None:

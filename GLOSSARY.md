@@ -16,6 +16,16 @@ can be loaded into, 0 through 4. Slot 0 holds the desktop profile; slot 1 holds
 whichever gaming profile is active.
 _Avoid_: index, bank, channel
 
+**Active slot**:
+The slot the mouse is using right now, as the mouse itself reports it.
+ratbagd's answer is only its belief about the active slot.
+_Avoid_: current profile, selected slot
+
+**Drift**:
+The active slot differing from the slot the daemon last loaded a profile
+into, whatever moved it: a profile button, a KVM switch, or another tool.
+_Avoid_: desync, mismatch
+
 **Load**:
 Writing a profile's contents into a slot and committing it to the mouse.
 _Avoid_: push, apply, upload, sync

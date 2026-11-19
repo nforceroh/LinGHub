@@ -181,6 +181,24 @@ class DriftTests(unittest.TestCase):
         h.tick()
         self.assertEqual(h.written, [("world-of-tanks", 1), ("world-of-tanks", 1)])
 
+    def test_an_unknown_slot_is_neither_drift_nor_a_lost_mouse(self):
+        """A sleeping mouse cannot say which slot it is on (#2).
+
+        Reloading would be a guess, and reconnecting every two seconds while
+        it sleeps would be churn. The next answer decides.
+        """
+        from linghub.hardware.active_slot import SlotUnknown
+
+        h = DaemonHarness(self)
+        h.tick()
+        h.mouse.mouse.active = 1          # drifted, but the read cannot say so
+        h.mouse.mouse.next_read = SlotUnknown("no reply")
+        h.tick()
+        self.assertEqual(h.written, [("desktop", 0)], "an unknown slot caused a reload")
+        self.assertEqual(h.mouse.connects, 1, "an unknown slot caused a reconnect")
+        h.tick()                          # the mouse answers again
+        self.assertEqual(h.written, [("desktop", 0), ("desktop", 0)])
+
     def test_an_unreadable_slot_is_not_drift(self):
         h = DaemonHarness(self)
         h.tick()
