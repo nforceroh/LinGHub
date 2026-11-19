@@ -13,14 +13,9 @@ import unittest
 
 from linghub.config import Config
 from linghub.daemon.dbus_service import INTERFACE, ManagerInterface
-from linghub.daemon.snapshot import StateSnapshot
+from linghub.daemon.snapshot import ProfileSnapshot, StateSnapshot, View
 from linghub.daemon.state import DaemonState
-from linghub.daemon.writes import (
-    Bindings,
-    ConfigWrites,
-    DeviceSettings,
-    ProfileLifecycle,
-)
+from linghub.daemon.writes import build_collaborators
 from linghub.domain.profile import Binding, Game, Profile
 
 
@@ -51,8 +46,10 @@ class FakeDaemon:
     routing is tested against the real write rule, not a copy of it.
     """
 
-    def __init__(self, snapshot=None, accept=True, bindings=None):
-        self.snapshot = snapshot or StateSnapshot()
+    def __init__(self, snapshot=None, accept=True, bindings=None, profile=None):
+        # What GetView and the properties report: one view, so the state and
+        # profile halves come from the same place, as they do in the daemon.
+        self.view = View(snapshot or StateSnapshot(), profile or ProfileSnapshot())
         self.accept = accept
         self.loaded: list[str] = []
         self.reloads = 0
@@ -74,39 +71,30 @@ class FakeDaemon:
     def wake(self) -> None:
         self.woken = getattr(self, "woken", 0) + 1
 
-    def report_rates(self) -> tuple[int, ...]:
-        return (125, 250, 500, 1000)
-
     # --- the collaborators, built on this fake ---
 
-    @property
-    def profiles(self) -> ProfileLifecycle:
-        return ProfileLifecycle(
-            state=lambda: self.state,
-            writes=self._writes(),
-            request_load=self.request_load,
-            request_reload=self.request_reload,
-        )
-
-    @property
-    def bindings(self) -> Bindings:
-        return Bindings(state=lambda: self.state, writes=self._writes())
-
-    @property
-    def settings(self) -> DeviceSettings:
-        return DeviceSettings(
-            state=lambda: self.state,
-            writes=self._writes(),
-            report_rates=self.report_rates,
-        )
-
-    def _writes(self) -> ConfigWrites:
-        return ConfigWrites(
+    def _wired(self):
+        return build_collaborators(
             state=lambda: self.state, save=self.save, wake=self.wake,
+            announce=lambda: None,
+            request_load=self.request_load, request_reload=self.request_reload,
         )
 
-    def get_state(self):
-        return self.snapshot
+    @property
+    def profiles(self):
+        return self._wired().profiles
+
+    @property
+    def bindings(self):
+        return self._wired().bindings
+
+    @property
+    def settings(self):
+        return self._wired().settings
+
+    def get_view(self, profile: str) -> View:
+        self.viewed = profile
+        return self.view
 
 
 def make_interface(daemon):
@@ -114,7 +102,7 @@ def make_interface(daemon):
         profiles=daemon.profiles,
         bindings=daemon.bindings,
         settings=daemon.settings,
-        get_state=daemon.get_state,
+        get_view=daemon.get_view,
     )
 
 
@@ -196,51 +184,46 @@ class LedMethodTests(unittest.TestCase):
 
 
 class GetViewTests(unittest.TestCase):
-    """One read for everything a poll needs.
+    """GetView marshals one view into the struct the client decodes.
 
-    Before GetView the client made nine sequential round trips per poll,
-    with three separate failure policies. These tests pin the one struct
-    that replaced them.
+    What goes into the view is read_view's job (tests/test_view.py); these pin
+    the D-Bus shapes, which the client's decoder relies on.
     """
 
-    def test_view_returns_state_and_profile_sections(self):
+    def test_the_state_and_sections_are_marshalled(self):
         daemon = FakeDaemon(
             StateSnapshot(
                 loaded_profile="wot", detected_game="x.exe",
                 desktop_profile="desktop", profile_names=("desktop", "wot"),
             ),
-            bindings={0: ("key", "KEY_F"), 3: ("special", "resolution-up")},
+            profile=ProfileSnapshot(
+                bindings=((0, "key", "KEY_F"), (3, "button", 4), (5, "disabled", None)),
+                leds=({"index": 0, "mode": "breathing", "color": (255, 0, 0),
+                       "brightness": 128, "duration": 3000},),
+                resolutions=((800, True, False), (1600, False, True)),
+                report_rates=(125, 250, 500, 1000),
+                report_rate=500,
+            ),
         )
         view = call(make_interface(daemon), "GetView", "wot")
+        self.assertEqual(daemon.viewed, "wot")
         active, detected, desktop, names, bindings, leds, res, rates, rate = view
-        self.assertEqual(active, "wot")
-        self.assertEqual(detected, "x.exe")
-        self.assertEqual(desktop, "desktop")
+        self.assertEqual((active, detected, desktop), ("wot", "x.exe", "desktop"))
         self.assertEqual(list(names), ["desktop", "wot"])
-        self.assertEqual(
-            sorted(bindings),
-            [(0, "key", "KEY_F"), (3, "special", "resolution-up")],
-        )
-        self.assertEqual(leds, [(0, "on", (0, 0, 0), 255, 0)])
-        self.assertEqual(res, [(0, 800, 0, 0), (1, 1600, 0, 0)])
-        self.assertEqual(list(rates), [125, 250, 500, 1000])
-        self.assertEqual(rate, 0)
+        self.assertEqual(bindings, [(0, "key", "KEY_F"), (3, "button", "4"), (5, "disabled", "")])
+        self.assertEqual(leds, [(0, "breathing", (255, 0, 0), 128, 3000)])
+        self.assertEqual(res, [(0, 800, 1, 0), (1, 1600, 0, 1)])
+        self.assertEqual(rates, [125, 250, 500, 1000])
+        self.assertEqual(rate, 500)
 
-    def test_view_of_an_unknown_profile_has_empty_sections(self):
-        """The UI may poll a profile that was just deleted."""
-        view = call(make_interface(FakeDaemon()), "GetView", "nope")
-        _active, _detected, _desktop, _names, bindings, leds, res, rates, rate = view
-        self.assertEqual(bindings, [])
-        self.assertEqual(leds, [])
-        self.assertEqual(res, [])
-        self.assertEqual(list(rates), [125, 250, 500, 1000])
-        self.assertEqual(rate, 0)
+    def test_nothing_loaded_and_no_game_are_empty_strings(self):
+        view = call(make_interface(FakeDaemon()), "GetView", "")
+        self.assertEqual(view[:2], ("", ""))
 
-    def test_view_report_rate_reports_the_profile(self):
-        daemon = FakeDaemon()
-        daemon.state.config = make_config(report_rate=500)
+    def test_an_led_zone_missing_settings_gets_defaults(self):
+        daemon = FakeDaemon(profile=ProfileSnapshot(leds=({"index": 2},)))
         view = call(make_interface(daemon), "GetView", "wot")
-        self.assertEqual(view[-1], 500)
+        self.assertEqual(view[5], [(2, "off", (0, 0, 0), 255, 0)])
 
     def test_set_resolution_routes_to_the_daemon(self):
         daemon = FakeDaemon()
@@ -350,6 +333,50 @@ class ReadmeTests(unittest.TestCase):
             )
 
 
+class BusAnnouncerTests(unittest.TestCase):
+    """The daemon's events become the interface's signals."""
+
+    class Interface:
+        def __init__(self):
+            self.emitted = []
+
+        def ProfileChanged(self, name):
+            self.emitted.append(("ProfileChanged", name))
+
+        def GameDetected(self, name):
+            self.emitted.append(("GameDetected", name))
+
+        def GameExited(self, name):
+            self.emitted.append(("GameExited", name))
+
+        def ConfigChanged(self):
+            self.emitted.append(("ConfigChanged",))
+
+    def test_each_event_is_its_signal(self):
+        from linghub.daemon.dbus_service import BusAnnouncer
+
+        interface = self.Interface()
+        announcer = BusAnnouncer()
+        announcer.attach(interface)
+        announcer.profile_loaded("wot")
+        announcer.game_started("wot")
+        announcer.game_stopped("wot")
+        announcer.config_changed()
+        self.assertEqual(interface.emitted, [
+            ("ProfileChanged", "wot"),
+            ("GameDetected", "wot"),
+            ("GameExited", "wot"),
+            ("ConfigChanged",),
+        ])
+
+    def test_nothing_is_announced_before_the_interface_is_published(self):
+        from linghub.daemon.dbus_service import BusAnnouncer
+
+        announcer = BusAnnouncer()
+        announcer.config_changed()  # must not raise
+        announcer.profile_loaded("wot")
+
+
 class IntrospectionTests(unittest.TestCase):
     def test_interface_exposes_expected_members(self):
         interface = make_interface(FakeDaemon())
@@ -366,7 +393,7 @@ class IntrospectionTests(unittest.TestCase):
             "SetResolution", "SetReportRate",
             "CreateProfile", "RenameProfile", "DeleteProfile",
             "ActiveProfile", "DetectedGame", "DesktopProfile",
-            "ProfileChanged", "GameDetected", "GameExited",
+            "ProfileChanged", "GameDetected", "GameExited", "ConfigChanged",
         ):
             self.assertIn(member, names, f"{member} missing from introspection")
 

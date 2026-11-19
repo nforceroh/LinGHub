@@ -29,18 +29,18 @@ class ProfileListTests(unittest.TestCase):
         self.assertIsNotNone(selected)
         self.assertEqual(selected.get_title(), "star-citizen")
 
-    def test_a_poll_does_not_clear_the_selection(self):
+    def test_a_refresh_does_not_clear_the_selection(self):
         window = self._window()
         window._profile_list.select_row(window._profile_list.get_row_at_index(2))
 
-        # Same state again, as the poll would deliver.
+        # Same state again, as a refresh would deliver.
         window._apply_view(view())
 
         selected = window._profile_list.get_selected_row()
-        self.assertIsNotNone(selected, "the poll cleared the selection")
+        self.assertIsNotNone(selected, "the refresh cleared the selection")
         self.assertEqual(selected.get_title(), "star-citizen")
 
-    def test_rows_are_not_recreated_on_every_poll(self):
+    def test_rows_are_not_recreated_on_every_refresh(self):
         """Recreating rows is what loses focus and selection."""
         window = self._window()
         first = window._profile_list.get_row_at_index(1)
@@ -83,7 +83,7 @@ class LedSaveModelTests(unittest.TestCase):
             panel._brightness.set_value(value)
         self.assertEqual(calls, [], "editing wrote to the daemon")
 
-    def test_a_poll_does_not_discard_unsaved_edits(self):
+    def test_a_refresh_does_not_discard_unsaved_edits(self):
         window = self._window()
         panel = window._led_panel
         panel.load({0: {"mode": "on", "color": (255, 0, 0),
@@ -91,15 +91,15 @@ class LedSaveModelTests(unittest.TestCase):
         panel._brightness.set_value(222)
         self.assertTrue(panel.dirty)
 
-        # A poll arrives with the old values from disk.
+        # A refresh arrives with the old values from disk.
         leds = {0: {"mode": "on", "color": (255, 0, 0),
                     "brightness": 100, "duration": 0}}
         window._apply_view(view(profiles=("desktop",), leds=leds))
 
-        self.assertEqual(panel.brightness, 222, "the poll reverted the edit")
+        self.assertEqual(panel.brightness, 222, "the refresh reverted the edit")
         self.assertTrue(panel.dirty)
 
-    def test_a_poll_refreshes_a_clean_panel(self):
+    def test_a_refresh_reloads_a_clean_panel(self):
         window = self._window()
         panel = window._led_panel
         panel.load({0: {"mode": "on", "color": (255, 0, 0),
@@ -135,6 +135,11 @@ class WriteStatusTests(unittest.TestCase):
 
             async def get_view(self, _profile):
                 return view(profiles=("desktop",))
+
+            async def daemon_version(self):
+                from linghub import version
+
+                return version.current()
 
         window = self._window()
         window._client = FakeClient()
@@ -254,6 +259,11 @@ class SelectionVersusLoadingTests(unittest.TestCase):
             async def get_view(self, _profile):
                 return view(profiles=("desktop", "world-of-tanks"))
 
+            async def daemon_version(self):
+                from linghub import version
+
+                return version.current()
+
         window = self._window()
         window._client = FakeClient()
         # _load_selected goes through the GLib bridge, which needs a main loop;
@@ -266,6 +276,78 @@ class SelectionVersusLoadingTests(unittest.TestCase):
 
         asyncio.run(run())
         self.assertEqual(calls, ["world-of-tanks"])
+
+
+
+@unittest.skipUnless(has_cairo(), "needs pycairo and Gtk 4")
+class VersionTests(unittest.TestCase):
+    """The window shows its app version, and flags a daemon on other code."""
+
+    def setUp(self):
+        from linghub import version
+
+        self.version = version
+        self.window = make_window()
+
+    def test_a_matching_daemon_shows_no_banner(self):
+        self.window._apply_daemon_version(self.version.current())
+        self.assertFalse(self.window._banner.get_revealed())
+
+    def test_a_different_daemon_says_to_restart_it(self):
+        self.window._apply_daemon_version("9.9.9")
+        self.assertTrue(self.window._banner.get_revealed())
+        self.assertEqual(self.window._banner.get_title(), "Daemon is running 9.9.9; restart it")
+
+    def test_an_old_daemon_predates_version_reporting(self):
+        self.window._apply_daemon_version(self.version.PREDATES_REPORTING)
+        self.assertTrue(self.window._banner.get_revealed())
+        self.assertEqual(
+            self.window._banner.get_title(), "Daemon predates version reporting; restart it"
+        )
+
+    def test_no_daemon_is_not_a_mismatch(self):
+        self.window._apply_daemon_version("9.9.9")
+        self.window._apply_daemon_version(self.version.DAEMON_NOT_RUNNING)
+        self.assertFalse(self.window._banner.get_revealed())
+
+    def test_the_about_dialog_shows_both_versions(self):
+        self.window._apply_daemon_version("9.9.9")
+        dialog = self.window._about_dialog()
+        self.assertEqual(dialog.get_version(), self.version.current())
+        self.assertIn("Daemon 9.9.9", dialog.get_comments())
+
+    def test_the_about_dialog_says_when_the_daemon_is_not_running(self):
+        self.window._apply_daemon_version(self.version.DAEMON_NOT_RUNNING)
+        self.assertIn("Daemon not running", self.window._about_dialog().get_comments())
+
+    def test_a_refresh_reads_the_daemon_version(self):
+        import asyncio
+
+        class FakeClient:
+            async def get_view(self, _profile):
+                return view()
+
+            async def daemon_version(self):
+                return "9.9.9"
+
+        self.window._client = FakeClient()
+        asyncio.run(self.window._read_and_apply())
+        self.assertTrue(self.window._banner.get_revealed())
+
+    def test_a_failed_version_read_does_not_break_the_refresh(self):
+        import asyncio
+
+        class FakeClient:
+            async def get_view(self, _profile):
+                return view(active="world-of-tanks")
+
+            async def daemon_version(self):
+                raise RuntimeError("Get failed")
+
+        self.window._client = FakeClient()
+        asyncio.run(self.window._read_and_apply())
+        self.assertIn("world-of-tanks", self.window._status.get_text())
+        self.assertFalse(self.window._banner.get_revealed())
 
 
 if __name__ == "__main__":

@@ -70,8 +70,8 @@ only the looping ones have a speed.
 
 Between them, the DPI and lighting panels cover the whole profile. Both are
 staged rather than live: nothing reaches the mouse until Save, and Revert throws
-away unsaved edits. A poll never overwrites unsaved edits, so the two-second
-refresh cannot discard what you are in the middle of choosing.
+away unsaved edits. A refresh never overwrites unsaved edits, so a change made
+elsewhere cannot discard what you are in the middle of choosing.
 
 Profiles can be created, renamed and deleted from the buttons above the profile
 list. The desktop profile cannot be deleted, and neither can the last remaining
@@ -158,6 +158,51 @@ systemctl --user status linghub.service
 journalctl --user -u linghub.service -f
 ```
 
+## Versions and releases
+
+The daemon, the tray and the window are separate processes, and each runs the
+code that was on disk when it started. After a `git pull`, a daemon that hasn't
+been restarted is still running the old code. Check with:
+
+```console
+$ linghub --version
+LinGHub 0.1.0+3.g5c27eef
+Daemon  0.1.0+3.g5c27eef
+```
+
+A third line appears when the two differ, such as `Daemon is running 0.1.0;
+restart it`. A daemon too old to report its version shows `Daemon predates
+version reporting; restart it`. To restart both services:
+
+```bash
+systemctl --user restart linghub.service linghub-tray.service
+```
+
+The tray's last menu line and the window's About dialog show the same version,
+and say the same thing when the daemon differs.
+
+The version comes from git, read when each process starts:
+
+| Version | Meaning |
+| --- | --- |
+| `0.1.0` | exactly the `v0.1.0` release |
+| `0.1.0+3.g5c27eef` | 3 commits past `v0.1.0`, at commit `5c27eef` |
+| `0.1.0+3.g5c27eef.dirty` | the same, with uncommitted changes |
+| `0.0.0+66.gfb886ac` | no release tagged yet |
+
+To cut a release, tag `main`:
+
+```bash
+git switch main && git pull
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+Tag after a branch is merged, not on the branch itself: if the merge squashes
+or rebases it, a tag made on the branch points at a commit `main` never
+contains. Nothing needs bumping by hand; the version is the tag. See
+[ADR-0009](docs/adr/0009-app-version-from-git-at-runtime.md) for why.
+
 ## D-Bus interface
 
 The daemon publishes `org.linghub.Manager` on the session bus at
@@ -169,7 +214,7 @@ editing the config file.
 | `ListProfiles` | method → `as` | Every profile name in the config |
 | `LoadProfile(s)` | method → `b` | Load a profile now; false if it does not exist |
 | `Reload` | method → `b` | Re-read the config file |
-| `GetView(s)` | method → `(sssasa(iss)a(us(uuu)uu)a(uuuu)auu)` | Everything a poll needs in one read: active profile, detected game, desktop profile, profile names; then the named profile's bindings (index, type, value), LED zones (index, mode, colour, brightness, duration), DPI slots (index, dpi, is_default, is_disabled), accepted report rates, and its current report rate. Unknown profile: empty sections |
+| `GetView(s)` | method → `(sssasa(iss)a(us(uuu)uu)a(uuuu)auu)` | Everything a client shows, in one read: active profile, detected game, desktop profile, profile names; then the named profile's bindings (index, type, value), LED zones (index, mode, colour, brightness, duration), DPI slots (index, dpi, is_default, is_disabled), accepted report rates, and its current report rate. Unknown profile: empty sections |
 | `SetBinding(s,i,s,s)` → `siss` | method → `b` | Assign one button's binding |
 | `ClearBinding(s,i)` → `si` | method → `b` | Record a button as doing nothing |
 | `SetLeds(s,s,u,u,u,u,u)` → `ssuuuuu` | method → `b` | Set every LED zone to one effect |
@@ -181,12 +226,19 @@ editing the config file.
 | `ActiveProfile` | property `s` | Profile currently on the mouse, empty if unknown |
 | `DetectedGame` | property `s` | Game currently detected, empty if none |
 | `DesktopProfile` | property `s` | Profile used when no game is running |
+| `Version` | property `s` | The daemon's app version: the code it loaded when it started (see ADR-0009) |
 | `ProfileChanged(s)` | signal | A profile was loaded onto the mouse |
 | `GameDetected(s)` | signal | A game started being detected |
 | `GameExited(s)` | signal | A detected game stopped running |
+| `ConfigChanged()` | signal | The config changed: an edit through this interface, or the file reloaded after a hand edit |
 
-A manual `LoadProfile` lasts until the detected game changes, then detection
-takes over again.
+Every change a client shows is announced by one of these signals, so clients
+re-read with `GetView` when a signal arrives rather than polling.
+
+A manual `LoadProfile` is honoured whether or not a game is running. It lasts
+until the current game changes, meaning a game starts or stops, and then
+detection takes over again. With several games running, the current game is
+the one started most recently, and that is the one `DetectedGame` reports.
 
 ```bash
 busctl --user call org.linghub.Manager /org/linghub/Manager \
@@ -220,13 +272,13 @@ src/linghub/
 ├── hardware/        ratbagd: reading, encoding, writing and verifying
 ├── discovery/       /proc and GameMode: is a game running?
 ├── daemon/
-│   ├── service.py   the run loop, the device, and which profile should load
-│   ├── state.py     what the daemon believes, and what it should do next
+│   ├── service.py   the run loop; detection and the mouse are injected
+│   ├── state.py     which profile should be on the mouse, and why
 │   ├── writes.py    every config change, and the rule that persists it
 │   ├── slots.py     which slot a profile belongs in (ADR-0001)
 │   ├── collaborators.py  what the D-Bus adapter needs from the daemon
 │   ├── dbus_service.py   the D-Bus surface itself
-│   └── snapshot.py  a read-only view for the interface
+│   └── snapshot.py  the one read a client makes: state plus a profile
 ├── ui/
 │   ├── window.py    the main window
 │   ├── presentation.py   what the window should show, decided without a widget
@@ -240,6 +292,11 @@ src/linghub/
 The pattern throughout: a decision that does not need a framework lives in a
 module the framework calls, so it can be tested directly. `presentation`,
 `panel_rules`, `binding_modes`, `slots` and `writes` are all that shape.
+
+The daemon itself is tested the same way: it takes its detector and its mouse
+connection as constructor arguments, so `tests/test_daemon.py` drives it one
+`tick()` at a time against a fake mouse that can vanish, refuse a write, or be
+moved to another slot. In production the mouse is `RatbagConnector`.
 
 ## Development
 

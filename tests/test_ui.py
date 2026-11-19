@@ -179,6 +179,78 @@ class SignalHandlingTests(unittest.TestCase):
         client = DaemonClient()
         client._handle_signal(self._signal())  # must not raise
 
+    def _owner_changed(self, name):
+        return SimpleNamespace(
+            message_type=MessageType.SIGNAL, interface="org.freedesktop.DBus",
+            member="NameOwnerChanged", body=[name, "", ":1.42"],
+        )
+
+    def test_the_daemon_starting_or_stopping_triggers_change(self):
+        """With no poll, this is how a client notices the daemon came or went."""
+        from linghub.dbus_contract import SERVICE
+
+        self.client._handle_signal(self._owner_changed(SERVICE))
+        self.assertEqual(self.calls, 1)
+
+    def test_another_name_changing_owner_is_ignored(self):
+        self.client._handle_signal(self._owner_changed("org.example.Other"))
+        self.assertEqual(self.calls, 0)
+
+
+
+class DaemonVersionTests(unittest.TestCase):
+    """Reading the daemon's version, which is a property of its own (ADR-0009)."""
+
+    def _client_answering(self, reply):
+        client = DaemonClient()
+        sent = []
+
+        class Bus:
+            async def call(self, message):
+                sent.append(message)
+                return reply
+
+        client._bus = Bus()
+        return client, sent
+
+    def _error(self, name):
+        return SimpleNamespace(
+            message_type=MessageType.ERROR, error_name=name, body=["no"],
+        )
+
+    def test_reads_the_version_property(self):
+        import asyncio
+        from dbus_fast import Variant
+
+        client, sent = self._client_answering(SimpleNamespace(
+            message_type=MessageType.METHOD_RETURN, body=[Variant("s", "0.1.0+3.g5c27eef")],
+        ))
+        self.assertEqual(asyncio.run(client.daemon_version()), "0.1.0+3.g5c27eef")
+        self.assertEqual(sent[0].member, "Get")
+        self.assertEqual(sent[0].body, [INTERFACE, "Version"])
+
+    def test_a_daemon_without_the_property_predates_reporting(self):
+        import asyncio
+        from linghub import version
+
+        for name in ("org.freedesktop.DBus.Error.UnknownProperty",
+                     "org.freedesktop.DBus.Error.InvalidArgs"):
+            with self.subTest(error=name):
+                client, _ = self._client_answering(self._error(name))
+                self.assertIs(
+                    asyncio.run(client.daemon_version()), version.PREDATES_REPORTING
+                )
+
+    def test_no_daemon_is_unavailable_not_old(self):
+        import asyncio
+        from linghub.ui.client import DaemonUnavailable
+
+        client, _ = self._client_answering(
+            self._error("org.freedesktop.DBus.Error.ServiceUnknown")
+        )
+        with self.assertRaises(DaemonUnavailable):
+            asyncio.run(client.daemon_version())
+
 
 if __name__ == "__main__":
     unittest.main()

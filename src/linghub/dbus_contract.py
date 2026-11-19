@@ -75,3 +75,17 @@ METHODS: tuple[Member, ...] = (
 )
 
 BY_NAME = {member.name: member for member in METHODS}
+
+
+@dataclass(frozen=True)
+class Property:
+    """One read-only D-Bus property: its name and its signature."""
+
+    name: str
+    signature: str
+
+
+# The daemon's app version. A property rather than a GetView field, so a
+# daemon too old to have it answers "unknown property" and nothing else
+# breaks (ADR-0009).
+VERSION = Property("Version", "s")

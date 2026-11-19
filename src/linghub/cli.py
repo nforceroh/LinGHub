@@ -10,6 +10,7 @@ from dbus_fast.aio import MessageBus
 from dbus_fast.errors import DBusFastError
 
 from . import config as config_module
+from . import version
 from .discovery.detector import Detection, detect
 from .hardware.ratbag import RatbagClient
 
@@ -155,8 +156,51 @@ def format_status(
     return "\n".join(lines)
 
 
+DAEMON_NOT_RUNNING = version.DAEMON_NOT_RUNNING
+
+
+def format_version(own: str, daemon) -> str:
+    """This process's app version, the daemon's, and a note if they differ."""
+    if daemon is DAEMON_NOT_RUNNING:
+        return f"LinGHub {own}\nDaemon  not running"
+    shown = "unknown" if daemon is version.PREDATES_REPORTING else daemon
+    lines = [f"LinGHub {own}", f"Daemon  {shown}"]
+    note = version.daemon_note(own, daemon)
+    if note is not None:
+        lines.append(note)
+    return "\n".join(lines)
+
+
+class _VersionAction(argparse.Action):
+    """Print the versions and exit, before argparse demands a subcommand."""
+
+    def __init__(self, option_strings, dest=argparse.SUPPRESS, default=argparse.SUPPRESS, help=None):
+        super().__init__(option_strings, dest=dest, default=default, nargs=0, help=help)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        print(format_version(version.current(), _daemon_version()))
+        parser.exit()
+
+
+def _daemon_version():
+    """The running daemon's version, or DAEMON_NOT_RUNNING if none answers."""
+    from . import daemon_access
+
+    async def read(client):
+        return await client.daemon_version()
+
+    try:
+        return daemon_access.call(read)
+    except (daemon_access.DaemonUnavailable, RuntimeError, OSError, TimeoutError):
+        return DAEMON_NOT_RUNNING
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Manage G502 hardware profiles via ratbagd.")
+    parser.add_argument(
+        "--version", action=_VersionAction,
+        help="show this version and the running daemon's, then exit",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
 
     commands.add_parser("list", help="list hardware profiles")

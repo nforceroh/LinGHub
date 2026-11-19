@@ -9,25 +9,27 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Protocol
 
 from dbus_fast import BusType
 from dbus_fast.aio import MessageBus
 
 from .. import config as config_module
+from .. import version
 from ..discovery.detector import Detection, detect
 from ..discovery.gamemode import GameModeClient
 from dbus_fast import DBusError as DBusFastError
 
-from ..hardware.ratbag import DeviceNotFound, RatbagClient
-from ..hardware.writer import ProfileWriter, WriteError
+from ..domain.profile import Profile
+from ..hardware.ratbag import DeviceNotFound
+from ..hardware.writer import RatbagConnector, WriteError, WriteResult
 from ..notify import Notifier, profile_message
-from . import slots, tick
-from .dbus_service import PATH, SERVICE, ManagerInterface
-from .snapshot import StateSnapshot
+from . import slots
+from .dbus_service import PATH, SERVICE, BusAnnouncer, ManagerInterface
+from .snapshot import View, read_view
 from .state import DaemonState
 from .watcher import ConfigWatcher
-from .writes import Bindings, ConfigWrites, DeviceSettings, ProfileLifecycle
+from .writes import build_collaborators
 
 
 logger = logging.getLogger("linghub.daemon")
@@ -40,21 +42,61 @@ class ConfigStartupError(RuntimeError):
     """
 
 
+class Mouse(Protocol):
+    """What the daemon needs from a connected mouse.
+
+    `apply` raises WriteError when the mouse refused a write; any other error
+    means the mouse is gone and must be reconnected.
+    """
+
+    async def apply(self, profile: Profile, slot: int) -> WriteResult: ...
+
+    async def active_slot(self) -> int | None: ...
+
+    async def report_rates(self) -> list[int]: ...
+
+
+class MouseConnector(Protocol):
+    """Connects to the mouse; `connect` raises DeviceNotFound when it is absent."""
+
+    async def connect(self) -> Mouse: ...
+
+    def disconnect(self) -> None: ...
+
+
+class Announcer(Protocol):
+    """Who the daemon tells about what it did, so clients need not poll."""
+
+    def profile_loaded(self, name: str) -> None: ...
+
+    def game_started(self, name: str) -> None: ...
+
+    def game_stopped(self, name: str) -> None: ...
+
+    def config_changed(self) -> None: ...
+
+
 class Daemon:
     def __init__(
         self,
         config_path: Path | str = config_module.DEFAULT_CONFIG_PATH,
         poll_interval: float | None = None,
         detector: Callable[[list], Detection] = detect,
+        mouse: MouseConnector | None = None,
+        announce: Announcer | None = None,
+        reconnect_delay: float = 1.0,
     ):
         self._config_path = Path(config_path)
         self._poll_interval = poll_interval
-        # Detection is a collaborator like the write adapters: injected so a
-        # test can say what is running without patching a module global.
+        # Detection and the mouse are injected so a test can say what is
+        # running and what the hardware does without a bus or a device.
         self._detector = detector
+        self._mouse = mouse if mouse is not None else RatbagConnector()
+        self._bus_announcer = BusAnnouncer()
+        self._announce = announce if announce is not None else self._bus_announcer
+        self._reconnect_delay = reconnect_delay
         self._state: DaemonState | None = None
-        self._writer: ProfileWriter | None = None
-        self._bus: MessageBus | None = None
+        self._writer: Mouse | None = None
         self._watcher = ConfigWatcher(self._config_path)
         self._wakeup = asyncio.Event()
         self._gamemode: GameModeClient | None = None
@@ -62,33 +104,26 @@ class Daemon:
         self._interface: ManagerInterface | None = None
         self._report_rates: list[int] = []
         self._notifier: Notifier | None = None
-        self._manual_override: str | None = None
-        self._detected_game: str | None = None
 
         # The three collaborators the D-Bus adapter calls. They hold the config
-        # edits; this class keeps the run loop, the device, and the decision of
-        # which profile should be on the mouse.
-        writes = ConfigWrites(
+        # edits; this class keeps the run loop and the device. Which profile
+        # should be on the mouse is DaemonState's decision.
+        wired = build_collaborators(
             state=lambda: self._state,
             save=self._save_config,
             wake=self._wake,
-        )
-        self.profiles = ProfileLifecycle(
-            state=lambda: self._state,
-            writes=writes,
+            announce=self._announce.config_changed,
             request_load=self._request_load,
             request_reload=self._request_reload,
         )
-        self.bindings = Bindings(state=lambda: self._state, writes=writes)
-        self.settings = DeviceSettings(
-            state=lambda: self._state,
-            writes=writes,
-            report_rates=lambda: tuple(self._report_rates),
-        )
+        self.profiles = wired.profiles
+        self.bindings = wired.bindings
+        self.settings = wired.settings
 
     def _request_load(self, name: str) -> bool:
-        """Load a named profile, overriding detection until that changes."""
-        self._manual_override = name
+        """Load a named profile, overriding detection until the game changes."""
+        if self._state is None or not self._state.request(name):
+            return False
         self._wake()
         return True
 
@@ -98,20 +133,12 @@ class Daemon:
         return True
 
     async def _connect(self) -> None:
-        if self._bus is None:
-            self._bus = await asyncio.wait_for(
-                MessageBus(bus_type=BusType.SYSTEM).connect(), timeout=5
-            )
-        client = RatbagClient(self._bus)
-        device = await client.find_device()
-        self._writer = ProfileWriter(client, device)
+        mouse = await self._mouse.connect()
         # A missing capability must not stop the daemon: an empty list just
         # means the UI offers no rate choices.
-        self._report_rates = await client.report_rates(device)
-        logger.info(
-            "using device %s at %s (report rates %s)",
-            device.name, device.path, self._report_rates,
-        )
+        self._report_rates = await mouse.report_rates()
+        self._writer = mouse
+        logger.info("using the mouse (report rates %s)", self._report_rates)
 
     async def _start_notifications(self) -> None:
         """Attach to the notification daemon, if there is one.
@@ -126,7 +153,7 @@ class Daemon:
         """Tell the user which profile was loaded."""
         if self._notifier is None or not self._notifier.available:
             return
-        summary, body = profile_message(profile_name, self._detected_game)
+        summary, body = profile_message(profile_name, self._state.current_game if self._state else None)
         await self._notifier.notify(summary, body, tag="profile")
 
     async def _export_interface(self) -> None:
@@ -147,20 +174,18 @@ class Daemon:
             profiles=self.profiles,
             bindings=self.bindings,
             settings=self.settings,
-            get_state=self._snapshot,
+            get_view=self.view,
+            app_version=version.current(),
         )
         self._session_bus.export(PATH, self._interface)
+        self._bus_announcer.attach(self._interface)
         await self._session_bus.request_name(SERVICE)
         logger.info("published %s on the session bus", SERVICE)
 
-    def _snapshot(self) -> StateSnapshot:
+    def view(self, profile: str = "") -> View:
+        """What the daemon believes now, and one profile's sections."""
         assert self._state is not None
-        return StateSnapshot(
-            profile_names=tuple(p.name for p in self._state.config.profiles),
-            loaded_profile=self._state.loaded_profile,
-            detected_game=self._detected_game,
-            desktop_profile=self._state.config.desktop_profile,
-        )
+        return read_view(self._state, profile, tuple(self._report_rates))
 
     def _save_config(self) -> bool:
         assert self._state is not None
@@ -175,7 +200,8 @@ class Daemon:
         self._watcher.resync()
         return True
 
-    def _reload_config(self) -> bool:
+    def load_config(self) -> bool:
+        """Read the config file; False, keeping any previous config, if it is invalid."""
         try:
             config = config_module.load(self._config_path)
         except config_module.ConfigError as exc:
@@ -206,8 +232,9 @@ class Daemon:
         assert self._state is not None
         self._state.config = config
         logger.info("reloaded config: %d profile(s)", len(config.profiles))
+        self._announce.config_changed()
 
-    async def _reconnect(self, attempts: int = 3, delay: float = 1.0) -> None:
+    async def _reconnect(self, attempts: int = 3) -> None:
         """Try to reconnect to the device after it disappeared.
 
         Bounded rather than looping until the device returns: blocking here
@@ -225,7 +252,7 @@ class Daemon:
             except DeviceNotFound as exc:
                 if attempt == 0:
                     logger.warning("%s; will retry", exc)
-                await asyncio.sleep(delay * (attempt + 1))
+                await asyncio.sleep(self._reconnect_delay * (attempt + 1))
         logger.warning("device still absent; detection continues without it")
 
     async def _apply_target(self) -> None:
@@ -264,11 +291,15 @@ class Daemon:
         self._state.mark_loaded(target.name)
         logger.info("loaded profile %r into slot %d (%d changes)", target.name, slot, len(result.changed))
 
-        if self._interface is not None:
-            self._interface.ProfileChanged(target.name)
+        self._announce.profile_loaded(target.name)
         await self._notify_switch(target.name)
 
-    async def _tick(self) -> None:
+    async def tick(self) -> None:
+        """One pass: detect games, check the mouse's slot, write if needed.
+
+        Never raises for a vanished mouse or a failed write: one bad tick must
+        not take the daemon down.
+        """
         assert self._state is not None
         try:
             await self._tick_once()
@@ -282,33 +313,15 @@ class Daemon:
         self._reload_if_changed()
         detection = self._detector(self._state.config.profiles)
 
-        previous_game = self._detected_game
-        self._state.observe(detection)
-        self._detected_game = detection.game.profile.name if detection.game else None
-
-        # The override's fate and the game events are one pure decision; the
-        # effects it implies are this method's job.
-        decision = tick.decide(previous_game, self._detected_game, self._manual_override)
-        if decision.ended is tick.OverrideEnded.GAME_CHANGED:
-            logger.info(
-                "clearing the manual override for %r: the detected game changed",
-                self._manual_override,
-            )
-        elif decision.ended is tick.OverrideEnded.NO_GAME:
-            logger.info(
-                "clearing the manual override for %r: no game is running",
-                self._manual_override,
-            )
-        self._manual_override = decision.override
-
-        if self._interface is not None:
-            if decision.detected is not None:
-                self._interface.GameDetected(decision.detected)
-            elif decision.exited is not None:
-                self._interface.GameExited(decision.exited)
-
-        if self._manual_override is not None:
-            self._state.stack = [self._manual_override]
+        override = self._state.manual_override
+        change = self._state.observe(detection)
+        if change is not None:
+            if override is not None:
+                logger.info("clearing the manual override for %r: the current game changed", override)
+            if change.started is not None:
+                self._announce.game_started(change.started)
+            elif change.stopped is not None:
+                self._announce.game_stopped(change.stopped)
 
         await self._observe_active_slot()
         await self._apply_target()
@@ -326,11 +339,14 @@ class Daemon:
         try:
             active = await self._writer.active_slot()
         except (RuntimeError, OSError, DBusFastError) as exc:
-            logger.debug("cannot read the active slot: %s", exc)
-            return
-        except AttributeError:
-            # A writer without the capability cannot report drift; treat it as
-            # unknown rather than failing the tick.
+            # The path names another device (DeviceReplaced) or nothing at
+            # all: after a KVM switch the kernel renumbers hidraw nodes, and
+            # ratbagd's paths follow them. With nothing to write this read is
+            # the only call that touches the mouse, so drop the stale mouse
+            # here; _apply_target reconnects in this same tick. An unreadable
+            # slot is not drift, so nothing is rewritten on its account.
+            logger.warning("lost the device: %s", exc)
+            self._writer = None
             return
 
         before = self._state.needs_write
@@ -342,7 +358,10 @@ class Daemon:
             )
 
     async def run(self) -> None:
-        if not self._reload_config():
+        # Fix the app version now, before anything else: it must describe the
+        # code this process loaded, not whatever the clone holds later.
+        logger.info("LinGHub %s starting", version.current())
+        if not self.load_config():
             # A bad config is not transient: restarting will not fix it, so
             # exit non-zero and let systemd's RestartPreventExitStatus stop
             # the unit rather than looping.
@@ -380,7 +399,7 @@ class Daemon:
 
         try:
             while True:
-                await self._tick()
+                await self.tick()
                 try:
                     await asyncio.wait_for(self._wakeup.wait(), timeout=interval)
                 except asyncio.TimeoutError:
@@ -392,8 +411,7 @@ class Daemon:
             self._gamemode.disconnect()
             if self._session_bus is not None:
                 self._session_bus.disconnect()
-            if self._bus is not None:
-                self._bus.disconnect()
+            self._mouse.disconnect()
 
     def _wake(self) -> None:
         """Ask the run loop to tick now rather than at the next interval."""

@@ -4,7 +4,7 @@ import unittest
 
 from linghub.config import Config
 from linghub.daemon.state import DaemonState
-from linghub.discovery.detector import Detection, Match, Rejection
+from linghub.discovery.detector import Detection, Match
 from linghub.discovery.processes import ProcessInfo
 from linghub.domain.profile import Binding, Game, Profile
 
@@ -212,242 +212,6 @@ class BindingPersistenceTests(unittest.TestCase):
         self.assertTrue(state.needs_write)
 
 
-class DeviceLossTests(unittest.TestCase):
-    """A mouse can vanish at any time.
-
-    A KVM switch, a cable, or a flat battery all remove the hidraw node. The
-    daemon must survive that, drop its stale writer, and reconnect when the
-    device returns - not exit and rely on systemd to restart it.
-    """
-
-    def _daemon(self):
-        from linghub.daemon.service import Daemon
-
-        daemon = Daemon()
-        daemon._state = DaemonState(config=make_config(DESKTOP, WOT))
-        daemon._state.mark_loaded("stale")
-        return daemon
-
-    def test_a_vanished_device_does_not_escape_the_tick(self):
-        import asyncio
-
-        from linghub.hardware.writer import WriteError
-
-        daemon = self._daemon()
-
-        class Vanished:
-            async def apply(self, profile, slot):
-                raise RuntimeError("D-Bus call Get failed: Unknown object")
-
-        daemon._writer = Vanished()
-        # Must return, not raise.
-        asyncio.run(daemon._tick())
-        self.assertIsNone(daemon._writer, "the stale writer was kept")
-
-    def test_a_write_error_keeps_the_writer(self):
-        """A refused write is not the same as a missing device."""
-        import asyncio
-
-        from linghub.hardware.writer import WriteError
-
-        daemon = self._daemon()
-        writer = type("W", (), {"apply": staticmethod(lambda p, s: None)})()
-        daemon._writer = writer
-
-        async def apply(profile, slot):
-            raise WriteError("commit did not complete within the timeout")
-
-        daemon._writer = type("W", (), {"apply": staticmethod(apply)})()
-        asyncio.run(daemon._tick())
-        self.assertIsNotNone(daemon._writer)
-
-    def test_the_daemon_reconnects_after_device_loss(self):
-        import asyncio
-
-        from linghub.hardware.ratbag import DeviceNotFound
-
-        daemon = self._daemon()
-        attempts = {"n": 0}
-
-        async def connect():
-            attempts["n"] += 1
-            if attempts["n"] < 3:
-                raise DeviceNotFound("no G502 found")
-            daemon._writer = object()
-
-        daemon._connect = connect
-        asyncio.run(daemon._reconnect(delay=0))
-        self.assertEqual(attempts["n"], 3)
-        self.assertIsNotNone(daemon._writer)
-
-    def test_startup_does_not_require_the_device(self):
-        """The daemon must be visible to the UI and tray with no mouse present.
-
-        Blocking at startup meant it published nothing and detected nothing for
-        as long as the device was away - which is normal on a KVM switch.
-        """
-        import asyncio
-
-        from linghub.daemon.service import Daemon
-        from linghub.hardware.ratbag import DeviceNotFound
-
-        daemon = Daemon()
-        daemon._state = DaemonState(config=make_config(DESKTOP))
-        exported = {"n": 0}
-        notified = {"n": 0}
-
-        async def connect():
-            raise DeviceNotFound("no G502 found")
-
-        async def export():
-            exported["n"] += 1
-
-        async def notify():
-            notified["n"] += 1
-
-        daemon._connect = connect
-        daemon._export_interface = export
-        daemon._start_notifications = notify
-
-        async def stop_soon():
-            await asyncio.sleep(0.05)
-            raise KeyboardInterrupt
-
-        daemon._tick = stop_soon
-        try:
-            asyncio.run(daemon.run())
-        except KeyboardInterrupt:
-            pass
-        self.assertEqual(exported["n"], 1, "the interface was not published")
-        self.assertEqual(notified["n"], 1)
-
-    def test_a_tick_with_no_device_does_not_raise(self):
-        """After a failed reconnect there is nothing to write to; skip, don't crash."""
-        import asyncio
-
-        from linghub.hardware.ratbag import DeviceNotFound
-
-        daemon = self._daemon()
-
-        async def never():
-            raise DeviceNotFound("still gone")
-
-        daemon._connect = never
-        daemon._writer = None
-        asyncio.run(daemon._tick())
-        self.assertIsNone(daemon._writer)
-
-    def test_reconnect_gives_up_so_detection_continues(self):
-        """Blocking until the device returns would stop detecting games."""
-        import asyncio
-
-        from linghub.hardware.ratbag import DeviceNotFound
-
-        daemon = self._daemon()
-
-        async def never():
-            raise DeviceNotFound("still gone")
-
-        daemon._connect = never
-        asyncio.run(daemon._reconnect(attempts=2, delay=0))
-        self.assertIsNone(daemon._writer)
-
-
-class ReloadTests(unittest.TestCase):
-    """A broken config edit must never take the daemon down.
-
-    The daemon already kept the previous config when a reload failed, but it
-    only caught `ConfigError`. A malformed binding raised a bare `ValueError`
-    from the domain model, which escaped, so a single typo in a hand-edited
-    binding was enough to kill the service mid-session.
-    """
-
-    def _daemon(self, body: dict):
-        import json
-        import tempfile
-        from pathlib import Path
-
-        from linghub.daemon.service import Daemon
-
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        path = Path(directory.name) / "config.json"
-        path.write_text(json.dumps(body), encoding="utf-8")
-        daemon = Daemon(config_path=path)
-        return daemon, path
-
-    def _body(self, bindings: dict) -> dict:
-        return {
-            "version": 1,
-            "settings": {"desktop_profile": "desktop"},
-            "profiles": {"desktop": {"games": [], "bindings": bindings}},
-        }
-
-    def test_an_unknown_binding_type_does_not_raise(self):
-        daemon, _ = self._daemon(self._body({"0": {"type": "nonsense"}}))
-        self.assertFalse(daemon._reload_config())
-
-    def test_a_non_numeric_button_does_not_raise(self):
-        daemon, _ = self._daemon(self._body({"0": {"type": "button", "value": "left"}}))
-        self.assertFalse(daemon._reload_config())
-
-    def test_a_broken_edit_keeps_the_previous_config(self):
-        daemon, path = self._daemon(self._body({"0": {"type": "key", "value": "KEY_A"}}))
-        self.assertTrue(daemon._reload_config())
-        before = daemon._state.config
-
-        path.write_text(
-            '{"version": 1, "settings": {"desktop_profile": "desktop"},'
-            ' "profiles": {"desktop": {"games": [],'
-            ' "bindings": {"0": {"type": "nonsense"}}}}}',
-            encoding="utf-8",
-        )
-        daemon._watcher.reset()
-        daemon._reload_if_changed()
-        self.assertIs(daemon._state.config, before)
-
-
-class ApplyTargetSlotTests(unittest.TestCase):
-    """ADR-0001, at the point where it actually reaches the hardware.
-
-    `slots.slot_for` says which slot a profile belongs in; this pins that the
-    daemon passes that answer to the writer rather than deciding again itself.
-    A wrong slot here would overwrite the desktop profile with a game's, which
-    is the one write that cannot be recovered from by reloading.
-    """
-
-    def _daemon(self, target: str):
-        from linghub.daemon.service import Daemon
-
-        daemon = Daemon()
-        daemon._state = DaemonState(config=make_config(DESKTOP, WOT))
-        if target == "world-of-tanks":
-            daemon._state.stack = ["world-of-tanks"]
-        written = []
-
-        class Writer:
-            async def apply(self, profile, slot):
-                written.append((profile.name, slot))
-                return type("Result", (), {"changed": ()})()
-
-        daemon._writer = Writer()
-        return daemon, written
-
-    def test_a_gaming_profile_goes_to_slot_1(self):
-        import asyncio
-
-        daemon, written = self._daemon("world-of-tanks")
-        asyncio.run(daemon._apply_target())
-        self.assertEqual(written, [("world-of-tanks", 1)])
-
-    def test_the_desktop_profile_goes_to_slot_0(self):
-        import asyncio
-
-        daemon, written = self._daemon("desktop")
-        asyncio.run(daemon._apply_target())
-        self.assertEqual(written, [("desktop", 0)])
-
-
 class ResolutionTests(unittest.TestCase):
     """DPI slots and the report rate are part of the profile, like bindings."""
 
@@ -595,7 +359,7 @@ class ProfileManagementTests(unittest.TestCase):
         self.assertEqual(state.loaded_profile, "wot")
         self.assertFalse(state.needs_write)
 
-    def test_rename_updates_a_manual_override(self):
+    def test_rename_updates_the_running_games(self):
         state = self._state()
         state.stack = ["world-of-tanks"]
         state.rename_profile("world-of-tanks", "wot")
@@ -682,63 +446,107 @@ class ActiveSlotTests(unittest.TestCase):
 
 
 class ManualOverrideTests(unittest.TestCase):
-    """A manual profile choice must not outlive its reason.
+    """A manual override holds until the current game changes.
 
-    The override used to clear only when the detected game changed, so picking
-    a profile while no game was running left it stuck forever: the mouse stayed
-    on a gaming profile with nothing running.
-
-    The rule itself is tested directly in test_tick.py. These tests keep the
-    integration honest: the daemon must ask the decision and act on it.
+    It holds with no game running too: a profile loaded by hand at the desktop
+    stays loaded until a game starts or another profile is loaded.
     """
 
-    def _daemon(self, detection):
-        from linghub.daemon.service import Daemon
+    def _state(self):
+        return DaemonState(config=make_config(DESKTOP, WOT, SC))
 
-        daemon = Daemon(detector=lambda _profiles: detection)
-        daemon._state = DaemonState(config=make_config(DESKTOP, WOT))
-        return daemon
+    def test_a_load_with_no_game_running_is_honoured(self):
+        state = self._state()
+        self.assertTrue(state.request("world-of-tanks"))
+        state.observe(detection_for())
+        self.assertEqual(state.target_profile.name, "world-of-tanks")
 
-    def test_an_override_is_cleared_when_no_game_is_running(self):
-        import asyncio
+    def test_an_unknown_profile_is_refused(self):
+        state = self._state()
+        self.assertFalse(state.request("nope"))
+        self.assertIsNone(state.manual_override)
 
-        from linghub.discovery.detector import Detection
+    def test_a_game_starting_ends_the_override(self):
+        state = self._state()
+        state.request("world-of-tanks")
+        state.observe(detection_for(SC))
+        self.assertIsNone(state.manual_override)
+        self.assertEqual(state.target_profile.name, "star-citizen")
 
-        daemon = self._daemon(Detection(matches=[], rejections=[], considered=0))
-        daemon._manual_override = "world-of-tanks"
-        daemon._detected_game = None
+    def test_the_override_survives_while_the_same_game_runs(self):
+        """Picking a profile mid-game must not be undone by the next tick."""
+        state = self._state()
+        state.observe(detection_for(WOT))
+        state.request("desktop")
+        state.observe(detection_for(WOT))
+        self.assertEqual(state.target_profile.name, "desktop")
 
-        asyncio.run(daemon._tick_once())
+    def test_the_game_exiting_ends_the_override(self):
+        state = self._state()
+        state.observe(detection_for(WOT))
+        state.request("star-citizen")
+        state.observe(detection_for())
+        self.assertIsNone(state.manual_override)
+        self.assertEqual(state.target_profile.name, "desktop")
 
-        self.assertIsNone(daemon._manual_override)
-        self.assertEqual(daemon._state.target_profile.name, "desktop")
+    def test_the_override_does_not_disturb_the_running_games(self):
+        """Ending an override returns to the game that was underneath it."""
+        state = self._state()
+        state.observe(detection_for(WOT))
+        state.observe(detection_for(WOT, SC))
+        state.request("desktop")
+        state.observe(detection_for(WOT))
+        self.assertEqual(state.target_profile.name, "world-of-tanks")
 
-    def test_an_override_survives_while_its_game_runs(self):
-        """A manual choice holds while the game it names is running.
+    def test_the_override_follows_a_rename(self):
+        """Renaming the overriding profile must not fall back to the desktop."""
+        state = self._state()
+        state.request("world-of-tanks")
+        state.rename_profile("world-of-tanks", "wot")
+        self.assertEqual(state.manual_override, "wot")
+        self.assertEqual(state.target_profile.name, "wot")
 
-        The override is set on a later tick than the game being detected, so
-        the "detected game changed" rule does not clear it first.
-        """
-        import asyncio
+    def test_deleting_the_overriding_profile_ends_the_override(self):
+        state = self._state()
+        state.request("star-citizen")
+        state.delete_profile("star-citizen")
+        self.assertIsNone(state.manual_override)
 
-        from linghub.discovery.detector import Detection, Match
-        from linghub.discovery.processes import ProcessInfo
 
-        profile = Profile(name="world-of-tanks", games=(Game("x.exe"),))
-        process = ProcessInfo(pid=1, name="p", executable_path="x.exe",
-                              real_executable_path="x.exe", command="x.exe")
-        detection = Detection(
-            matches=[Match(game=profile.games[0], profile=profile, process=process)],
-            rejections=[], considered=1,
-        )
+class GameChangeTests(unittest.TestCase):
+    """What observe reports, so the daemon can announce it."""
 
-        daemon = self._daemon(detection)
-        daemon._detected_game = "world-of-tanks"
-        daemon._manual_override = "world-of-tanks"
+    def _state(self):
+        return DaemonState(config=make_config(DESKTOP, WOT, SC))
 
-        asyncio.run(daemon._tick_once())
+    def test_a_game_starting_is_reported(self):
+        change = self._state().observe(detection_for(WOT))
+        self.assertEqual(change.started, "world-of-tanks")
+        self.assertIsNone(change.stopped)
 
-        self.assertEqual(daemon._manual_override, "world-of-tanks")
+    def test_a_game_stopping_is_reported(self):
+        state = self._state()
+        state.observe(detection_for(WOT))
+        change = state.observe(detection_for())
+        self.assertIsNone(change.started)
+        self.assertEqual(change.stopped, "world-of-tanks")
+
+    def test_a_second_game_starting_is_a_change(self):
+        state = self._state()
+        state.observe(detection_for(WOT))
+        change = state.observe(detection_for(WOT, SC))
+        self.assertEqual(change.started, "star-citizen")
+        self.assertEqual(change.stopped, "world-of-tanks")
+
+    def test_no_change_reports_nothing(self):
+        state = self._state()
+        state.observe(detection_for(WOT))
+        self.assertIsNone(state.observe(detection_for(WOT)))
+
+    def test_a_request_is_not_a_game_change(self):
+        state = self._state()
+        state.request("world-of-tanks")
+        self.assertIsNone(state.observe(detection_for()))
 
 
 class FingerprintTests(unittest.TestCase):

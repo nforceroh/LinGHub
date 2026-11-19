@@ -1,10 +1,12 @@
 [build-system]
-requires = ["setuptools>=68"]
+# setuptools-scm reads the release from the git tag at build time; a
+# running clone reads git itself instead (ADR-0009).
+requires = ["setuptools>=68", "setuptools-scm==8.1.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "linghub"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Profile manager for the Logitech G502 family on Linux"
 requires-python = ">=3.11"
 dependencies = ["dbus-fast>=5.2,<6"]
@@ -19,3 +21,7 @@ linghub = "linghub.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools_scm]
+# Builds outside a clone (an sdist without git metadata) still get a version.
+fallback_version = "0.0.0"

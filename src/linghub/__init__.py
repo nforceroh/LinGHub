@@ -1,3 +1,4 @@
-"""LinGHub: profile manager for the Logitech G502 family on Linux."""
+"""LinGHub: profile manager for the Logitech G502 family on Linux.
 
-__version__ = "0.1.0"
+The app version lives in `linghub.version`, read from git (ADR-0009).
+"""

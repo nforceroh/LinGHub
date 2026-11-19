@@ -1,9 +1,16 @@
 """The daemon's decision logic, independent of D-Bus and the clock.
 
 The daemon holds a stack of active games. A game starting pushes onto the
-stack; a game exiting pops it. The profile to load is the top of the stack,
-or the desktop profile when the stack is empty. This handles nested
-registrations (launcher then game) without special cases.
+stack; a game exiting pops it. The top of the stack is the current game. This
+handles nested registrations (launcher then game) without special cases.
+
+The profile to load is the manual override if there is one, else the current
+game's profile, else the desktop profile. Every name those three depend on
+lives here, so renaming or deleting a profile can update all of them at once.
+
+A manual override holds until the current game changes, whether or not a game
+is running when it is made. An earlier version also dropped an override made
+with no game running; that made Load at the desktop silently do nothing.
 """
 
 from __future__ import annotations
@@ -38,6 +45,16 @@ def fingerprint(profile: Profile) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+@dataclass(frozen=True)
+class GameChange:
+    """The current game changed during one detection pass."""
+
+    # The game that is now current, if any.
+    started: str | None
+    # The game that was current before, if any.
+    stopped: str | None
+
+
 @dataclass
 class DaemonState:
     """What the daemon currently believes, and what it should do next."""
@@ -47,10 +64,31 @@ class DaemonState:
     loaded_profile: str | None = None
     loaded_fingerprint: str | None = None
     _slot_drifted: bool = False
+    _manual_override: str | None = None
+
+    @property
+    def manual_override(self) -> str | None:
+        """The profile loaded by hand, or None when detection decides."""
+        return self._manual_override
+
+    def request(self, name: str) -> bool:
+        """Load a profile by hand, overriding detection until the game changes.
+
+        A name that is not in the config is refused rather than held: it
+        could never be loaded.
+        """
+        if self.config.profile_named(name) is None:
+            return False
+        self._manual_override = name
+        return True
 
     @property
     def target_profile(self) -> Profile:
         """The profile that should be loaded right now."""
+        if self._manual_override is not None:
+            profile = self.config.profile_named(self._manual_override)
+            if profile is not None:
+                return profile
         if self.stack:
             profile = self.config.profile_named(self.stack[-1])
             if profile is not None:
@@ -100,14 +138,18 @@ class DaemonState:
         loaded = self.loaded
         return None if loaded is None else slots.slot_for(loaded)
 
-    def observe(self, detection: Detection) -> None:
+    def observe(self, detection: Detection) -> GameChange | None:
         """Update the stack from one detection pass.
 
         Every running game is pushed, in detection order, so nested
         registrations stack correctly. A game that is no longer running is
         removed wherever it sits in the stack, so a game exiting out of order
         cannot strand the stack.
+
+        When the current game changes, a manual override ends and the change
+        is returned so the daemon can announce it. Otherwise returns None.
         """
+        previous = self.current_game
         running = {match.profile.name for match in detection.matches}
 
         self.stack = [name for name in self.stack if name in running]
@@ -115,6 +157,16 @@ class DaemonState:
         for match in detection.matches:
             if match.profile.name not in self.stack:
                 self.stack.append(match.profile.name)
+
+        if self.current_game == previous:
+            return None
+        self._manual_override = None
+        return GameChange(started=self.current_game, stopped=previous)
+
+    @property
+    def current_game(self) -> str | None:
+        """The most recently started game still running, or None."""
+        return self.stack[-1] if self.stack else None
 
     def mark_loaded(self, profile_name: str) -> None:
         self.loaded_profile = profile_name
@@ -236,6 +288,8 @@ class DaemonState:
         if self.loaded_profile == old:
             self.loaded_profile = new
         self.stack = [new if name == old else name for name in self.stack]
+        if self._manual_override == old:
+            self._manual_override = new
         return True
 
     def delete_profile(self, name: str) -> bool:
@@ -250,6 +304,8 @@ class DaemonState:
 
         self.config = replace(self.config, profiles=remaining)
         self.stack = [entry for entry in self.stack if entry != name]
+        if self._manual_override == name:
+            self._manual_override = None
         if self.loaded_profile == name:
             self.loaded_profile = None
             self.loaded_fingerprint = None

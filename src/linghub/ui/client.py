@@ -10,7 +10,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 
-from dbus_fast import BusType, Message, MessageType, Variant
+from dbus_fast import BusType, Message, MessageType
 from dbus_fast.aio import MessageBus
 
 
@@ -22,6 +22,24 @@ PATH = contract.PATH
 INTERFACE = contract.INTERFACE
 
 logger = logging.getLogger("linghub.ui.client")
+
+# A daemon's answers when it has no such property: dbus-fast says
+# UnknownProperty, GLib-based services say InvalidArgs.
+_NO_PROPERTY = frozenset({
+    "org.freedesktop.DBus.Error.UnknownProperty",
+    "org.freedesktop.DBus.Error.InvalidArgs",
+})
+
+# The bus's answers when nothing owns the daemon's name. Connecting to the bus
+# succeeds without the daemon, so these replies are the only sign it is absent.
+_NO_DAEMON = frozenset({
+    "org.freedesktop.DBus.Error.ServiceUnknown",
+    "org.freedesktop.DBus.Error.NameHasNoOwner",
+})
+
+
+class DaemonUnavailable(RuntimeError):
+    """The daemon is not running, or is not answering on the session bus."""
 
 
 @dataclass(frozen=True)
@@ -45,10 +63,10 @@ class ProfileView:
 
 @dataclass(frozen=True)
 class DaemonView:
-    """Everything a poll needs, from one D-Bus read.
+    """Everything a client shows, from one D-Bus read.
 
     The state section is what the tray and the title bar show; the profile
-    section is what the panels edit. One read means a poll cannot piece a
+    section is what the panels edit. One read means a refresh cannot piece a
     view together from two ticks.
     """
 
@@ -73,15 +91,24 @@ class DaemonClient:
             return False
 
         self._bus.add_message_handler(self._handle_signal)
+        # The daemon's own signals, and its name gaining or losing an owner:
+        # with no poll, the second is how a client notices the daemon started
+        # or stopped.
+        rules = (
+            f"type='signal',interface='{INTERFACE}'",
+            "type='signal',interface='org.freedesktop.DBus',"
+            f"member='NameOwnerChanged',arg0='{SERVICE}'",
+        )
         try:
-            await self._bus.call(Message(
-                destination="org.freedesktop.DBus",
-                path="/org/freedesktop/DBus",
-                interface="org.freedesktop.DBus",
-                member="AddMatch",
-                signature="s",
-                body=[f"type='signal',interface='{INTERFACE}'"],
-            ))
+            for rule in rules:
+                await self._bus.call(Message(
+                    destination="org.freedesktop.DBus",
+                    path="/org/freedesktop/DBus",
+                    interface="org.freedesktop.DBus",
+                    member="AddMatch",
+                    signature="s",
+                    body=[rule],
+                ))
         except (OSError, asyncio.TimeoutError):
             return False
         return True
@@ -92,7 +119,12 @@ class DaemonClient:
     def _handle_signal(self, message: Message) -> None:
         if message.message_type != MessageType.SIGNAL:
             return
-        if message.interface != INTERFACE:
+        ours = message.interface == INTERFACE
+        daemon_came_or_went = (
+            message.member == "NameOwnerChanged"
+            and bool(message.body) and message.body[0] == SERVICE
+        )
+        if not (ours or daemon_came_or_went):
             return
         if self._on_change is not None:
             self._on_change()
@@ -115,39 +147,14 @@ class DaemonClient:
             )),
             timeout=5,
         )
-        if reply.message_type == MessageType.ERROR:
-            raise RuntimeError(f"{member} failed: {reply.body}")
+        _raise_for_error(reply, member)
         return reply.body[0] if reply.body else None
-
-    async def _property(self, name: str) -> str:
-        if self._bus is None:
-            raise RuntimeError("not connected to the daemon")
-        reply = await asyncio.wait_for(
-            self._bus.call(Message(
-                destination=SERVICE, path=PATH,
-                interface="org.freedesktop.DBus.Properties", member="Get",
-                signature="ss", body=[INTERFACE, name],
-            )),
-            timeout=5,
-        )
-        if reply.message_type == MessageType.ERROR:
-            raise RuntimeError(f"reading {name} failed")
-        value = reply.body[0]
-        return value.value if isinstance(value, Variant) else ""
-
-    async def state(self) -> DaemonState:
-        return DaemonState(
-            active_profile=await self._property("ActiveProfile"),
-            detected_game=await self._property("DetectedGame"),
-            desktop_profile=await self._property("DesktopProfile"),
-            profiles=tuple(await self._invoke(contract.LIST_PROFILES) or ()),
-        )
 
     async def get_view(self, profile: str) -> DaemonView:
         """Read the state and one profile's editable sections, in one call.
 
         An unknown profile comes back with empty sections rather than an
-        error: the window may be polling a profile that was just deleted, and
+        error: the window may be reading a profile that was just deleted, and
         "nothing there" is the answer it needs.
         """
         raw = await self._invoke(contract.GET_VIEW, profile)
@@ -189,6 +196,34 @@ class DaemonClient:
                 report_rate=int(rate),
             ),
         )
+
+    async def daemon_version(self) -> str | None:
+        """The daemon's app version, or PREDATES_REPORTING for an older daemon.
+
+        A property of its own rather than part of GetView, so a daemon from
+        before version reporting answers "no such property" here and every
+        other read still works (ADR-0009). No daemon at all is still
+        DaemonUnavailable: that is a different thing to tell the user.
+        """
+        from dbus_fast import Variant
+
+        from .. import version
+
+        if self._bus is None:
+            raise RuntimeError("not connected to the daemon")
+        reply = await asyncio.wait_for(
+            self._bus.call(Message(
+                destination=SERVICE, path=PATH,
+                interface="org.freedesktop.DBus.Properties", member="Get",
+                signature="ss", body=[INTERFACE, contract.VERSION.name],
+            )),
+            timeout=5,
+        )
+        if reply.message_type == MessageType.ERROR and reply.error_name in _NO_PROPERTY:
+            return version.PREDATES_REPORTING
+        _raise_for_error(reply, contract.VERSION.name)
+        value = reply.body[0]
+        return str(value.value if isinstance(value, Variant) else value)
 
     async def load_profile(self, name: str) -> bool:
         return bool(await self._invoke(contract.LOAD_PROFILE, name))
@@ -239,3 +274,17 @@ class DaemonClient:
         if self._bus is not None:
             self._bus.disconnect()
             self._bus = None
+
+
+def _raise_for_error(reply: Message, what: str) -> None:
+    """Raise if `reply` is an error: DaemonUnavailable when the daemon is absent.
+
+    Any other error is a failure of the call itself, and keeps the bus's
+    error name so the caller can see what went wrong.
+    """
+    if reply.message_type != MessageType.ERROR:
+        return
+    detail = reply.body[0] if reply.body else ""
+    if reply.error_name in _NO_DAEMON:
+        raise DaemonUnavailable(f"the daemon is not on the session bus ({detail})")
+    raise RuntimeError(f"{what} failed: {reply.error_name}: {detail}")

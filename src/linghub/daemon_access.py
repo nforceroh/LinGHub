@@ -22,17 +22,13 @@ import logging
 import threading
 from typing import Any, Callable, TypeVar
 
-from .ui.client import DaemonState
+from .ui.client import DaemonState, DaemonUnavailable
 
 
 logger = logging.getLogger("linghub.daemon_access")
 
 
 T = TypeVar("T")
-
-
-class DaemonUnavailable(RuntimeError):
-    """The daemon is not running, or is not answering on the session bus."""
 
 
 async def run_with_client(action: Callable[[Any], T]) -> T:
@@ -66,9 +62,24 @@ def call(action: Callable[[Any], T], timeout: float = 10.0) -> T:
 
 
 def state() -> DaemonState:
-    """The daemon's current state. Convenience for the common case."""
+    """The daemon's current state. Convenience for the common case.
+
+    Read through GetView, the same single call the window makes, so there is
+    one decoder for the daemon's state rather than two.
+    """
     async def read(client):
-        return await client.state()
+        return (await client.get_view("")).state
+
+    return call(read)
+
+
+def state_and_version() -> tuple[DaemonState, str | None]:
+    """The daemon's state and its app version, on one connection.
+
+    The version is PREDATES_REPORTING for a daemon too old to report one.
+    """
+    async def read(client):
+        return (await client.get_view("")).state, await client.daemon_version()
 
     return call(read)
 
