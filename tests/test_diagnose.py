@@ -66,24 +66,5 @@ class FindHoldersTests(unittest.TestCase):
         self.assertEqual(holders, [])
 
 
-class DescribeFailureTests(unittest.TestCase):
-    def test_names_the_offending_process(self):
-        holder = diagnose.HidrawHolder(pid=42, command="wine WorldOfTanks.exe", node="/dev/hidraw12")
-        with mock.patch.object(diagnose, "find_deleted_hidraw_holders", return_value=[holder]):
-            message = diagnose.describe_failure()
-
-        self.assertIn("pid 42", message)
-        self.assertIn("WorldOfTanks.exe", message)
-        self.assertIn("/dev/hidraw12", message)
-        self.assertIn("replug", message)
-
-    def test_falls_back_when_no_holders(self):
-        with mock.patch.object(diagnose, "find_deleted_hidraw_holders", return_value=[]):
-            message = diagnose.describe_failure()
-
-        self.assertIn("no stale hidraw holders", message)
-        self.assertIn("ratbagd is running", message)
-
-
 if __name__ == "__main__":
     unittest.main()
