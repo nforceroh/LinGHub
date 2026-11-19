@@ -53,7 +53,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._view: DaemonView | None = None
         self._refresh_task = None
         self._refresh_pending = False
-        self._daemon_version = version.DAEMON_NOT_RUNNING
+        self._daemon_version = version.DaemonVersion.not_running()
 
         self.set_default_size(980, 620)
 
@@ -313,7 +313,7 @@ class MainWindow(Adw.ApplicationWindow):
             view = await self._client.get_view(self._editing_profile() or "")
         except (RuntimeError, OSError) as exc:
             self._status.set_text(f"Daemon unavailable: {exc}")
-            self._apply_daemon_version(version.DAEMON_NOT_RUNNING)
+            self._apply_daemon_version(version.DaemonVersion.not_running())
             return
         self._apply_view(view)
         # Read after the view, and on its own: a failure here must not cost
@@ -322,13 +322,13 @@ class MainWindow(Adw.ApplicationWindow):
             daemon_version = await self._client.daemon_version()
         except (RuntimeError, OSError) as exc:
             logger.debug("cannot read the daemon's version: %s", exc)
-            daemon_version = version.DAEMON_NOT_RUNNING
+            daemon_version = version.DaemonVersion.unreadable()
         self._apply_daemon_version(daemon_version)
 
     def _apply_daemon_version(self, daemon_version) -> None:
         """Remember the daemon's version, and flag it if it differs from ours."""
         self._daemon_version = daemon_version
-        note = version.daemon_note(version.current(), daemon_version)
+        _line, note = version.describe(version.current(), daemon_version)
         self._banner.set_title(note or "")
         self._banner.set_revealed(note is not None)
 
@@ -345,15 +345,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _about_dialog(self) -> Adw.AboutDialog:
         """This window's app version, with the daemon's beside it."""
-        daemon = self._daemon_version
-        if daemon is version.DAEMON_NOT_RUNNING:
-            line = "Daemon not running"
-        elif daemon is version.PREDATES_REPORTING:
-            line = "Daemon version unknown: it predates version reporting"
-        else:
-            line = f"Daemon {daemon}"
-        note = version.daemon_note(version.current(), daemon)
-        comments = line if note is None or daemon is version.PREDATES_REPORTING else f"{line}\n{note}"
+        line, note = version.describe(version.current(), self._daemon_version)
+        comments = line if note is None else f"{line}\n{note}"
         return Adw.AboutDialog(
             application_name="LinGHub",
             version=version.current(),

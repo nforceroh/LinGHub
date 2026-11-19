@@ -94,28 +94,70 @@ class ResolveTests(unittest.TestCase):
         self.assertEqual(found, "unknown")
 
 
-class DaemonNoteTests(unittest.TestCase):
+class DescribeTests(unittest.TestCase):
     """What a client says about the daemon's version next to its own."""
 
     def test_the_same_version_needs_no_note(self):
-        self.assertIsNone(version.daemon_note("0.1.0+3.g5c27eef", "0.1.0+3.g5c27eef"))
+        self.assertEqual(
+            version.describe("0.1.0+3.g5c27eef", version.DaemonVersion.known("0.1.0+3.g5c27eef")),
+            ("Daemon  0.1.0+3.g5c27eef", None),
+        )
 
     def test_a_different_version_says_to_restart(self):
         self.assertEqual(
-            version.daemon_note("0.1.0+4.gabc1234", "0.1.0+3.g5c27eef"),
-            "Daemon is running 0.1.0+3.g5c27eef; restart it",
+            version.describe("0.1.0+4.gabc1234", version.DaemonVersion.known("0.1.0+3.g5c27eef")),
+            (
+                "Daemon  0.1.0+3.g5c27eef",
+                "Daemon is running 0.1.0+3.g5c27eef; restart it",
+            ),
         )
 
     def test_a_daemon_without_a_version_predates_reporting(self):
         self.assertEqual(
-            version.daemon_note("0.1.0", version.PREDATES_REPORTING),
-            "Daemon predates version reporting; restart it",
+            version.describe("0.1.0", version.DaemonVersion.predates_reporting()),
+            ("Daemon  unknown", "Daemon predates version reporting; restart it"),
         )
 
-
-class NoDaemonTests(unittest.TestCase):
     def test_no_daemon_is_not_a_mismatch(self):
-        self.assertIsNone(version.daemon_note("0.1.0", version.DAEMON_NOT_RUNNING))
+        self.assertEqual(
+            version.describe("0.1.0", version.DaemonVersion.not_running()),
+            ("Daemon  not running", None),
+        )
+
+    def test_an_unreadable_version_is_not_called_not_running(self):
+        """The bug this fixes: a running daemon whose version read failed."""
+        line, note = version.describe("0.1.0", version.DaemonVersion.unreadable())
+        self.assertEqual(line, "Daemon  unreadable")
+        self.assertNotIn("not running", line)
+        self.assertIsNone(note)
+
+
+class DaemonVersionTests(unittest.TestCase):
+    """The four states are distinct values, not sentinels that can collide."""
+
+    def test_each_state_is_its_own_kind(self):
+        kinds = {
+            version.DaemonVersion.known("0.1.0").kind,
+            version.DaemonVersion.predates_reporting().kind,
+            version.DaemonVersion.not_running().kind,
+            version.DaemonVersion.unreadable().kind,
+        }
+        self.assertEqual(len(kinds), 4)
+
+    def test_only_a_known_version_carries_a_string(self):
+        self.assertEqual(version.DaemonVersion.known("0.1.0").version, "0.1.0")
+        for state in (
+            version.DaemonVersion.predates_reporting(),
+            version.DaemonVersion.not_running(),
+            version.DaemonVersion.unreadable(),
+        ):
+            with self.subTest(state=state.kind):
+                self.assertEqual(state.version, "")
+
+    def test_a_stray_none_is_not_a_predating_daemon(self):
+        """PREDATES_REPORTING used to be None, so any None read as "old daemon"."""
+        self.assertIsNotNone(version.DaemonVersion.predates_reporting())
+        self.assertNotEqual(version.DaemonVersion.predates_reporting(), None)
 
 
 class CurrentTests(unittest.TestCase):

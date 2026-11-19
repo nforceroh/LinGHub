@@ -112,6 +112,13 @@ number, plus how far past that release the code is. The daemon, tray and
 window each have one, and they can differ until a stale process restarts.
 _Avoid_: version (alone), build number, release
 
+**Daemon version**:
+What a client knows about the daemon's app version, as one of four values:
+known, predates reporting, not running, or unreadable. The four are distinct
+because they call for different words: only a known version can differ from
+the client's own, and "unreadable" must never be shown as "not running".
+_Avoid_: daemon state, version sentinel
+
 **Config change**:
 One edit to the config: a new binding, a DPI slot, a lighting effect, or a
 whole profile. Every config change obeys the same rule — apply it, save it, and

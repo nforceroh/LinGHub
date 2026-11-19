@@ -173,7 +173,9 @@ Daemon  0.1.0+3.g5c27eef
 
 A third line appears when the two differ, such as `Daemon is running 0.1.0;
 restart it`. A daemon too old to report its version shows `Daemon predates
-version reporting; restart it`. To restart both services:
+version reporting; restart it`. If the daemon is running but its version
+cannot be read, the line says `Daemon  unreadable` and no note is added: we
+do not know that it differs. To restart both services:
 
 ```bash
 systemctl --user restart linghub.service linghub-tray.service
