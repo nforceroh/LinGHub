@@ -158,6 +158,51 @@ systemctl --user status linghub.service
 journalctl --user -u linghub.service -f
 ```
 
+## Versions and releases
+
+The daemon, the tray and the window are separate processes, and each runs the
+code that was on disk when it started. After a `git pull`, a daemon that hasn't
+been restarted is still running the old code. Check with:
+
+```console
+$ linghub --version
+LinGHub 0.1.0+3.g5c27eef
+Daemon  0.1.0+3.g5c27eef
+```
+
+A third line appears when the two differ, such as `Daemon is running 0.1.0;
+restart it`. A daemon too old to report its version shows `Daemon predates
+version reporting; restart it`. To restart both services:
+
+```bash
+systemctl --user restart linghub.service linghub-tray.service
+```
+
+The tray's last menu line and the window's About dialog show the same version,
+and say the same thing when the daemon differs.
+
+The version comes from git, read when each process starts:
+
+| Version | Meaning |
+| --- | --- |
+| `0.1.0` | exactly the `v0.1.0` release |
+| `0.1.0+3.g5c27eef` | 3 commits past `v0.1.0`, at commit `5c27eef` |
+| `0.1.0+3.g5c27eef.dirty` | the same, with uncommitted changes |
+| `0.0.0+66.gfb886ac` | no release tagged yet |
+
+To cut a release, tag `main`:
+
+```bash
+git switch main && git pull
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+Tag after a branch is merged, not on the branch itself: if the merge squashes
+or rebases it, a tag made on the branch points at a commit `main` never
+contains. Nothing needs bumping by hand; the version is the tag. See
+[ADR-0009](docs/adr/0009-app-version-from-git-at-runtime.md) for why.
+
 ## D-Bus interface
 
 The daemon publishes `org.linghub.Manager` on the session bus at
