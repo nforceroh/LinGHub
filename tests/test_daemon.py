@@ -44,6 +44,8 @@ class FakeMouse:
         self.active: int | None = None
         # What the next write does: None succeeds, or the exception to raise.
         self.next_write: Exception | None = None
+        # What the next active-slot read does: None answers, or raises this.
+        self.next_read: Exception | None = None
 
     async def apply(self, profile, slot):
         if self.next_write is not None:
@@ -54,6 +56,9 @@ class FakeMouse:
         return type("Result", (), {"changed": ()})()
 
     async def active_slot(self):
+        if self.next_read is not None:
+            error, self.next_read = self.next_read, None
+            raise error
         return self.active
 
     async def report_rates(self):
@@ -215,6 +220,46 @@ class MouseLossTests(unittest.TestCase):
         h.tick()
         self.assertEqual(h.mouse.connects, 1)
         self.assertEqual(h.written, [("desktop", 0)])
+
+    def test_a_replaced_mouse_is_reconnected_when_a_write_finds_it(self):
+        """A reused hidraw path names another device: reconnect, do not retry."""
+        from linghub.hardware.ratbag import DeviceReplaced
+
+        h = DaemonHarness(self)
+        h.mouse.mouse.next_write = DeviceReplaced("now Logitech Candy")
+        h.tick()
+        h.tick()
+        self.assertEqual(h.mouse.connects, 2, "the stale mouse was kept")
+        self.assertEqual(h.written, [("desktop", 0)])
+
+    def test_a_replaced_mouse_is_reconnected_when_a_read_finds_it(self):
+        """With nothing to write, the slot read is the only thing that looks."""
+        from linghub.hardware.ratbag import DeviceReplaced
+
+        h = DaemonHarness(self)
+        h.tick()
+        self.assertEqual(h.mouse.connects, 1)
+        h.mouse.mouse.next_read = DeviceReplaced("now Logitech Candy")
+        h.tick()
+        h.tick()
+        self.assertEqual(h.mouse.connects, 2, "the stale mouse was kept")
+
+    def test_a_vanished_path_is_reconnected_without_waiting_for_a_write(self):
+        """After a KVM switch the old hidraw path may name nothing at all.
+
+        With nothing to write, the slot read is the only call that touches
+        the mouse, so its failure must drop the stale mouse; otherwise the
+        daemon stays blind until the next game starts or stops.
+        """
+        h = DaemonHarness(self)
+        h.tick()
+        self.assertEqual(h.mouse.connects, 1)
+        h.mouse.mouse.next_read = RuntimeError(
+            "D-Bus call Get failed: Unknown object '/org/freedesktop/ratbag1/device/hidraw12'"
+        )
+        h.tick()
+        self.assertEqual(h.mouse.connects, 2, "the stale mouse was kept")
+        self.assertEqual(h.written, [("desktop", 0)], "a reconnect alone is not a reason to write")
 
     def test_an_absent_mouse_does_not_stop_the_tick(self):
         """Blocking until the mouse returns would stop detecting games."""

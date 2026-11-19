@@ -27,6 +27,9 @@ class FakeClient:
         self.fail_activation = False
         self.ignore_report_rate = False
         self.ignore_mapping_payload = False
+        # What ratbagd says lives at the device path. A receiver reconnect
+        # can renumber hidraw nodes, so this can become another device.
+        self.device_name = "Logitech G502"
 
     async def _call(self, message):
         from types import SimpleNamespace
@@ -51,6 +54,8 @@ class FakeClient:
         return SimpleNamespace(message_type=MessageType.METHOD_RETURN, body=[0])
 
     async def _property(self, path, interface, name):
+        if name == "Name":
+            return self.device_name
         if name == "Profiles":
             return self._profiles
         if name == "Buttons":
@@ -80,6 +85,7 @@ class FakeClient:
 
 
 class FakeDevice:
+    name = "Logitech G502"
     path = "/device"
 
 
@@ -146,6 +152,47 @@ class WriterTests(unittest.IsolatedAsyncioTestCase):
         profile = Profile(name="desktop", bindings={9: Binding("button", 1)})
         with self.assertRaisesRegex(WriteError, "no button 9"):
             await self.writer.apply(profile, 0)
+
+
+
+class DeviceIdentityTests(unittest.IsolatedAsyncioTestCase):
+    """ratbagd names devices by hidraw node, and nodes get reused.
+
+    Seen on a G502 Lightspeed: after the receiver reconnected, the path the
+    daemon held (/device/hidraw12) named the receiver's other device, a
+    one-profile "Logitech Candy". Every load then failed with "no profile
+    slot 1", read as a refused write, and was retried on the wrong device
+    for good while the mouse sat on slot 0.
+    """
+
+    def setUp(self):
+        self.client = FakeClient()
+        self.writer = ProfileWriter(self.client, FakeDevice())
+        self.client.device_name = "Logitech Candy"
+
+    async def test_apply_reports_a_replaced_device_not_a_refused_write(self):
+        from linghub.hardware.ratbag import DeviceReplaced
+
+        with self.assertRaises(DeviceReplaced):
+            await self.writer.apply(Profile(name="world-of-tanks"), 1)
+
+    async def test_apply_writes_nothing_to_the_other_device(self):
+        from linghub.hardware.ratbag import DeviceReplaced
+
+        with self.assertRaises(DeviceReplaced):
+            await self.writer.apply(Profile(name="desktop", report_rate=1000), 0)
+        self.assertEqual(self.client.calls, [])
+
+    async def test_active_slot_reports_a_replaced_device(self):
+        from linghub.hardware.ratbag import DeviceReplaced
+
+        with self.assertRaises(DeviceReplaced):
+            await self.writer.active_slot()
+
+    async def test_a_replaced_device_is_not_a_write_error(self):
+        from linghub.hardware.ratbag import DeviceReplaced
+
+        self.assertFalse(issubclass(DeviceReplaced, WriteError))
 
 
 if __name__ == "__main__":

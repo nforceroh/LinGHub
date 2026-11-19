@@ -35,6 +35,16 @@ class DeviceNotFound(RuntimeError):
     """
 
 
+class DeviceReplaced(RuntimeError):
+    """The device path now names a different device.
+
+    ratbagd names devices after their hidraw node, and the kernel reuses
+    node numbers: after a wireless receiver reconnects, the path found at
+    startup can name the receiver's other device. Distinct from WriteError
+    because the cure is to find the mouse again, not to retry the write.
+    """
+
+
 class RatbagClient:
     """Use an already-connected system bus to manage a single G502."""
 

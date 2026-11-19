@@ -337,7 +337,14 @@ class Daemon:
         try:
             active = await self._writer.active_slot()
         except (RuntimeError, OSError, DBusFastError) as exc:
-            logger.debug("cannot read the active slot: %s", exc)
+            # The path names another device (DeviceReplaced) or nothing at
+            # all: after a KVM switch the kernel renumbers hidraw nodes, and
+            # ratbagd's paths follow them. With nothing to write this read is
+            # the only call that touches the mouse, so drop the stale mouse
+            # here; _apply_target reconnects in this same tick. An unreadable
+            # slot is not drift, so nothing is rewritten on its account.
+            logger.warning("lost the device: %s", exc)
+            self._writer = None
             return
 
         before = self._state.needs_write

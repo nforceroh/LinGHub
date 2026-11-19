@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from ..domain.profile import Profile
 from . import mapping
-from .ratbag import SERVICE, RatbagClient, Device
+from .ratbag import SERVICE, RatbagClient, Device, DeviceReplaced
 
 
 def _payloads_match(actual, expected) -> bool:
@@ -64,6 +64,19 @@ class ProfileWriter:
         """The report rates this device accepts, in Hz; empty if unpublished."""
         return await self._client.report_rates(self._device)
 
+    async def _check_identity(self) -> None:
+        """Fail if the device path no longer names the device we found.
+
+        ratbagd paths follow hidraw node numbers, which the kernel reuses
+        when a wireless receiver reconnects. Without this check the writer
+        would carry on against whatever device inherited the path.
+        """
+        name = await self._client._property(self._device.path, "Device", "Name")
+        if name != self._device.name:
+            raise DeviceReplaced(
+                f"{self._device.path} is now {name!r}, not {self._device.name!r}"
+            )
+
     async def _profile_path(self, slot: int) -> str:
         paths = await self._client._property(self._device.path, "Device", "Profiles")
         if slot >= len(paths):
@@ -87,6 +100,7 @@ class ProfileWriter:
 
     async def apply(self, profile: Profile, slot: int) -> WriteResult:
         """Write `profile` into `slot`, commit, and verify."""
+        await self._check_identity()
         path = await self._profile_path(slot)
         changed: list[str] = []
 
@@ -127,6 +141,7 @@ class ProfileWriter:
         Read from hardware rather than remembered, so the daemon can notice
         when something outside it changed the active profile.
         """
+        await self._check_identity()
         paths = await self._get(self._device.path, "Device", "Profiles")
         for index, path in enumerate(paths):
             if await self._get(path, "Profile", "IsActive"):
