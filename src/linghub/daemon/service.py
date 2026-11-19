@@ -21,6 +21,7 @@ from ..discovery.gamemode import GameModeClient
 from dbus_fast import DBusError as DBusFastError
 
 from ..domain.profile import Profile
+from ..hardware.active_slot import SlotUnknown
 from ..hardware.ratbag import DeviceNotFound
 from ..hardware.writer import RatbagConnector, WriteError, WriteResult
 from ..notify import Notifier, profile_message
@@ -338,6 +339,12 @@ class Daemon:
             return
         try:
             active = await self._writer.active_slot()
+        except SlotUnknown as exc:
+            # The mouse could not say (asleep, out of range, host mode). Not
+            # drift, so no reload, and not lost, so no reconnect: the next
+            # check asks again (#2).
+            logger.debug("active slot unknown: %s", exc)
+            return
         except (RuntimeError, OSError, DBusFastError) as exc:
             # The path names another device (DeviceReplaced) or nothing at
             # all: after a KVM switch the kernel renumbers hidraw nodes, and

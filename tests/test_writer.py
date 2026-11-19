@@ -195,5 +195,37 @@ class DeviceIdentityTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(issubclass(DeviceReplaced, WriteError))
 
 
+
+class ActiveSlotSourceTests(unittest.IsolatedAsyncioTestCase):
+    """The writer's active slot comes from the mouse when it can (#2)."""
+
+    async def test_the_mouse_answers_over_ratbagd(self):
+        class Mouse:
+            def active_slot(self):
+                return 0
+
+        client = FakeClient()
+        client._active = "/p1"          # ratbagd believes slot 1
+        writer = ProfileWriter(client, FakeDevice(), mouse=Mouse())
+        self.assertEqual(await writer.active_slot(), 0)
+
+    async def test_without_a_mouse_reader_ratbagd_answers(self):
+        client = FakeClient()
+        client._active = "/p1"
+        self.assertEqual(await ProfileWriter(client, FakeDevice()).active_slot(), 1)
+
+    async def test_a_replaced_device_is_found_before_the_mouse_is_asked(self):
+        from linghub.hardware.ratbag import DeviceReplaced
+
+        class Mouse:
+            def active_slot(self):
+                raise AssertionError("asked the mouse behind a replaced path")
+
+        client = FakeClient()
+        client.device_name = "Logitech Candy"
+        with self.assertRaises(DeviceReplaced):
+            await ProfileWriter(client, FakeDevice(), mouse=Mouse()).active_slot()
+
+
 if __name__ == "__main__":
     unittest.main()

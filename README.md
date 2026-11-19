@@ -270,6 +270,8 @@ validate is never written over.
 src/linghub/
 ├── domain/          Profile, Game, Binding — pure, no I/O
 ├── hardware/        ratbagd: reading, encoding, writing and verifying
+│   ├── hidpp.py     asks the mouse itself which slot it is on (ADR-0010)
+│   └── active_slot.py    the mouse's answer over ratbagd's, and what a failed read means
 ├── discovery/       /proc and GameMode: is a game running?
 ├── daemon/
 │   ├── service.py   the run loop; detection and the mouse are injected
@@ -291,7 +293,8 @@ src/linghub/
 
 The pattern throughout: a decision that does not need a framework lives in a
 module the framework calls, so it can be tested directly. `presentation`,
-`panel_rules`, `binding_modes`, `slots` and `writes` are all that shape.
+`panel_rules`, `binding_modes`, `slots`, `writes` and `active_slot` are all
+that shape.
 
 The daemon itself is tested the same way: it takes its detector and its mouse
 connection as constructor arguments, so `tests/test_daemon.py` drives it one
