@@ -261,9 +261,11 @@ def main() -> int:
     if args.command == "run":
         return _run_daemon(args)
 
+    from .hardware.failures import MouseFailure
+
     try:
         asyncio.run(_run_hardware(args))
-    except (RuntimeError, OSError, DBusFastError) as exc:
+    except (MouseFailure, RuntimeError, OSError, DBusFastError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     return 0

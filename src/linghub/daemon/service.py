@@ -19,13 +19,13 @@ from .. import config as config_module
 from .. import version
 from ..discovery.detector import Detection, detect
 from ..discovery.gamemode import GameModeClient
-from dbus_fast import DBusError as DBusFastError
 
 from ..domain.profile import Profile
-from ..hardware.active_slot import SlotUnknown
-from ..hardware.ratbag import DeviceNotFound
-from ..hardware.writer import RatbagConnector, WriteError, WriteResult
-from ..notify import Notifier, profile_message
+from ..hardware.failures import (
+    LoadRefused, MouseAbsent, MouseLost, MouseMisconfigured, SlotUnknown,
+)
+from ..hardware.writer import RatbagConnector, WriteResult
+from ..notify import Notifier, profile_message, refused_message
 from . import slots
 from .dbus_service import PATH, SERVICE, BusAnnouncer, ManagerInterface
 from .snapshot import View, read_view
@@ -47,8 +47,15 @@ class ConfigStartupError(RuntimeError):
 class Mouse(Protocol):
     """What the daemon needs from a connected mouse.
 
-    `apply` raises WriteError when the mouse refused a write; any other error
-    means the mouse is gone and must be reconnected.
+    Failures are reported in the seam's vocabulary (`hardware.failures`), and
+    the daemon matches on what they mean (#8):
+
+    - `apply` raises LoadRefused (keep the mouse, don't retry the same load)
+      or MouseLost (reconnect).
+    - `active_slot` raises SlotUnknown (skip this check) or MouseLost.
+    - `report_rates` raises MouseLost.
+
+    Anything else is a bug: `tick` logs it with its traceback and carries on.
     """
 
     async def apply(self, profile: Profile, slot: int) -> WriteResult: ...
@@ -59,7 +66,11 @@ class Mouse(Protocol):
 
 
 class MouseConnector(Protocol):
-    """Connects to the mouse; `connect` raises DeviceNotFound when it is absent."""
+    """Connects to the mouse.
+
+    `connect` raises MouseAbsent (not found, or ratbagd not answering) or
+    MouseMisconfigured (retrying won't help until something changes).
+    """
 
     async def connect(self) -> Mouse: ...
 
@@ -87,6 +98,7 @@ class Daemon:
         mouse: MouseConnector | None = None,
         announce: Announcer | None = None,
         clock: Callable[[], float] = time.monotonic,
+        notifier: Notifier | None = None,
     ):
         self._config_path = Path(config_path)
         self._poll_interval = poll_interval
@@ -110,7 +122,11 @@ class Daemon:
         self._session_bus: MessageBus | None = None
         self._interface: ManagerInterface | None = None
         self._report_rates: list[int] = []
-        self._notifier: Notifier | None = None
+        # Injected by tests; otherwise made, and connected, at startup.
+        self._notifier: Notifier | None = notifier
+        # The last unexpected error, so a bug that repeats every check is
+        # logged with its traceback once, not every two seconds.
+        self._last_bug: tuple[str, str] | None = None
 
         # The three collaborators the D-Bus adapter calls. They hold the config
         # edits; this class keeps the run loop and the device. Which profile
@@ -153,7 +169,8 @@ class Daemon:
         Failure is not fatal: a headless machine has no notifications and must
         still switch profiles.
         """
-        self._notifier = Notifier()
+        if self._notifier is None:
+            self._notifier = Notifier()
         await self._notifier.connect()
 
     async def _notify_switch(self, profile_name: str) -> None:
@@ -161,6 +178,13 @@ class Daemon:
         if self._notifier is None or not self._notifier.available:
             return
         summary, body = profile_message(profile_name, self._state.current_game if self._state else None)
+        await self._notifier.notify(summary, body, tag="profile")
+
+    async def _notify_refused(self, profile_name: str, reason: str) -> None:
+        """Tell the user a load was refused: the mouse is on the wrong profile."""
+        if self._notifier is None or not self._notifier.available:
+            return
+        summary, body = refused_message(profile_name, reason)
         await self._notifier.notify(summary, body, tag="profile")
 
     async def _export_interface(self) -> None:
@@ -252,14 +276,18 @@ class Daemon:
         self._writer = None
         try:
             await self._connect()
-        except DeviceNotFound as exc:
+        except MouseAbsent as exc:
             self._report_absence(str(exc))
             return
-        except (RuntimeError, OSError, DBusFastError) as exc:
-            # ratbagd itself is down or broken: the mouse is just as out of
-            # reach, and one warning says so better than an error per check.
-            self._report_absence(f"cannot reach the mouse through ratbagd: {exc}")
+        except MouseMisconfigured as exc:
+            # Retrying won't help until something changes, but searching is
+            # cheap and the condition can go away (one G502 unplugged).
+            self._report_absence(str(exc), level=logging.ERROR)
             return
+
+        # A new connection may accept a load the last one refused.
+        if self._state is not None:
+            self._state.clear_refusal()
 
         if self._connected_before and self._absent_since is not None:
             away = _duration(self._clock() - self._absent_since)
@@ -275,14 +303,14 @@ class Daemon:
             self._absent_since = self._clock()
             self._absence_reported = False
 
-    def _report_absence(self, message: str) -> None:
-        """Warn once per absence; every later failed search is debug."""
+    def _report_absence(self, message: str, level: int = logging.WARNING) -> None:
+        """Log once per absence; every later failed search is debug."""
         if self._absent_since is None:
             self._absent_since = self._clock()
         if self._absence_reported:
             logger.debug("%s", message)
             return
-        logger.warning("%s", message)
+        logger.log(level, "%s", message)
         self._absence_reported = True
 
     async def _apply_target(self) -> None:
@@ -303,17 +331,17 @@ class Daemon:
 
         try:
             result = await self._writer.apply(target, slot)
-        except WriteError as exc:
-            # A refused write is not a missing device: keep the writer and
-            # retry on the next tick. The retry needs no queue: mark_loaded
-            # was not reached, so the fingerprint still disagrees and
-            # needs_write stays true.
-            logger.error("failed to load profile %r: %s", target.name, exc)
+        except LoadRefused as exc:
+            # Not a missing mouse: keep it. Retrying the same load would be
+            # refused again, flooding the log and maybe rewriting flash, so
+            # it waits for the config, the target or the connection to change.
+            self._state.mark_refused()
+            logger.error("could not load profile %r: %s", target.name, exc)
+            await self._notify_refused(target.name, str(exc))
             return
-        except (RuntimeError, OSError, DBusFastError) as exc:
-            # The device object is gone: a KVM switch, an unplugged cable, a
-            # flat battery. The writer is stale, so drop it and reconnect
-            # rather than letting this escape and killing the daemon.
+        except MouseLost as exc:
+            # A KVM switch, an unplugged cable, a flat battery: drop the
+            # stale mouse; the next check looks for it again.
             logger.warning("lost the device while writing: %s", exc)
             self._lose_mouse()
             return
@@ -327,16 +355,26 @@ class Daemon:
     async def tick(self) -> None:
         """One pass: detect games, check the mouse's slot, write if needed.
 
-        Never raises for a vanished mouse or a failed write: one bad tick must
-        not take the daemon down.
+        Never raises for anything an Exception covers: the mouse's failures
+        are handled where they happen, and anything else is a bug, logged
+        with its traceback. One bad tick must not take the daemon down:
+        systemd would restart it, losing state and the manual override, and a
+        bug that repeats would crash-loop it (#8).
         """
         assert self._state is not None
         try:
             await self._tick_once()
-        except (RuntimeError, OSError, DBusFastError) as exc:
-            # One bad tick must not take the daemon down: systemd would restart
-            # it, losing state and the manual override.
-            logger.error("tick failed: %s", exc)
+        except Exception as exc:  # noqa: BLE001 - the daemon must survive its own bugs
+            self._log_bug("tick failed", exc)
+
+    def _log_bug(self, what: str, exc: Exception) -> None:
+        """Log an unexpected error with its traceback, once while it repeats."""
+        key = (type(exc).__name__, str(exc))
+        if key == self._last_bug:
+            logger.debug("%s again: %s", what, exc)
+            return
+        self._last_bug = key
+        logger.error("%s: %s", what, exc, exc_info=exc)
 
     async def _tick_once(self) -> None:
         assert self._state is not None
@@ -374,7 +412,7 @@ class Daemon:
             # check asks again (#2).
             logger.debug("active slot unknown: %s", exc)
             return
-        except (RuntimeError, OSError, DBusFastError) as exc:
+        except MouseLost as exc:
             # The path names another device (DeviceReplaced) or nothing at
             # all: after a KVM switch the kernel renumbers hidraw nodes, and
             # ratbagd's paths follow them. With nothing to write this read is
@@ -415,7 +453,10 @@ class Daemon:
         # Try once rather than looping here: blocking would stop the tick loop,
         # so games would go undetected for as long as the mouse was absent.
         # _apply_target looks again on each tick until the device appears.
-        await self._reconnect()
+        try:
+            await self._reconnect()
+        except Exception as exc:  # noqa: BLE001 - a bug here must not stop startup
+            self._log_bug("first connection failed", exc)
 
         # GameMode is an accelerator: when it fires, run a tick immediately
         # instead of waiting for the next poll. When it is absent the poll

@@ -65,6 +65,9 @@ class DaemonState:
     loaded_fingerprint: str | None = None
     _slot_drifted: bool = False
     _manual_override: str | None = None
+    # A refused load: the target's name and fingerprint, and the config it
+    # was refused under. Not retried while all three still hold (#8).
+    _refusal: tuple[str, str, Config] | None = None
 
     @property
     def manual_override(self) -> str | None:
@@ -111,6 +114,13 @@ class DaemonState:
         a KVM reconnect gets corrected.
         """
         target = self.target_profile
+        if self._refusal is not None:
+            name, refused_fingerprint, config = self._refusal
+            # Identity, not equality: every config change replaces the
+            # object, and any config change is a reason to try again.
+            if (name == target.name and refused_fingerprint == fingerprint(target)
+                    and config is self.config):
+                return False
         return (
             self.loaded_profile != target.name
             or self.loaded_fingerprint != fingerprint(target)
@@ -168,7 +178,27 @@ class DaemonState:
         """The most recently started game still running, or None."""
         return self.stack[-1] if self.stack else None
 
+    def mark_refused(self) -> None:
+        """The target profile was refused: don't retry it until something changes.
+
+        Cleared by a config change, a different target, a successful load, or
+        `clear_refusal` (a reconnect). Drift doesn't clear it: the same
+        contents would only be refused again.
+        """
+        target = self.target_profile
+        self._refusal = (target.name, fingerprint(target), self.config)
+
+    def clear_refusal(self) -> None:
+        """Forget a refused load, so the next check tries it again."""
+        self._refusal = None
+
+    @property
+    def refused_profile(self) -> str | None:
+        """The name of the profile last refused, or None."""
+        return self._refusal[0] if self._refusal is not None else None
+
     def mark_loaded(self, profile_name: str) -> None:
+        self._refusal = None
         self.loaded_profile = profile_name
         profile = self.config.profile_named(profile_name)
         self.loaded_fingerprint = fingerprint(profile) if profile else None

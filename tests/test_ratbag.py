@@ -80,11 +80,11 @@ class RatbagClientTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_missing_g502_says_so_plainly(self):
         """#3: it names the likely causes and blames no process."""
-        from linghub.hardware.ratbag import DeviceNotFound
+        from linghub.hardware.failures import MouseAbsent
 
         self.bus.values[(ROOT, "Manager", "Devices")] = ("ao", ["/other"])
         self.bus.values[("/other", "Device", "Name")] = ("s", "Logitech Candy")
-        with self.assertRaises(DeviceNotFound) as raised:
+        with self.assertRaises(MouseAbsent) as raised:
             await self.client.find_device()
         message = str(raised.exception)
         self.assertIn("KVM", message)
@@ -95,19 +95,20 @@ class RatbagClientTests(unittest.IsolatedAsyncioTestCase):
         """Scanning every process's open files every check bought a wrong answer."""
         from unittest import mock
         from linghub.hardware import diagnose
-        from linghub.hardware.ratbag import DeviceNotFound
+        from linghub.hardware.failures import MouseAbsent
 
         self.bus.values[(ROOT, "Manager", "Devices")] = ("ao", [])
         scan = mock.Mock(side_effect=AssertionError("scanned /proc"))
         with mock.patch.object(diagnose, "find_deleted_hidraw_holders", scan):
-            with self.assertRaises(DeviceNotFound):
+            with self.assertRaises(MouseAbsent):
                 await self.client.find_device()
         scan.assert_not_called()
 
     async def test_rejects_multiple_matching_devices(self):
         self.bus.values[(ROOT, "Manager", "Devices")] = ("ao", ["/device", "/other"])
         self.bus.values[("/other", "Device", "Name")] = ("s", "Another G502")
-        with self.assertRaisesRegex(RuntimeError, "multiple G502"):
+        from linghub.hardware.failures import MouseMisconfigured
+        with self.assertRaisesRegex(MouseMisconfigured, "multiple G502"):
             await self.client.find_device()
 
 

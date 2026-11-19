@@ -8,7 +8,8 @@ writer must call Profile.SetActive and commit again.
 import unittest
 
 from linghub.domain.profile import Binding, Profile
-from linghub.hardware.writer import ProfileWriter, WriteError
+from linghub.hardware.failures import LoadRefused, MouseLost
+from linghub.hardware.writer import ProfileWriter
 
 
 class FakeClient:
@@ -110,13 +111,13 @@ class WriterTests(unittest.IsolatedAsyncioTestCase):
     async def test_raises_when_slot_does_not_become_active(self):
         self.client.fail_activation = True
         profile = Profile(name="desktop", bindings={0: Binding("button", 1)})
-        with self.assertRaisesRegex(WriteError, "did not become active"):
+        with self.assertRaisesRegex(LoadRefused, "did not become active"):
             await self.writer.apply(profile, 1)
 
     async def test_raises_when_report_rate_does_not_take_effect(self):
         self.client.ignore_report_rate = True
         profile = Profile(name="desktop", report_rate=500)
-        with self.assertRaisesRegex(WriteError, "report rate did not take effect"):
+        with self.assertRaisesRegex(LoadRefused, "report rate did not take effect"):
             await self.writer.apply(profile, 0)
 
     async def test_raises_when_the_keycode_does_not_take_effect(self):
@@ -127,7 +128,7 @@ class WriterTests(unittest.IsolatedAsyncioTestCase):
         """
         self.client.ignore_mapping_payload = True
         profile = Profile(name="desktop", bindings={0: Binding("key", "KEY_X")})
-        with self.assertRaisesRegex(WriteError, "button 0"):
+        with self.assertRaisesRegex(LoadRefused, "button 0"):
             await self.writer.apply(profile, 0)
 
     async def test_raises_when_a_macro_does_not_take_effect(self):
@@ -136,7 +137,7 @@ class WriterTests(unittest.IsolatedAsyncioTestCase):
             name="desktop",
             bindings={0: Binding("macro", "+KEY_LEFTCTRL +KEY_C -KEY_C -KEY_LEFTCTRL")},
         )
-        with self.assertRaisesRegex(WriteError, "button 0"):
+        with self.assertRaisesRegex(LoadRefused, "button 0"):
             await self.writer.apply(profile, 0)
 
     async def test_accepts_a_matching_payload(self):
@@ -145,12 +146,12 @@ class WriterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_raises_for_missing_slot(self):
         profile = Profile(name="desktop")
-        with self.assertRaisesRegex(WriteError, "no profile slot 9"):
+        with self.assertRaisesRegex(LoadRefused, "no profile slot 9"):
             await self.writer.apply(profile, 9)
 
     async def test_raises_for_missing_button(self):
         profile = Profile(name="desktop", bindings={9: Binding("button", 1)})
-        with self.assertRaisesRegex(WriteError, "no button 9"):
+        with self.assertRaisesRegex(LoadRefused, "no button 9"):
             await self.writer.apply(profile, 0)
 
 
@@ -171,28 +172,20 @@ class DeviceIdentityTests(unittest.IsolatedAsyncioTestCase):
         self.client.device_name = "Logitech Candy"
 
     async def test_apply_reports_a_replaced_device_not_a_refused_write(self):
-        from linghub.hardware.ratbag import DeviceReplaced
-
-        with self.assertRaises(DeviceReplaced):
+        with self.assertRaises(MouseLost):
             await self.writer.apply(Profile(name="world-of-tanks"), 1)
 
     async def test_apply_writes_nothing_to_the_other_device(self):
-        from linghub.hardware.ratbag import DeviceReplaced
-
-        with self.assertRaises(DeviceReplaced):
+        with self.assertRaises(MouseLost):
             await self.writer.apply(Profile(name="desktop", report_rate=1000), 0)
         self.assertEqual(self.client.calls, [])
 
     async def test_active_slot_reports_a_replaced_device(self):
-        from linghub.hardware.ratbag import DeviceReplaced
-
-        with self.assertRaises(DeviceReplaced):
+        with self.assertRaises(MouseLost):
             await self.writer.active_slot()
 
-    async def test_a_replaced_device_is_not_a_write_error(self):
-        from linghub.hardware.ratbag import DeviceReplaced
-
-        self.assertFalse(issubclass(DeviceReplaced, WriteError))
+    async def test_a_replaced_device_is_lost_not_refused(self):
+        self.assertFalse(issubclass(MouseLost, LoadRefused))
 
 
 
@@ -215,15 +208,13 @@ class ActiveSlotSourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await ProfileWriter(client, FakeDevice()).active_slot(), 1)
 
     async def test_a_replaced_device_is_found_before_the_mouse_is_asked(self):
-        from linghub.hardware.ratbag import DeviceReplaced
-
         class Mouse:
             def active_slot(self):
                 raise AssertionError("asked the mouse behind a replaced path")
 
         client = FakeClient()
         client.device_name = "Logitech Candy"
-        with self.assertRaises(DeviceReplaced):
+        with self.assertRaises(MouseLost):
             await ProfileWriter(client, FakeDevice(), mouse=Mouse()).active_slot()
 
 

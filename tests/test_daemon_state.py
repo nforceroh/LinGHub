@@ -587,3 +587,53 @@ class FingerprintTests(unittest.TestCase):
         state.mark_loaded("desktop")
         state.config = self._config({1: Binding("button", 2), 0: Binding("button", 1)})
         self.assertFalse(state.needs_write)
+
+
+class RefusedLoadTests(unittest.TestCase):
+    """A refused load is not retried until something changes (#8).
+
+    It used to be retried every check, logging an error and possibly
+    rewriting the mouse's flash each time.
+    """
+
+    def _refused(self):
+        state = DaemonState(config=make_config(DESKTOP, WOT))
+        state.mark_refused()
+        return state
+
+    def test_a_refused_target_does_not_need_a_write(self):
+        self.assertFalse(self._refused().needs_write)
+
+    def test_drift_does_not_retry_a_refused_load(self):
+        state = self._refused()
+        state.observe_active_slot(1)
+        self.assertFalse(state.needs_write)
+
+    def test_a_config_change_retries(self):
+        from dataclasses import replace
+
+        state = self._refused()
+        state.config = replace(state.config, poll_interval=3.0)
+        self.assertTrue(state.needs_write)
+
+    def test_a_different_target_is_not_refused(self):
+        state = self._refused()
+        state.request("world-of-tanks")
+        self.assertTrue(state.needs_write)
+
+    def test_the_refused_target_coming_back_is_retried_after_another_loads(self):
+        state = self._refused()
+        state.request("world-of-tanks")
+        state.mark_loaded("world-of-tanks")
+        state.request("desktop")
+        self.assertTrue(state.needs_write, "a successful load ends the refusal")
+
+    def test_clearing_retries(self):
+        """A reconnect clears it: the new connection may accept the load."""
+        state = self._refused()
+        state.clear_refusal()
+        self.assertTrue(state.needs_write)
+
+    def test_the_refusal_is_reported(self):
+        self.assertEqual(self._refused().refused_profile, "desktop")
+        self.assertIsNone(DaemonState(config=make_config(DESKTOP, WOT)).refused_profile)

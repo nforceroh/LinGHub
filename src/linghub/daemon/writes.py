@@ -24,6 +24,7 @@ from typing import Callable
 
 from .. import config as config_module
 from ..domain.profile import Binding
+from ..hardware import mapping
 from .state import DaemonState
 
 logger = logging.getLogger("linghub.writes")
@@ -147,6 +148,8 @@ class Bindings:
             return False
         try:
             binding = Binding(type=kind, value=value)
+            # Saved, an unencodable binding would only fail at write time (#8).
+            mapping.encode(binding)
         except ValueError as exc:
             logger.warning("SetBinding: %s", exc)
             return False

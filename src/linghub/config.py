@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .domain.profile import Binding, Game, Profile
+from .hardware import mapping
 
 
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "linghub" / "config.json"
@@ -45,9 +46,15 @@ def _parse_bindings(raw: dict) -> dict[int, Binding]:
         if not isinstance(value, dict) or "type" not in value:
             raise ConfigError(f"binding {key!r} must be an object with a 'type'")
         try:
-            bindings[index] = Binding(type=value["type"], value=value.get("value"))
+            binding = Binding(type=value["type"], value=value.get("value"))
+            # The encoder is the authority on what the mouse can take. A
+            # binding it rejects used to load fine and crash the daemon on its
+            # first write, and since the config still loaded, systemd
+            # restarted it into the same crash (#8).
+            mapping.encode(binding)
         except ValueError as exc:
             raise ConfigError(f"binding {key!r} is invalid: {exc}") from exc
+        bindings[index] = binding
     return bindings
 
 

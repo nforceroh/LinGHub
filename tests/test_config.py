@@ -135,6 +135,36 @@ class LoadTests(unittest.TestCase):
         self.assertIsNotNone(config.profile_named("world-of-tanks"))
 
 
+class UnencodableBindingTests(unittest.TestCase):
+    """A binding the hardware can't encode is refused on the way in (#8).
+
+    It used to load fine and crash the daemon on its first write, and since
+    the config still loaded, systemd restarted it into the same crash.
+    """
+
+    def _body(self, binding):
+        return {
+            "version": 1,
+            "settings": {"desktop_profile": "desktop"},
+            "profiles": {"desktop": {"games": [], "bindings": {"3": binding}}},
+        }
+
+    def test_an_unknown_key_name_is_rejected_naming_the_button(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ConfigError, r"binding '3' is invalid: .*KEY_BOGUS"):
+                load(write_config(Path(tmp), self._body({"type": "key", "value": "KEY_BOGUS"})))
+
+    def test_an_unknown_key_inside_a_macro_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ConfigError, "KEY_NOPE"):
+                load(write_config(Path(tmp), self._body({"type": "macro", "value": "KEY_A KEY_NOPE"})))
+
+    def test_an_encodable_binding_still_loads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = load(write_config(Path(tmp), self._body({"type": "key", "value": "KEY_F"})))
+        self.assertEqual(config.desktop.bindings[3].value, "KEY_F")
+
+
 class SaveTests(unittest.TestCase):
     """Round-trip: what is written must load back identically.
 
