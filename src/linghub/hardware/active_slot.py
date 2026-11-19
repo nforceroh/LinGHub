@@ -103,7 +103,7 @@ class ActiveSlotReader:
         readings = await self.readings()
 
         if isinstance(readings.answer, NoReading):
-            return self._without_an_answer(readings.answer, readings.believed)
+            return self._without_an_answer(readings)
 
         self._refused = False
         self._host_mode = False
@@ -116,8 +116,9 @@ class ActiveSlotReader:
             self._disagreement = None
         return actual
 
-    def _without_an_answer(self, no_reading: NoReading, believed: int | None) -> int | None:
+    def _without_an_answer(self, readings: SlotReadings) -> int | None:
         """The daemon's verdict when the mouse could not say, logging once."""
+        no_reading, believed = readings.answer, readings.believed
         match no_reading.reason:
             case Reason.UNCONFIRMED_NODE:
                 return believed

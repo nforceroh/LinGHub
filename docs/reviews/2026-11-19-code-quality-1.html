@@ -22,6 +22,9 @@
         <h1 class="font-serif text-3xl">LinGHub — code quality review 1</h1>
         <p class="text-sm text-slate-500">2026-11-19 · <span class="font-mono">main @ 70ec848</span> · scope: the three PRs merged today — <span class="font-mono">#14</span> version value, <span class="font-mono">#15</span> ratbag Mouse adapter, <span class="font-mono">#16</span> absence module</p>
         <p class="text-sm text-slate-600">The three PRs did real work: <span class="font-mono">Absence</span> is a genuine deep module, <span class="font-mono">DaemonVersion</span> is a real value type, and <span class="font-mono">mouse.py</span> collapsed four modules into one with a single decision point. This review is about what they left behind, not about whether they were worth doing.</p>
+        <div class="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm space-y-2">
+          <p><strong class="text-emerald-800">Both confirmed defects are fixed in this PR.</strong> The findings below are kept as written, so the evidence stays with the fix.</p>
+        </div>
         <div class="rounded-md border border-red-200 bg-red-50 p-3 text-sm space-y-2">
           <p><strong class="text-red-700">Two confirmed defects found during the walk.</strong></p>
           <p><strong>1.</strong> A mouse that vanishes between <span class="font-mono">connect()</span> and <span class="font-mono">report_rates()</span> escapes <span class="font-mono">_reconnect</span> and is logged as a daemon bug with a traceback. Reproduced: <span class="font-mono">ESCAPED _reconnect: MouseLost vanished between connect and report_rates</span>.</p>

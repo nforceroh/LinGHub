@@ -57,6 +57,16 @@ def _translated(refused: tuple[type[BaseException], ...] = ()):
         raise MouseLost(str(exc)) from exc
 
 
+async def _report_rates(client: RatbagClient, device: Device) -> list[int]:
+    """The report rates this device accepts, in Hz; empty if unpublished.
+
+    Read by `connect` and handed to the daemon with the mouse, so nothing
+    asks a connected mouse a question that can fail.
+    """
+    with _translated():
+        return await client.report_rates(device)
+
+
 def _payloads_match(actual, expected) -> bool:
     """Compare a mapping payload, tolerating dbus-fast's Variant wrapping.
 
@@ -83,7 +93,8 @@ class WriteError(RuntimeError):
 
 @dataclass(frozen=True)
 class WriteResult:
-    slot: int
+    """What a load changed, so the daemon can say so in its log."""
+
     changed: tuple[str, ...]
 
 
@@ -105,14 +116,6 @@ class RatbagMouse:
     @property
     def device(self) -> Device:
         return self._device
-
-    async def report_rates(self) -> list[int]:
-        """The report rates this device accepts, in Hz; empty if unpublished.
-
-        Raises MouseLost if the mouse is gone.
-        """
-        with _translated():
-            return await self._client.report_rates(self._device)
 
     async def apply(self, profile: Profile, slot: int) -> WriteResult:
         """Write `profile` into `slot`, commit, verify, and activate it.
@@ -204,7 +207,7 @@ class RatbagMouse:
         await self._client.invoke(self._device.path, "Device", "Commit")
         await self._wait_for_commit(path)
 
-        return WriteResult(slot=slot, changed=tuple(changed))
+        return WriteResult(changed=tuple(changed))
 
     async def _write_resolution(self, profile_path: str, index: int, resolution: dict) -> None:
         paths = await self._client.get(profile_path, "Profile", "Resolutions")
@@ -329,15 +332,30 @@ def mouse_for(
     return hidpp.OnboardProfiles(lambda: open_node(node))
 
 
+@dataclass(frozen=True)
+class RatbagConnection:
+    """A mouse that is ready to use, and what it can do.
+
+    The capabilities come back with the mouse rather than from a second call
+    the caller could get wrong: asking a connected mouse for its report rates
+    can fail, and at connect time that is a mouse that isn't there. One
+    connection, one step that can fail.
+    """
+
+    mouse: RatbagMouse
+    report_rates: list[int]
+
+
 async def connect(
     bus, *, sys_root: Path = Path("/sys/class/hidraw")
-) -> RatbagMouse:
-    """Find the G502 through ratbagd and return the mouse behind it.
+) -> RatbagConnection:
+    """Find the G502 through ratbagd and return it ready to use.
 
     The one place that decides whether a connection succeeds: the device is
-    found, then the hidraw node behind it is confirmed, then the mouse is
-    built. Raises MouseAbsent (not found, or a node the kernel already
-    removed) or MouseMisconfigured (two G502s, an unsupported ratbagd), and
+    found, the hidraw node behind it is confirmed, the mouse is built, and
+    its capabilities are read. Raises MouseAbsent (not found, or a node the
+    kernel already removed), MouseMisconfigured (two G502s, an unsupported
+    ratbagd) or MouseLost (the mouse vanished before it could be asked), and
     nothing else on purpose.
     """
     client = RatbagClient(bus)
@@ -345,8 +363,10 @@ async def connect(
     # Before announcing the find: ratbagd can still list a mouse the kernel
     # has removed, and mouse_for raises MouseAbsent for that.
     mouse = mouse_for(device.path, sys_root=sys_root)
-    logger.info("found %s at %s", device.name, device.path)
-    return RatbagMouse(client, device, mouse=mouse)
+    found = RatbagMouse(client, device, mouse=mouse)
+    rates = await _report_rates(client, device)
+    logger.info("found %s at %s (report rates %s)", device.name, device.path, rates)
+    return RatbagConnection(found, rates)
 
 
 class RatbagConnector:
@@ -363,7 +383,7 @@ class RatbagConnector:
         self._sys_root = sys_root
         self._bus = None
 
-    async def connect(self) -> RatbagMouse:
+    async def connect(self) -> RatbagConnection:
         try:
             if self._bus is None:
                 self._bus = await asyncio.wait_for(self._connect_bus(), timeout=5)

@@ -174,7 +174,7 @@ async def _read_mouse() -> MouseReport:
 
     connector = RatbagConnector()
     try:
-        mouse = await connector.connect()
+        mouse = (await connector.connect()).mouse
         readings = await mouse.slot_readings()
     except (MouseAbsent, MouseLost):
         # Only now are held nodes worth a mention: as a lead, never a cause.

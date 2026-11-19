@@ -17,6 +17,7 @@ from linghub.discovery.detector import Detection, Match
 from linghub.discovery.processes import ProcessInfo
 from linghub.domain.profile import Game, Profile
 from linghub.hardware.failures import LoadRefused, MouseAbsent, MouseLost, MouseMisconfigured
+from linghub.hardware.mouse import RatbagConnection
 
 DESKTOP = Profile(name="desktop")
 WOT = Profile(name="world-of-tanks", games=(Game("WorldOfTanks.exe"),))
@@ -47,8 +48,6 @@ class FakeMouse:
         self.attempts = 0
         # What the next active-slot read does: None answers, or raises this.
         self.next_read: Exception | None = None
-        # What the next report_rates call does: None answers, or raises this.
-        self.next_report_rates: Exception | None = None
 
     async def apply(self, profile, slot):
         self.attempts += 1
@@ -65,15 +64,10 @@ class FakeMouse:
             raise error
         return self.active
 
-    async def report_rates(self):
-        if self.next_report_rates is not None:
-            error, self.next_report_rates = self.next_report_rates, None
-            raise error
-        return [125, 250, 500, 1000]
 
 
 class FakeConnector:
-    """Hands out a mouse, or raises MouseAbsent while `present` is False."""
+    """Hands out a mouse with its capabilities, or raises while absent."""
 
     def __init__(self, mouse: FakeMouse | None = None):
         self.mouse = mouse or FakeMouse()
@@ -81,6 +75,9 @@ class FakeConnector:
         self.connects = 0
         # Raised by every connect while set: ratbagd not answering, say.
         self.error: Exception | None = None
+        # What the next connect does after finding the mouse: None succeeds,
+        # or the exception to raise. A mouse that vanishes mid-connect.
+        self.next_connect_error: Exception | None = None
 
     async def connect(self):
         self.connects += 1
@@ -88,7 +85,10 @@ class FakeConnector:
             raise self.error
         if not self.present:
             raise MouseAbsent("no G502 found")
-        return self.mouse
+        if self.next_connect_error is not None:
+            error, self.next_connect_error = self.next_connect_error, None
+            raise error
+        return RatbagConnection(self.mouse, [125, 250, 500, 1000])
 
     def disconnect(self):
         pass
@@ -250,21 +250,21 @@ class MouseLossTests(unittest.TestCase):
         self.assertEqual(h.written, [("desktop", 0)])
 
     def test_a_mouse_lost_during_connect_is_an_absence_not_a_bug(self):
-        """A KVM flick between connect() and report_rates() is a lost mouse.
+        """A KVM flick while connecting is a lost mouse, not a daemon bug.
 
-        report_rates raises MouseLost, which _connect translates into
-        MouseAbsent: the absence starts and warns once, instead of tick's
-        blanket handler logging a traceback.
+        The connector raises MouseLost when the mouse vanishes before its
+        capabilities are read. _reconnect treats that as an absence: it warns
+        once, instead of tick's blanket handler logging a traceback.
         """
         h = DaemonHarness(self)
-        h.mouse.mouse.next_report_rates = MouseLost("vanished between connect and report_rates")
+        h.mouse.next_connect_error = MouseLost("vanished while connecting")
         with self.assertLogs("linghub.daemon", "DEBUG") as logs:
             h.tick()
         errors = [r.getMessage() for r in logs.records if r.levelname == "ERROR"]
         self.assertEqual(errors, [], "a lost mouse was logged as a daemon bug")
         warnings = [r.getMessage() for r in logs.records if r.levelname == "WARNING"]
         self.assertEqual(len(warnings), 1, warnings)
-        self.assertIn("vanished between connect and report_rates", warnings[0])
+        self.assertIn("vanished while connecting", warnings[0])
         self.assertEqual(h.written, [], "nothing to write to while the mouse is away")
 
         h.tick()

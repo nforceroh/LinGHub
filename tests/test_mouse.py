@@ -102,16 +102,16 @@ class FakeDevice:
 class MouseTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.client = FakeClient()
-        self.writer = RatbagMouse(self.client, FakeDevice())
+        self.mouse = RatbagMouse(self.client, FakeDevice())
 
     async def test_activates_the_slot_after_writing(self):
         profile = Profile(name="desktop", bindings={0: Binding("button", 1)})
-        await self.writer.apply(profile, 1)
+        await self.mouse.apply(profile, 1)
         self.assertIn(("/p1", "SetActive"), self.client.calls)
 
     async def test_commits_after_activation(self):
         profile = Profile(name="desktop", bindings={0: Binding("button", 1)})
-        await self.writer.apply(profile, 1)
+        await self.mouse.apply(profile, 1)
         commits = [i for i, call in enumerate(self.client.calls) if call[1] == "Commit"]
         activate = self.client.calls.index(("/p1", "SetActive"))
         self.assertTrue(any(i > activate for i in commits),
@@ -121,13 +121,13 @@ class MouseTests(unittest.IsolatedAsyncioTestCase):
         self.client.fail_activation = True
         profile = Profile(name="desktop", bindings={0: Binding("button", 1)})
         with self.assertRaisesRegex(LoadRefused, "did not become active"):
-            await self.writer.apply(profile, 1)
+            await self.mouse.apply(profile, 1)
 
     async def test_raises_when_report_rate_does_not_take_effect(self):
         self.client.ignore_report_rate = True
         profile = Profile(name="desktop", report_rate=500)
         with self.assertRaisesRegex(LoadRefused, "report rate did not take effect"):
-            await self.writer.apply(profile, 0)
+            await self.mouse.apply(profile, 0)
 
     async def test_raises_when_the_keycode_does_not_take_effect(self):
         """The action type matching is not enough.
@@ -138,7 +138,7 @@ class MouseTests(unittest.IsolatedAsyncioTestCase):
         self.client.ignore_mapping_payload = True
         profile = Profile(name="desktop", bindings={0: Binding("key", "KEY_X")})
         with self.assertRaisesRegex(LoadRefused, "button 0"):
-            await self.writer.apply(profile, 0)
+            await self.mouse.apply(profile, 0)
 
     async def test_raises_when_a_macro_does_not_take_effect(self):
         self.client.ignore_mapping_payload = True
@@ -147,21 +147,21 @@ class MouseTests(unittest.IsolatedAsyncioTestCase):
             bindings={0: Binding("macro", "+KEY_LEFTCTRL +KEY_C -KEY_C -KEY_LEFTCTRL")},
         )
         with self.assertRaisesRegex(LoadRefused, "button 0"):
-            await self.writer.apply(profile, 0)
+            await self.mouse.apply(profile, 0)
 
     async def test_accepts_a_matching_payload(self):
         profile = Profile(name="desktop", bindings={0: Binding("key", "KEY_X")})
-        await self.writer.apply(profile, 0)  # must not raise
+        await self.mouse.apply(profile, 0)  # must not raise
 
     async def test_raises_for_missing_slot(self):
         profile = Profile(name="desktop")
         with self.assertRaisesRegex(LoadRefused, "no profile slot 9"):
-            await self.writer.apply(profile, 9)
+            await self.mouse.apply(profile, 9)
 
     async def test_raises_for_missing_button(self):
         profile = Profile(name="desktop", bindings={9: Binding("button", 1)})
         with self.assertRaisesRegex(LoadRefused, "no button 9"):
-            await self.writer.apply(profile, 0)
+            await self.mouse.apply(profile, 0)
 
 
 
@@ -177,21 +177,21 @@ class DeviceIdentityTests(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         self.client = FakeClient()
-        self.writer = RatbagMouse(self.client, FakeDevice())
+        self.mouse = RatbagMouse(self.client, FakeDevice())
         self.client.device_name = "Logitech Candy"
 
     async def test_apply_reports_a_replaced_device_not_a_refused_write(self):
         with self.assertRaises(MouseLost):
-            await self.writer.apply(Profile(name="world-of-tanks"), 1)
+            await self.mouse.apply(Profile(name="world-of-tanks"), 1)
 
     async def test_apply_writes_nothing_to_the_other_device(self):
         with self.assertRaises(MouseLost):
-            await self.writer.apply(Profile(name="desktop", report_rate=1000), 0)
+            await self.mouse.apply(Profile(name="desktop", report_rate=1000), 0)
         self.assertEqual(self.client.calls, [])
 
     async def test_active_slot_reports_a_replaced_device(self):
         with self.assertRaises(MouseLost):
-            await self.writer.active_slot()
+            await self.mouse.active_slot()
 
     async def test_a_replaced_device_is_lost_not_refused(self):
         self.assertFalse(issubclass(MouseLost, LoadRefused))
@@ -199,7 +199,7 @@ class DeviceIdentityTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ActiveSlotSourceTests(unittest.IsolatedAsyncioTestCase):
-    """The writer's active slot comes from the mouse when it can (#2)."""
+    """The mouse's active slot comes from the device when it can (#2)."""
 
     async def test_the_mouse_answers_over_ratbagd(self):
         class Mouse:
@@ -208,8 +208,8 @@ class ActiveSlotSourceTests(unittest.IsolatedAsyncioTestCase):
 
         client = FakeClient()
         client._active = "/p1"          # ratbagd believes slot 1
-        writer = RatbagMouse(client, FakeDevice(), mouse=Mouse())
-        self.assertEqual(await writer.active_slot(), 0)
+        mouse = RatbagMouse(client, FakeDevice(), mouse=Mouse())
+        self.assertEqual(await mouse.active_slot(), 0)
 
     async def test_without_a_mouse_reader_ratbagd_answers(self):
         client = FakeClient()

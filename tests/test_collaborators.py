@@ -1,8 +1,10 @@
-"""The collaborators must actually satisfy their Protocols.
+"""Every Protocol must actually be satisfied by its implementation.
 
-`collaborators.py` declares what the D-Bus adapter needs; `writes.py` provides
-it. Nothing tied the two together, so a method could be renamed on one side and
-only fail at runtime, on a user's machine, the first time the UI asked for it.
+Two seams are checked: the D-Bus collaborators (`collaborators.py` declares
+what the adapter needs, `writes.py` provides it) and the daemon's hardware
+seam (`Mouse` and `MouseConnector`, implemented by the ratbag adapters).
+Nothing tied either pair together, so a method could be renamed on one side
+and only fail at runtime, on a user's machine.
 
 `runtime_checkable` is not enough on its own: it compares method *names*, so
 dropping a parameter or changing its type would still pass. These tests compare
@@ -60,88 +62,79 @@ SATISFIES = (
 )
 
 
-class ConformanceTests(unittest.TestCase):
+class _Conformance:
+    """The checks every Protocol/implementation pair gets.
+
+    Subclasses say which pairs they cover, and whether the implementation is
+    allowed to be wider than its Protocol.
+    """
+
+    PAIRS: tuple = ()
+    EXHAUSTIVE = False
+
     def test_every_protocol_method_is_implemented(self):
-        for proto, impl in PAIRS:
+        for proto, impl in self.PAIRS:
             for name in _protocol_methods(proto):
                 with self.subTest(protocol=proto.__name__, method=name):
                     self.assertIn(
                         name, _implementation_methods(impl),
                         f"{impl.__name__} does not implement {name}",
+                    )
+
+    def test_signatures_match(self):
+        """A drifted parameter list is the failure a name check misses."""
+        for proto, impl in self.PAIRS:
+            for name, wanted in _protocol_methods(proto).items():
+                with self.subTest(protocol=proto.__name__, method=name):
+                    actual = _implementation_methods(impl)[name]
+                    self.assertEqual(
+                        list(actual.parameters), list(wanted.parameters),
+                        f"{impl.__name__}.{name} takes different arguments",
+                    )
+
+    def test_return_annotations_match(self):
+        for proto, impl in self.PAIRS:
+            for name, wanted in _protocol_methods(proto).items():
+                with self.subTest(protocol=proto.__name__, method=name):
+                    actual = _implementation_methods(impl)[name]
+                    self.assertEqual(
+                        actual.return_annotation, wanted.return_annotation,
+                        f"{impl.__name__}.{name} returns a different type",
                     )
 
     def test_the_implementations_add_nothing_to_their_protocol(self):
         """An extra public method is a member the adapter cannot reach.
 
         It would also mean the Protocol understates the collaborator, so a test
-        fake written from the Protocol would not match the real thing.
+        fake written from the Protocol would not match the real thing. Only
+        the collaborators are held to this: the hardware adapters are wider on
+        purpose, because the CLI uses `slot_readings` and `device`.
         """
-        for proto, impl in PAIRS:
+        if not self.EXHAUSTIVE:
+            self.skipTest("this implementation is deliberately wider")
+        for proto, impl in self.PAIRS:
             with self.subTest(protocol=proto.__name__):
                 extra = sorted(
                     set(_implementation_methods(impl)) - set(_protocol_methods(proto))
                 )
                 self.assertEqual(extra, [], f"{impl.__name__} has unstated members")
 
-    def test_signatures_match(self):
-        """A drifted parameter list is the failure a name check misses."""
-        for proto, impl in PAIRS:
-            for name, wanted in _protocol_methods(proto).items():
-                with self.subTest(protocol=proto.__name__, method=name):
-                    actual = _implementation_methods(impl)[name]
-                    self.assertEqual(
-                        list(actual.parameters), list(wanted.parameters),
-                        f"{impl.__name__}.{name} takes different arguments",
-                    )
 
-    def test_return_annotations_match(self):
-        for proto, impl in PAIRS:
-            for name, wanted in _protocol_methods(proto).items():
-                with self.subTest(protocol=proto.__name__, method=name):
-                    actual = _implementation_methods(impl)[name]
-                    self.assertEqual(
-                        actual.return_annotation, wanted.return_annotation,
-                        f"{impl.__name__}.{name} returns a different type",
-                    )
+class CollaboratorConformanceTests(_Conformance, unittest.TestCase):
+    """`collaborators.py` declares what the D-Bus adapter needs; `writes.py`
+    provides it. Nothing tied the two together, so a method could be renamed
+    on one side and only fail at runtime, on a user's machine."""
+
+    PAIRS = PAIRS
+    EXHAUSTIVE = True
 
 
-class SatisfiesTests(unittest.TestCase):
-    """The hardware adapters must satisfy the daemon's Protocols.
+class AdapterConformanceTests(_Conformance, unittest.TestCase):
+    """The daemon is written against `Mouse` and `MouseConnector`; the
+    adapters are what runs in production. A rename on either side would
+    otherwise only fail on a user's machine."""
 
-    The daemon is written against `Mouse` and `MouseConnector`; the adapters
-    are what runs in production. A rename on either side would otherwise only
-    fail on a user's machine. The adapters are wider on purpose, so only the
-    Protocol's own members are checked.
-    """
-
-    def test_every_protocol_method_is_implemented(self):
-        for proto, impl in SATISFIES:
-            for name in _protocol_methods(proto):
-                with self.subTest(protocol=proto.__name__, method=name):
-                    self.assertIn(
-                        name, _implementation_methods(impl),
-                        f"{impl.__name__} does not implement {name}",
-                    )
-
-    def test_signatures_match(self):
-        for proto, impl in SATISFIES:
-            for name, wanted in _protocol_methods(proto).items():
-                with self.subTest(protocol=proto.__name__, method=name):
-                    actual = _implementation_methods(impl)[name]
-                    self.assertEqual(
-                        list(actual.parameters), list(wanted.parameters),
-                        f"{impl.__name__}.{name} takes different arguments",
-                    )
-
-    def test_return_annotations_match(self):
-        for proto, impl in SATISFIES:
-            for name, wanted in _protocol_methods(proto).items():
-                with self.subTest(protocol=proto.__name__, method=name):
-                    actual = _implementation_methods(impl)[name]
-                    self.assertEqual(
-                        actual.return_annotation, wanted.return_annotation,
-                        f"{impl.__name__}.{name} returns a different type",
-                    )
+    PAIRS = SATISFIES
 
 
 if __name__ == "__main__":

@@ -437,41 +437,43 @@ class MainWindow(Adw.ApplicationWindow):
                 self._led_panel.mark_saved()
             self._status.set_text(f"Updated the lighting of {profile}.")
 
-    async def _write(self, change, *, report, rejected=None, close=None) -> bool:
-        """Run one daemon write and report the outcome.
+    async def _daemon_write(self, failure: str, change) -> bool:
+        """Run one daemon write and report the outcome on the status line.
 
-        Every write path here needs the same shape: run the change, turn a
-        transport error or a `False` return into a message, and only report
-        success (and refresh) when the daemon accepted it. `report` shows a
-        transport error's text; `rejected` is the message for a `False`
-        return, or None to let the change report its own reason; `close` runs
-        on success, for a dialog that should disappear.
+        Run the change, turn a transport error or a `False` return into a
+        status message, and only report success (and refresh) when the daemon
+        accepted it. `change` reports its own rejection reason when it has a
+        more specific one.
         """
         try:
             ok = await change()
         except (RuntimeError, OSError) as exc:
-            report(str(exc))
+            self._status.set_text(f"{failure}: {exc}")
             return False
         if not ok:
-            if rejected is not None:
-                report(rejected)
             return False
-        if close is not None:
-            close()
         await self._refresh_now()
         return True
 
-    async def _daemon_write(self, failure: str, change) -> bool:
-        """Report a failed write on the status line."""
-        return await self._write(
-            change, report=lambda text: self._status.set_text(f"{failure}: {text}")
-        )
-
     async def _dialog_write(self, dialog, rejected: str, change) -> bool:
-        """Report a failed write where the user typed, not behind the window."""
-        return await self._write(
-            change, report=dialog.show_error, rejected=rejected, close=dialog.close
-        )
+        """The same rule for writes whose failures belong in a dialog.
+
+        Create and rename run from a prompt, so a rejection has to appear
+        where the user typed, not on a status line behind the window.
+        `rejected` is the message for a `False` return; a transport error is
+        shown as its own text.
+        """
+        try:
+            ok = await change()
+        except (RuntimeError, OSError) as exc:
+            dialog.show_error(str(exc))
+            return False
+        if not ok:
+            dialog.show_error(rejected)
+            return False
+        dialog.close()
+        await self._refresh_now()
+        return True
 
     def _rebuild_profiles(self) -> None:
         """Make the profile list match the daemon's state, reusing rows.

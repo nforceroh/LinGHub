@@ -54,7 +54,6 @@ class Mouse(Protocol):
     - `apply` raises LoadRefused (keep the mouse, don't retry the same load)
       or MouseLost (reconnect).
     - `active_slot` raises SlotUnknown (skip this check) or MouseLost.
-    - `report_rates` raises MouseLost.
 
     Anything else is a bug: `tick` logs it with its traceback and carries on.
     """
@@ -63,17 +62,27 @@ class Mouse(Protocol):
 
     async def active_slot(self) -> int | None: ...
 
-    async def report_rates(self) -> list[int]: ...
+
+class Connected(Protocol):
+    """A mouse that is ready to use, and what it can do.
+
+    The capabilities come back with the mouse, so connecting is one step that
+    can fail rather than two.
+    """
+
+    mouse: Mouse
+    report_rates: list[int]
 
 
 class MouseConnector(Protocol):
     """Connects to the mouse.
 
-    `connect` raises MouseAbsent (not found, or ratbagd not answering) or
-    MouseMisconfigured (retrying won't help until something changes).
+    `connect` raises MouseAbsent (not found, or ratbagd not answering),
+    MouseMisconfigured (retrying won't help until something changes) or
+    MouseLost (the mouse vanished before it could be asked).
     """
 
-    async def connect(self) -> Mouse: ...
+    async def connect(self) -> Connected: ...
 
     def disconnect(self) -> None: ...
 
@@ -156,18 +165,12 @@ class Daemon:
     async def _connect(self) -> None:
         """Connect, and leave with a mouse or a connection failure.
 
-        `report_rates` can raise MouseLost: the mouse vanished between being
-        found and being asked. At connect time that is a mouse that isn't
-        there, so it joins MouseAbsent rather than escaping as a bug.
+        One step: the connector returns the mouse with its capabilities, so
+        there is no second await that can fail in a different vocabulary.
         """
-        mouse = await self._connector.connect()
-        try:
-            # A missing capability must not stop the daemon: an empty list
-            # just means the UI offers no rate choices.
-            self._report_rates = await mouse.report_rates()
-        except MouseLost as exc:
-            raise MouseAbsent(str(exc)) from exc
-        self._mouse = mouse
+        connected = await self._connector.connect()
+        self._mouse = connected.mouse
+        self._report_rates = connected.report_rates
         logger.info("using the mouse (report rates %s)", self._report_rates)
 
     async def _start_notifications(self) -> None:
@@ -291,6 +294,11 @@ class Daemon:
             # cheap and the condition can go away (one G502 unplugged).
             self._log(self._absence.search_failed(str(exc), level=logging.ERROR))
             return
+        except MouseLost as exc:
+            # The mouse vanished between being found and being asked for its
+            # capabilities. At connect time that is a mouse that isn't there.
+            self._log(self._absence.search_failed(str(exc)))
+            return
 
         # A new connection may accept a load the last one refused.
         if self._state is not None:
@@ -344,7 +352,7 @@ class Daemon:
         self._state.mark_loaded(target.name)
         logger.info(
             "loaded profile %r into slot %d (%s)",
-            target.name, slot, ", ".join(result.changed) or "no changes",
+            target.name, slot, ", ".join(result.changed) or "nothing to change",
         )
 
         self._announce.profile_loaded(target.name)

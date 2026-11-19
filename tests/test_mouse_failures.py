@@ -117,9 +117,12 @@ class WriterTests(unittest.IsolatedAsyncioTestCase):
             await writer.active_slot()
 
     async def test_a_dbus_failure_reading_report_rates_is_a_lost_mouse(self):
-        writer = self._writer(RuntimeError("D-Bus call Get failed"))
+        """connect() reads the capabilities, so a failure there is a lost mouse."""
+        from linghub.hardware import mouse as mouse_module
+
+        client = FailingClient(RuntimeError("D-Bus call Get failed"))
         with self.assertRaises(MouseLost):
-            await writer.report_rates()
+            await mouse_module._report_rates(client, FakeDevice())
 
     async def test_a_bug_is_not_dressed_up_as_an_outcome(self):
         """An error the adapter doesn't recognise propagates: the daemon's
@@ -188,6 +191,17 @@ class ConnectorTests(unittest.IsolatedAsyncioTestCase):
         bus.values[(ROOT, "Manager", "Devices")] = ("ao", [path for path, _ in devices])
         for path, name in devices:
             bus.values[(path, "Device", "Name")] = ("s", name)
+            self._profiles(bus, path)
+
+    @staticmethod
+    def _profiles(bus, device_path):
+        """One profile, so connect() can read the report rates."""
+        profile = device_path + "/profile0"
+        bus.values[(device_path, "Device", "Profiles")] = ("ao", [profile])
+        bus.values[(profile, "Profile", "Index")] = ("u", 0)
+        bus.values[(profile, "Profile", "IsActive")] = ("b", True)
+        bus.values[(profile, "Profile", "Disabled")] = ("b", False)
+        bus.values[(profile, "Profile", "ReportRates")] = ("au", [125, 250, 500, 1000])
 
     def _node(self, name, hid_id="0003:0000046D:0000407F"):
         uevent = self.sys / name / "device" / "uevent"
@@ -198,8 +212,10 @@ class ConnectorTests(unittest.IsolatedAsyncioTestCase):
         bus = FailingBus()
         self._devices(bus, ("/org/freedesktop/ratbag1/device/hidraw31", "Logitech G502"))
         self._node("hidraw31")
-        mouse = await self._connector(bus).connect()
-        self.assertEqual(mouse.device.path, "/org/freedesktop/ratbag1/device/hidraw31")
+        connected = await self._connector(bus).connect()
+        self.assertEqual(
+            connected.mouse.device.path, "/org/freedesktop/ratbag1/device/hidraw31"
+        )
 
     async def test_no_g502_is_absent(self):
         bus = FailingBus()
@@ -269,6 +285,7 @@ class ConnectTests(unittest.IsolatedAsyncioTestCase):
         bus.values[(ROOT, "Manager", "Devices")] = ("ao", [path for path, _ in devices])
         for path, name in devices:
             bus.values[(path, "Device", "Name")] = ("s", name)
+            ConnectorTests._profiles(bus, path)
         return bus
 
     async def test_a_confirmed_mouse_answers_its_slot(self):
@@ -289,9 +306,11 @@ class ConnectTests(unittest.IsolatedAsyncioTestCase):
                 pass
 
         with mock.patch.object(mouse_module.hidpp, "HidrawTransport", lambda path: Node()):
-            mouse = await mouse_module.connect(bus, sys_root=self.sys)
-        self.assertEqual(mouse.device.name, "Logitech G502")
-        self.assertEqual(mouse.device.path, "/org/freedesktop/ratbag1/device/hidraw31")
+            connected = await mouse_module.connect(bus, sys_root=self.sys)
+        self.assertEqual(connected.mouse.device.name, "Logitech G502")
+        self.assertEqual(
+            connected.mouse.device.path, "/org/freedesktop/ratbag1/device/hidraw31"
+        )
 
     async def test_the_race_with_the_kernel_fails_the_connection(self):
         """ratbagd still lists a mouse whose node the kernel already removed."""
@@ -308,8 +327,8 @@ class ConnectTests(unittest.IsolatedAsyncioTestCase):
         bus = self._bus_with(("/org/freedesktop/ratbag1/device/hidraw31", "Logitech G502"))
         self._node("hidraw31", hid_id="0003:00000BDA:00001100")
         with self.assertLogs("linghub.hardware.mouse", "ERROR"):
-            mouse = await mouse_module.connect(bus, sys_root=self.sys)
-        self.assertEqual(mouse.device.name, "Logitech G502")
+            connected = await mouse_module.connect(bus, sys_root=self.sys)
+        self.assertEqual(connected.mouse.device.name, "Logitech G502")
 
     async def test_two_g502s_are_misconfigured(self):
         from linghub.hardware import mouse as mouse_module
@@ -322,8 +341,6 @@ class ConnectTests(unittest.IsolatedAsyncioTestCase):
             await mouse_module.connect(bus, sys_root=self.sys)
 
     async def test_a_ratbagd_that_does_not_answer_is_absent(self):
-        from linghub.hardware import mouse as mouse_module
-
         class DeadBus(FakeBus):
             async def call(self, message):
                 raise RuntimeError("org.freedesktop.DBus.Error.ServiceUnknown")
