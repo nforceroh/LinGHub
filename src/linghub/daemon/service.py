@@ -27,6 +27,7 @@ from ..hardware.failures import (
 from ..hardware.mouse import RatbagConnector, WriteResult
 from ..notify import Notifier, profile_message, refused_message
 from . import slots
+from .absence import Absence, Report
 from .dbus_service import PATH, SERVICE, BusAnnouncer, ManagerInterface
 from .snapshot import View, read_view
 from .state import DaemonState
@@ -105,17 +106,15 @@ class Daemon:
         # Detection and the mouse are injected so a test can say what is
         # running and what the hardware does without a bus or a device.
         self._detector = detector
-        self._mouse = mouse if mouse is not None else RatbagConnector()
+        self._connector = mouse if mouse is not None else RatbagConnector()
         self._bus_announcer = BusAnnouncer()
         self._announce = announce if announce is not None else self._bus_announcer
         self._clock = clock
         # One absence: from losing the mouse (or not finding it at startup)
         # to the next connection. It sets how much the daemon logs (#4).
-        self._absent_since: float | None = None
-        self._absence_reported = False
-        self._connected_before = False
+        self._absence = Absence(clock)
         self._state: DaemonState | None = None
-        self._writer: Mouse | None = None
+        self._mouse: Mouse | None = None
         self._watcher = ConfigWatcher(self._config_path)
         self._wakeup = asyncio.Event()
         self._gamemode: GameModeClient | None = None
@@ -156,11 +155,11 @@ class Daemon:
         return True
 
     async def _connect(self) -> None:
-        mouse = await self._mouse.connect()
+        mouse = await self._connector.connect()
         # A missing capability must not stop the daemon: an empty list just
         # means the UI offers no rate choices.
         self._report_rates = await mouse.report_rates()
-        self._writer = mouse
+        self._mouse = mouse
         logger.info("using the mouse (report rates %s)", self._report_rates)
 
     async def _start_notifications(self) -> None:
@@ -273,52 +272,41 @@ class Daemon:
         about 8 s and held back GameMode wake-ups while the mouse was on
         another machine (#4). A brief KVM flick is caught by the next check.
         """
-        self._writer = None
+        self._mouse = None
         try:
             await self._connect()
         except MouseAbsent as exc:
-            self._report_absence(str(exc))
+            self._log(self._absence.search_failed(str(exc)))
             return
         except MouseMisconfigured as exc:
             # Retrying won't help until something changes, but searching is
             # cheap and the condition can go away (one G502 unplugged).
-            self._report_absence(str(exc), level=logging.ERROR)
+            self._log(self._absence.search_failed(str(exc), level=logging.ERROR))
             return
 
         # A new connection may accept a load the last one refused.
         if self._state is not None:
             self._state.clear_refusal()
 
-        if self._connected_before and self._absent_since is not None:
-            away = _duration(self._clock() - self._absent_since)
-            logger.info("device is back after %s", away)
-        self._connected_before = True
-        self._absent_since = None
-        self._absence_reported = False
+        self._log(self._absence.found())
 
-    def _lose_mouse(self) -> None:
+    def _lose_mouse(self, message: str) -> None:
         """Drop the mouse and start an absence, if one hasn't started."""
-        self._writer = None
-        if self._absent_since is None:
-            self._absent_since = self._clock()
-            self._absence_reported = False
+        self._mouse = None
+        self._log(self._absence.lost(message))
 
-    def _report_absence(self, message: str, level: int = logging.WARNING) -> None:
-        """Log once per absence; every later failed search is debug."""
-        if self._absent_since is None:
-            self._absent_since = self._clock()
-        if self._absence_reported:
-            logger.debug("%s", message)
-            return
-        logger.log(level, "%s", message)
-        self._absence_reported = True
+    @staticmethod
+    def _log(report: Report) -> None:
+        """Say what the absence module decided, if it decided anything."""
+        if report.message is not None:
+            logger.log(report.level, "%s", report.message)
 
     async def _apply_target(self) -> None:
         """Load the target profile if it differs from what is loaded."""
         assert self._state is not None
-        if self._writer is None:
+        if self._mouse is None:
             await self._reconnect()
-        if self._writer is None:
+        if self._mouse is None:
             # Still absent: nothing to write to. Detection keeps running and
             # the next tick tries again.
             return
@@ -330,7 +318,7 @@ class Daemon:
         slot = slots.slot_for(target)
 
         try:
-            result = await self._writer.apply(target, slot)
+            result = await self._mouse.apply(target, slot)
         except LoadRefused as exc:
             # Not a missing mouse: keep it. Retrying the same load would be
             # refused again, flooding the log and maybe rewriting flash, so
@@ -342,8 +330,7 @@ class Daemon:
         except MouseLost as exc:
             # A KVM switch, an unplugged cable, a flat battery: drop the
             # stale mouse; the next check looks for it again.
-            logger.warning("lost the device while writing: %s", exc)
-            self._lose_mouse()
+            self._lose_mouse(f"lost the device while writing: {exc}")
             return
 
         self._state.mark_loaded(target.name)
@@ -402,10 +389,10 @@ class Daemon:
         active slot and the daemon would never correct it.
         """
         assert self._state is not None
-        if self._writer is None:
+        if self._mouse is None:
             return
         try:
-            active = await self._writer.active_slot()
+            active = await self._mouse.active_slot()
         except SlotUnknown as exc:
             # The mouse could not say (asleep, out of range, host mode). Not
             # drift, so no reload, and not lost, so no reconnect: the next
@@ -419,8 +406,7 @@ class Daemon:
             # the only call that touches the mouse, so drop the stale mouse
             # here; _apply_target reconnects in this same tick. An unreadable
             # slot is not drift, so nothing is rewritten on its account.
-            logger.warning("lost the device: %s", exc)
-            self._lose_mouse()
+            self._lose_mouse(f"lost the device: {exc}")
             return
 
         before = self._state.needs_write
@@ -484,20 +470,8 @@ class Daemon:
             self._gamemode.disconnect()
             if self._session_bus is not None:
                 self._session_bus.disconnect()
-            self._mouse.disconnect()
+            self._connector.disconnect()
 
     def _wake(self) -> None:
         """Ask the run loop to tick now rather than at the next interval."""
         self._wakeup.set()
-
-
-def _duration(seconds: float) -> str:
-    """A short human duration: 45s, 3m 12s, 1h 2m."""
-    seconds = int(seconds)
-    if seconds < 60:
-        return f"{seconds}s"
-    minutes, seconds = divmod(seconds, 60)
-    if minutes < 60:
-        return f"{minutes}m {seconds}s"
-    hours, minutes = divmod(minutes, 60)
-    return f"{hours}h {minutes}m"
