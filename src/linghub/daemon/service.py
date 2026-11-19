@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 from typing import Callable, Protocol
 
@@ -85,7 +86,7 @@ class Daemon:
         detector: Callable[[list], Detection] = detect,
         mouse: MouseConnector | None = None,
         announce: Announcer | None = None,
-        reconnect_delay: float = 1.0,
+        clock: Callable[[], float] = time.monotonic,
     ):
         self._config_path = Path(config_path)
         self._poll_interval = poll_interval
@@ -95,7 +96,12 @@ class Daemon:
         self._mouse = mouse if mouse is not None else RatbagConnector()
         self._bus_announcer = BusAnnouncer()
         self._announce = announce if announce is not None else self._bus_announcer
-        self._reconnect_delay = reconnect_delay
+        self._clock = clock
+        # One absence: from losing the mouse (or not finding it at startup)
+        # to the next connection. It sets how much the daemon logs (#4).
+        self._absent_since: float | None = None
+        self._absence_reported = False
+        self._connected_before = False
         self._state: DaemonState | None = None
         self._writer: Mouse | None = None
         self._watcher = ConfigWatcher(self._config_path)
@@ -235,26 +241,49 @@ class Daemon:
         logger.info("reloaded config: %d profile(s)", len(config.profiles))
         self._announce.config_changed()
 
-    async def _reconnect(self, attempts: int = 3) -> None:
-        """Try to reconnect to the device after it disappeared.
+    async def _reconnect(self) -> None:
+        """Look for the mouse once, without waiting.
 
-        Bounded rather than looping until the device returns: blocking here
-        would stop the tick loop, so games would stop being detected while the
-        mouse is unplugged. A few quick attempts handle a KVM flick; a longer
-        absence is picked up by the next tick.
+        One attempt per check, and no sleeping: the search costs a few D-Bus
+        calls, and waiting between retries inside a check slowed detection to
+        about 8 s and held back GameMode wake-ups while the mouse was on
+        another machine (#4). A brief KVM flick is caught by the next check.
         """
         self._writer = None
-        for attempt in range(attempts):
-            try:
-                await self._connect()
-                if attempt:
-                    logger.info("device is back")
-                return
-            except DeviceNotFound as exc:
-                if attempt == 0:
-                    logger.warning("%s; will retry", exc)
-                await asyncio.sleep(self._reconnect_delay * (attempt + 1))
-        logger.warning("device still absent; detection continues without it")
+        try:
+            await self._connect()
+        except DeviceNotFound as exc:
+            self._report_absence(str(exc))
+            return
+        except (RuntimeError, OSError, DBusFastError) as exc:
+            # ratbagd itself is down or broken: the mouse is just as out of
+            # reach, and one warning says so better than an error per check.
+            self._report_absence(f"cannot reach the mouse through ratbagd: {exc}")
+            return
+
+        if self._connected_before and self._absent_since is not None:
+            away = _duration(self._clock() - self._absent_since)
+            logger.info("device is back after %s", away)
+        self._connected_before = True
+        self._absent_since = None
+        self._absence_reported = False
+
+    def _lose_mouse(self) -> None:
+        """Drop the mouse and start an absence, if one hasn't started."""
+        self._writer = None
+        if self._absent_since is None:
+            self._absent_since = self._clock()
+            self._absence_reported = False
+
+    def _report_absence(self, message: str) -> None:
+        """Warn once per absence; every later failed search is debug."""
+        if self._absent_since is None:
+            self._absent_since = self._clock()
+        if self._absence_reported:
+            logger.debug("%s", message)
+            return
+        logger.warning("%s", message)
+        self._absence_reported = True
 
     async def _apply_target(self) -> None:
         """Load the target profile if it differs from what is loaded."""
@@ -286,7 +315,7 @@ class Daemon:
             # flat battery. The writer is stale, so drop it and reconnect
             # rather than letting this escape and killing the daemon.
             logger.warning("lost the device while writing: %s", exc)
-            self._writer = None
+            self._lose_mouse()
             return
 
         self._state.mark_loaded(target.name)
@@ -353,7 +382,7 @@ class Daemon:
             # here; _apply_target reconnects in this same tick. An unreadable
             # slot is not drift, so nothing is rewritten on its account.
             logger.warning("lost the device: %s", exc)
-            self._writer = None
+            self._lose_mouse()
             return
 
         before = self._state.needs_write
@@ -385,12 +414,8 @@ class Daemon:
 
         # Try once rather than looping here: blocking would stop the tick loop,
         # so games would go undetected for as long as the mouse was absent.
-        # _apply_target reconnects on each tick until the device appears.
-        try:
-            await self._connect()
-        except DeviceNotFound as exc:
-            logger.warning("%s", exc)
-            logger.info("detection will run without the device until it appears")
+        # _apply_target looks again on each tick until the device appears.
+        await self._reconnect()
 
         # GameMode is an accelerator: when it fires, run a tick immediately
         # instead of waiting for the next poll. When it is absent the poll
@@ -423,3 +448,15 @@ class Daemon:
     def _wake(self) -> None:
         """Ask the run loop to tick now rather than at the next interval."""
         self._wakeup.set()
+
+
+def _duration(seconds: float) -> str:
+    """A short human duration: 45s, 3m 12s, 1h 2m."""
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, seconds = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {seconds}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}m"

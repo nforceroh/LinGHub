@@ -72,9 +72,13 @@ class FakeConnector:
         self.mouse = mouse or FakeMouse()
         self.present = True
         self.connects = 0
+        # Raised by every connect while set: ratbagd not answering, say.
+        self.error: Exception | None = None
 
     async def connect(self):
         self.connects += 1
+        if self.error is not None:
+            raise self.error
         if not self.present:
             raise DeviceNotFound("no G502 found")
         return self.mouse
@@ -117,12 +121,13 @@ class DaemonHarness:
         self.detection = running()
         self.mouse = FakeConnector()
         self.announced = Recorder()
+        self.now = 1000.0
         self.daemon = Daemon(
             config_path=self.path,
             detector=lambda _profiles: self.detection,
             mouse=self.mouse,
             announce=self.announced,
-            reconnect_delay=0,
+            clock=lambda: self.now,
         )
         case.assertTrue(self.daemon.load_config())
 
@@ -284,7 +289,7 @@ class MouseLossTests(unittest.TestCase):
         h = DaemonHarness(self)
         h.mouse.present = False
         h.tick()  # must return, not raise
-        self.assertEqual(h.mouse.connects, 3, "reconnecting should give up")
+        self.assertEqual(h.mouse.connects, 1, "one attempt per check (#4)")
         self.assertEqual(h.written, [])
 
     def test_a_mouse_that_appears_later_gets_the_profile(self):
@@ -294,6 +299,114 @@ class MouseLossTests(unittest.TestCase):
         h.mouse.present = True
         h.tick()
         self.assertEqual(h.written, [("desktop", 0)])
+
+
+
+class AbsenceTests(unittest.TestCase):
+    """While the mouse is away, checks keep their pace and the log stays quiet (#4).
+
+    A KVM switch can leave the mouse on another machine for minutes. Sleeping
+    between retries inside a check slowed detection to about 8 s and held
+    back GameMode wake-ups; logging every check filled the journal.
+    """
+
+    def _absent(self, h):
+        """Connect once, then lose the mouse the way a KVM switch does."""
+        h.tick()
+        h.mouse.mouse.next_read = RuntimeError("D-Bus call Get failed: Unknown object")
+        h.mouse.present = False
+
+    def _logs(self, level="DEBUG"):
+        return self.assertLogs("linghub.daemon", level)
+
+    @staticmethod
+    def _at(logs, level):
+        return [r.getMessage() for r in logs.records if r.levelname == level]
+
+    def test_each_check_makes_one_attempt_and_never_sleeps(self):
+        from unittest import mock
+
+        h = DaemonHarness(self)
+        self._absent(h)
+        with mock.patch("asyncio.sleep", side_effect=AssertionError("slept in a check")):
+            for _ in range(3):
+                h.tick()
+        self.assertEqual(h.mouse.connects, 4, "the first connect, then one per check")
+
+    def test_one_absence_logs_two_warnings_and_one_back_line(self):
+        h = DaemonHarness(self)
+        self._absent(h)
+        with self._logs() as logs:
+            for _ in range(6):
+                h.tick()
+            h.mouse.present = True
+            h.tick()
+        warnings = self._at(logs, "WARNING")
+        self.assertEqual(len(warnings), 2, warnings)
+        self.assertIn("lost the device", warnings[0])
+        self.assertIn("no G502 found", warnings[1])
+        backs = [m for m in self._at(logs, "INFO") if "device is back" in m]
+        self.assertEqual(len(backs), 1, logs.output)
+
+    def test_the_back_line_says_how_long_the_mouse_was_away(self):
+        h = DaemonHarness(self)
+        self._absent(h)
+        h.tick()                      # lost at t=1000
+        h.now += 192
+        h.mouse.present = True
+        with self._logs("INFO") as logs:
+            h.tick()
+        self.assertIn("device is back after 3m 12s", "\n".join(logs.output))
+
+    def test_a_second_absence_warns_again(self):
+        h = DaemonHarness(self)
+        self._absent(h)
+        h.tick()
+        h.mouse.present = True
+        h.tick()                      # back
+        h.mouse.mouse.next_read = RuntimeError("D-Bus call Get failed: Unknown object")
+        h.mouse.present = False
+        with self._logs("WARNING") as logs:
+            h.tick()
+            h.tick()
+        self.assertEqual(len(logs.records), 2, logs.output)
+
+    def test_a_mouse_missing_at_startup_warns_once_and_has_no_back_line(self):
+        """At startup the connector's "found ..." line is the "back" line."""
+        h = DaemonHarness(self)
+        h.mouse.present = False
+        with self._logs() as logs:
+            for _ in range(4):
+                h.tick()
+            h.mouse.present = True
+            h.tick()
+        self.assertEqual(len(self._at(logs, "WARNING")), 1, logs.output)
+        self.assertFalse(any("device is back" in m for m in self._at(logs, "INFO")))
+        self.assertEqual(h.written, [("desktop", 0)])
+
+    def test_ratbagd_down_is_an_absence_not_a_failed_check(self):
+        h = DaemonHarness(self)
+        h.mouse.error = RuntimeError(
+            "D-Bus call Get failed: org.freedesktop.DBus.Error.ServiceUnknown"
+        )
+        with self._logs() as logs:
+            for _ in range(4):
+                h.tick()
+        self.assertEqual(self._at(logs, "ERROR"), [], "a check failed outright")
+        warnings = self._at(logs, "WARNING")
+        self.assertEqual(len(warnings), 1, warnings)
+        self.assertIn("ratbagd", warnings[0])
+
+    def test_the_mouse_is_found_on_the_check_after_it_returns(self):
+        h = DaemonHarness(self)
+        self._absent(h)
+        h.tick()
+        h.tick()
+        h.mouse.present = True
+        before = h.mouse.connects
+        h.tick()
+        self.assertEqual(h.mouse.connects, before + 1)
+        self.assertEqual(h.written[-1], ("desktop", 0))
 
 
 class AnnouncementTests(unittest.TestCase):
@@ -428,6 +541,25 @@ class StartupTests(unittest.TestCase):
         with self.assertRaises(KeyboardInterrupt):
             asyncio.run(h.daemon.run())
         self.assertEqual(exported["n"], 1, "the interface was not published")
+
+    def test_startup_survives_ratbagd_being_down(self):
+        """It used to catch only DeviceNotFound, so ratbagd being down
+        stopped the daemon before it detected anything (#4)."""
+        h = DaemonHarness(self)
+        h.mouse.error = RuntimeError("D-Bus call Get failed: ServiceUnknown")
+
+        async def nothing():
+            pass
+
+        h.daemon._export_interface = nothing
+        h.daemon._start_notifications = nothing
+
+        def stop(_profiles):
+            raise KeyboardInterrupt
+
+        h.daemon._detector = stop
+        with self.assertRaises(KeyboardInterrupt):  # reached detection, not RuntimeError
+            asyncio.run(h.daemon.run())
 
 
 if __name__ == "__main__":
