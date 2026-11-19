@@ -273,6 +273,7 @@ validate is never written over.
 src/linghub/
 ├── domain/          Profile, Game, Binding — pure, no I/O
 ├── hardware/        ratbagd: reading, encoding, writing and verifying
+│   ├── mouse.py     the mouse as the daemon sees it: connect, write, verify, read the slot
 │   ├── failures.py  what can go wrong, in the daemon's terms: absent, lost, refused…
 │   ├── hidpp.py     asks the mouse itself which slot it is on (ADR-0010)
 │   └── active_slot.py    the mouse's answer over ratbagd's, and what a failed read means

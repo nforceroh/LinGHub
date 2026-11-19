@@ -18,11 +18,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Awaitable, Callable, Protocol
 
 from . import hidpp
-from .failures import MouseAbsent, SlotUnknown
+from .failures import SlotUnknown
 
 logger = logging.getLogger(__name__)
 
@@ -121,33 +120,3 @@ class ActiveSlotReader:
         else:
             self._disagreement = None
         return actual
-
-
-def mouse_for(
-    device_path: str,
-    sys_root: Path = Path("/sys/class/hidraw"),
-    open_node: Callable[[Path], hidpp.Transport] = hidpp.HidrawTransport,
-) -> hidpp.OnboardProfiles | None:
-    """A reader for the mouse behind a confirmed ratbagd device, or None.
-
-    None when the node exists but cannot be confirmed as a Logitech device:
-    reading it could read another device, so the daemon falls back to
-    ratbagd's answer for this connection and says so once, loudly.
-
-    Raises MouseAbsent when the node is already gone, so connecting fails
-    as it would for any missing mouse.
-    """
-    try:
-        node = hidpp.node_for(device_path, sys_root=sys_root)
-    except hidpp.NodeGone as exc:
-        # ratbagd still lists a mouse the kernel has removed: the mouse is
-        # still missing, so this connection fails and the absence goes on.
-        from .ratbag import NOT_FOUND
-
-        raise MouseAbsent(NOT_FOUND) from exc
-    except hidpp.NodeMismatch as exc:
-        logger.error(
-            "cannot read the active slot from the mouse: %s; using ratbagd's answer", exc
-        )
-        return None
-    return hidpp.OnboardProfiles(lambda: open_node(node))

@@ -24,7 +24,7 @@ from ..domain.profile import Profile
 from ..hardware.failures import (
     LoadRefused, MouseAbsent, MouseLost, MouseMisconfigured, SlotUnknown,
 )
-from ..hardware.writer import RatbagConnector, WriteResult
+from ..hardware.mouse import RatbagConnector, WriteResult
 from ..notify import Notifier, profile_message, refused_message
 from . import slots
 from .dbus_service import PATH, SERVICE, BusAnnouncer, ManagerInterface

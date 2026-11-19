@@ -152,7 +152,7 @@ class MouseForTests(unittest.TestCase):
 
     def test_a_logitech_node_gets_a_mouse_reader_on_that_node(self):
         from pathlib import Path
-        from linghub.hardware.active_slot import mouse_for
+        from linghub.hardware.mouse import mouse_for
 
         self._node("hidraw31", "0003:0000046D:0000407F")
         opened = []
@@ -171,7 +171,7 @@ class MouseForTests(unittest.TestCase):
         """Seen live: the kernel had removed hidraw31 but ratbagd still listed
         it, so the daemon "reconnected" to a mouse on the other machine,
         logged an error, and announced it back after 0 s."""
-        from linghub.hardware.active_slot import mouse_for
+        from linghub.hardware.mouse import mouse_for
         from linghub.hardware.failures import MouseAbsent
         from linghub.hardware.ratbag import NOT_FOUND
 
@@ -181,10 +181,10 @@ class MouseForTests(unittest.TestCase):
         self.assertEqual(str(raised.exception), NOT_FOUND)
 
     def test_an_unconfirmed_node_falls_back_to_ratbagd_loudly(self):
-        from linghub.hardware.active_slot import mouse_for
+        from linghub.hardware.mouse import mouse_for
 
         self._node("hidraw31", "0003:00000BDA:00001100")
-        with self.assertLogs("linghub.hardware.active_slot", "ERROR"):
+        with self.assertLogs("linghub.hardware.mouse", "ERROR"):
             mouse = mouse_for("/org/freedesktop/ratbag1/device/hidraw31", sys_root=self.sys)
         self.assertIsNone(mouse)
 
