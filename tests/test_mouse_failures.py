@@ -123,6 +123,31 @@ class WriterTests(unittest.IsolatedAsyncioTestCase):
             await writer.apply(Profile(name="desktop"), 0)
 
 
+class SlotReadingsTests(unittest.IsolatedAsyncioTestCase):
+    """The writer's public view of both answers, for `linghub status` (#5)."""
+
+    async def test_both_answers(self):
+        class Mouse:
+            def active_slot(self):
+                return 0
+
+        client = FailingClient()
+        client._active = "/p1"                    # ratbagd believes slot 1
+        readings = await ProfileWriter(client, FakeDevice(), mouse=Mouse()).slot_readings()
+        self.assertEqual((readings.mouse, readings.believed), (0, 1))
+
+    async def test_a_replaced_device_is_a_lost_mouse(self):
+        client = FailingClient()
+        client.device_name = "Logitech Candy"
+        with self.assertRaises(MouseLost):
+            await ProfileWriter(client, FakeDevice()).slot_readings()
+
+    async def test_a_dbus_failure_is_a_lost_mouse(self):
+        writer = ProfileWriter(FailingClient(RuntimeError("D-Bus call Get failed")), FakeDevice())
+        with self.assertRaises(MouseLost):
+            await writer.slot_readings()
+
+
 class FailingBus(FakeBus):
     def __init__(self, error=None):
         super().__init__()

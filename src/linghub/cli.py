@@ -2,8 +2,10 @@
 
 import argparse
 import asyncio
+import logging
 import sys
 import time
+from dataclasses import dataclass
 
 from dbus_fast import BusType
 from dbus_fast.aio import MessageBus
@@ -12,6 +14,7 @@ from dbus_fast.errors import DBusFastError
 from . import config as config_module
 from . import version
 from .discovery.detector import Detection, detect
+from .hardware.active_slot import SlotReadings
 from .hardware.ratbag import RatbagClient
 
 
@@ -99,9 +102,19 @@ def _run_daemon(args: argparse.Namespace) -> int:
 
 
 def _run_status() -> int:
-    """Ask the running daemon for its state over the session bus."""
+    """Report what the daemon is doing, then what the mouse itself says (#5).
+
+    The mouse section is read here, not taken from the daemon: it is for
+    seeing the truth when the daemon is down or wrong. It never changes the
+    exit status, which still says whether the daemon answered.
+    """
     from . import daemon_access
 
+    # The hardware code logs disagreements and warnings for the daemon's
+    # journal; here they'd be stray lines around the report.
+    logging.getLogger("linghub").setLevel(logging.ERROR)
+
+    status = 0
     try:
         state = daemon_access.state()
     except daemon_access.DaemonUnavailable as exc:
@@ -109,19 +122,115 @@ def _run_status() -> int:
             f"Error: the daemon is not running or not answering ({exc}).",
             file=sys.stderr,
         )
-        return 1
+        state, status = None, 1
     except (RuntimeError, OSError) as exc:
         # A failure inside the call is not a missing daemon, so say so.
         print(f"Error: {exc}", file=sys.stderr)
-        return 1
+        state, status = None, 1
 
-    print(format_status(
-        active=state.active_profile,
-        detected=state.detected_game or None,
-        desktop=state.desktop_profile,
-        profiles=state.profiles,
-    ))
-    return 0
+    if state is not None:
+        print(format_status(
+            active=state.active_profile,
+            detected=state.detected_game or None,
+            desktop=state.desktop_profile,
+            profiles=state.profiles,
+        ))
+        names = slot_names(desktop=state.desktop_profile, loaded=state.active_profile or None)
+    else:
+        names = slot_names(desktop=_desktop_from_config(), loaded=None)
+
+    if state is not None:
+        print()
+    print(format_mouse(asyncio.run(_read_mouse()), names))
+    return status
+
+
+def _desktop_from_config() -> str | None:
+    """The desktop profile's name from the config file, for when the daemon is down."""
+    try:
+        return config_module.load(config_module.DEFAULT_CONFIG_PATH).desktop_profile
+    except (config_module.ConfigError, OSError):
+        return None
+
+
+@dataclass(frozen=True)
+class MouseReport:
+    """What `status` found when it asked the mouse itself (#5)."""
+
+    name: str | None = None
+    node: str | None = None
+    readings: "SlotReadings | None" = None
+    absent: bool = False
+    misconfigured: str | None = None
+    holders: tuple = ()
+
+
+async def _read_mouse() -> MouseReport:
+    """Find the G502 and ask it, through the adapter the daemon uses."""
+    from .hardware import diagnose
+    from .hardware.failures import MouseAbsent, MouseLost, MouseMisconfigured
+    from .hardware.writer import RatbagConnector
+
+    connector = RatbagConnector()
+    try:
+        mouse = await connector.connect()
+        readings = await mouse.slot_readings()
+    except (MouseAbsent, MouseLost):
+        # Only now are held nodes worth a mention: as a lead, never a cause.
+        return MouseReport(absent=True, holders=tuple(diagnose.find_deleted_hidraw_holders()))
+    except MouseMisconfigured as exc:
+        return MouseReport(misconfigured=str(exc))
+    finally:
+        connector.disconnect()
+    node = "/dev/" + mouse.device.path.rstrip("/").rsplit("/", 1)[-1]
+    return MouseReport(name=mouse.device.name, node=node, readings=readings)
+
+
+def slot_names(*, desktop: str | None, loaded: str | None) -> dict[int, str]:
+    """Which profile each slot holds, as far as `status` can know.
+
+    Slot 0 always holds the desktop profile. Slot 1 holds whichever gaming
+    profile the daemon last loaded, which only the daemon knows.
+    """
+    names: dict[int, str] = {}
+    if desktop:
+        names[0] = desktop
+    if loaded and loaded != desktop:
+        names[1] = loaded
+    return names
+
+
+def format_mouse(report: MouseReport, names: dict[int, str]) -> str:
+    """Render the mouse section of `status`."""
+    if report.misconfigured is not None:
+        return f"Mouse          : {report.misconfigured}"
+    if report.absent or report.readings is None:
+        lines = ["Mouse          : not found (KVM, unplugged or asleep)"]
+        if report.holders:
+            lines.append(
+                "Processes holding deleted device nodes (a possible lead, often harmless):"
+            )
+            lines.extend(f"  pid {h.pid} {h.command} ({h.node})" for h in report.holders)
+        return "\n".join(lines)
+
+    def slot(number: int | None) -> str:
+        if number is None:
+            return "none"
+        return f"{number} ({names[number]})" if number in names else str(number)
+
+    r = report.readings
+    ratbagd = f"ratbagd says {slot(r.believed)}"
+    if r.reason is None:
+        value = slot(r.mouse) + ("" if r.mouse == r.believed else f" · {ratbagd}")
+    elif r.reason == "no answer":
+        value = f"unknown (the mouse did not answer; asleep?) · {ratbagd}"
+    elif r.reason == "host mode":
+        value = "none (host mode: another tool controls the mouse)"
+    elif r.reason == "no permission":
+        value = f"{slot(r.believed)} · ratbagd's answer; no permission to read the mouse"
+    else:
+        value = f"{slot(r.believed)} · ratbagd's answer; the device node could not be confirmed"
+    return f"Mouse          : {report.name} on {report.node}\nActive slot    : {value}"
 
 
 async def _run_hardware(args: argparse.Namespace) -> None:
