@@ -1,12 +1,16 @@
-"""Diagnose why ratbagd cannot see the mouse.
+"""Find processes holding a deleted /dev/hidraw node: a possible lead.
 
-The common cause is a stale Wine or Proton process still holding a deleted
-/dev/hidraw node. The kernel keeps the node alive for that process, so the
-device does not reappear until the process exits, even after replugging the
-receiver.
+When a device goes away while a process has its hidraw node open, the node
+lives on, deleted, until that process closes it. Wine does this routinely for
+the devices a game uses.
 
-Naming the offending process turns a silent "no G502 found" into something
-the user can act on.
+This used to be presented as "the usual cause" of a missing mouse, with
+advice to kill the holder. The evidence says otherwise: on 2026-11-19 Wine
+held a deleted /dev/hidraw15 for over an hour while the G502 came back on its
+own after two KVM switches, each time on a new node number. So the daemon no
+longer mentions holders (#3). An on-demand diagnostic may list them as a lead
+for when the mouse genuinely will not come back (#5), and should never advise
+killing a process, which is usually the game being played.
 """
 
 from __future__ import annotations
@@ -71,22 +75,3 @@ def find_deleted_hidraw_holders() -> list[HidrawHolder]:
             break
 
     return holders
-
-
-def describe_failure() -> str:
-    """A human-readable explanation of why the device is missing."""
-    holders = find_deleted_hidraw_holders()
-    if not holders:
-        return (
-            "no G502 found and no stale hidraw holders detected. "
-            "Check that the mouse is connected and ratbagd is running."
-        )
-
-    lines = [
-        "no G502 found: these processes hold deleted /dev/hidraw nodes, "
-        "which prevents the device from reappearing:",
-    ]
-    for holder in holders:
-        lines.append(f"  pid {holder.pid}: {holder.command} (holding {holder.node})")
-    lines.append("Kill them, then replug the mouse receiver.")
-    return "\n".join(lines)

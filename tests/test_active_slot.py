@@ -167,6 +167,18 @@ class MouseForTests(unittest.TestCase):
             pass
         self.assertEqual(opened, [Path("/dev/hidraw31")])
 
+    def test_a_gone_node_means_the_mouse_is_still_missing(self):
+        """Seen live: the kernel had removed hidraw31 but ratbagd still listed
+        it, so the daemon "reconnected" to a mouse on the other machine,
+        logged an error, and announced it back after 0 s."""
+        from linghub.hardware.active_slot import mouse_for
+        from linghub.hardware.ratbag import NOT_FOUND, DeviceNotFound
+
+        with self.assertNoLogs("linghub.hardware.active_slot", "ERROR"):
+            with self.assertRaises(DeviceNotFound) as raised:
+                mouse_for("/org/freedesktop/ratbag1/device/hidraw31", sys_root=self.sys)
+        self.assertEqual(str(raised.exception), NOT_FOUND)
+
     def test_an_unconfirmed_node_falls_back_to_ratbagd_loudly(self):
         from linghub.hardware.active_slot import mouse_for
 

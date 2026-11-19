@@ -68,6 +68,15 @@ class NodeMismatch(Exception):
     """The node the ratbagd path names cannot be confirmed as a Logitech device."""
 
 
+class NodeGone(Exception):
+    """The node the ratbagd path names no longer exists.
+
+    ratbagd lags the kernel by about 2 s when a device goes, so for a moment
+    it still lists a mouse whose node the kernel has removed. The mouse is
+    gone, not unconfirmed. Deliberately not a NodeMismatch.
+    """
+
+
 class Transport(Protocol):
     def write(self, data: bytes) -> None: ...
 
@@ -110,6 +119,8 @@ def node_for(device_path: str, sys_root: Path = Path("/sys/class/hidraw")) -> Pa
     name = device_path.rstrip("/").rsplit("/", 1)[-1]
     if not _NODE_NAME.match(name):
         raise NodeMismatch(f"{device_path} does not name a hidraw node")
+    if not (sys_root / name).exists():
+        raise NodeGone(f"{name} is no longer in sysfs")
     try:
         uevent = (sys_root / name / "device" / "uevent").read_text()
     except OSError as exc:

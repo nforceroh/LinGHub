@@ -90,8 +90,9 @@ The daemon survives the mouse disappearing: a KVM switch, an unplugged cable or
 a flat battery all remove the device node. It keeps detecting games, drops its
 stale handle, and reconnects when the device returns. It also publishes its
 D-Bus interface and starts detecting before it looks for the device, so the UI
-and tray still show the configured profiles while the mouse is away. Note the hidraw node
-number changes on reconnect, so nothing caches the device path.
+and tray still show the configured profiles while the mouse is away. The hidraw node
+number changes on reconnect, so the daemon checks on every pass that its device
+path still names the G502, and finds it again when it doesn't.
 
 The UI talks to the daemon over D-Bus, so the daemon must be running. It needs
 PyGObject, which on Fedora is the `python3-gobject` package:

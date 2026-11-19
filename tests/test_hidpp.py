@@ -222,9 +222,15 @@ class NodeTests(unittest.TestCase):
         with self.assertRaisesRegex(hidpp.NodeMismatch, "does not name a hidraw node"):
             hidpp.node_for("/org/freedesktop/ratbag1/device/mouse0", sys_root=self.sys)
 
-    def test_a_node_missing_from_sysfs_is_refused(self):
-        with self.assertRaises(hidpp.NodeMismatch):
+    def test_a_node_missing_from_sysfs_is_gone_not_a_mismatch(self):
+        """ratbagd lags the kernel by about 2 s after a KVM switch, so for a
+        moment it names a node the kernel has already removed."""
+        with self.assertRaises(hidpp.NodeGone):
             hidpp.node_for("/org/freedesktop/ratbag1/device/hidraw31", sys_root=self.sys)
+
+    def test_gone_and_mismatch_are_different_failures(self):
+        self.assertFalse(issubclass(hidpp.NodeGone, hidpp.NodeMismatch))
+        self.assertFalse(issubclass(hidpp.NodeMismatch, hidpp.NodeGone))
 
 
 if __name__ == "__main__":

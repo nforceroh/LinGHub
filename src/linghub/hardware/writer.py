@@ -271,8 +271,11 @@ class RatbagConnector:
             )
         client = RatbagClient(self._bus)
         device = await client.find_device()
+        # Before announcing the find: ratbagd can still list a mouse the
+        # kernel has removed, and mouse_for raises DeviceNotFound for that.
+        mouse = mouse_for(device.path)
         logging.getLogger(__name__).info("found %s at %s", device.name, device.path)
-        return ProfileWriter(client, device, mouse=mouse_for(device.path))
+        return ProfileWriter(client, device, mouse=mouse)
 
     def disconnect(self) -> None:
         if self._bus is not None:
