@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LinGHub code quality review 1</title>
+    <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { border-style: dashed; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .label { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-5xl mx-auto px-4 sm:px-6 py-12 space-y-12">
+
+      <header class="space-y-3">
+        <h1 class="font-serif text-3xl">LinGHub — code quality review 1</h1>
+        <p class="text-sm text-slate-500">2026-11-19 · <span class="font-mono">main @ 70ec848</span> · scope: the three PRs merged today — <span class="font-mono">#14</span> version value, <span class="font-mono">#15</span> ratbag Mouse adapter, <span class="font-mono">#16</span> absence module</p>
+        <p class="text-sm text-slate-600">The three PRs did real work: <span class="font-mono">Absence</span> is a genuine deep module, <span class="font-mono">DaemonVersion</span> is a real value type, and <span class="font-mono">mouse.py</span> collapsed four modules into one with a single decision point. This review is about what they left behind, not about whether they were worth doing.</p>
+        <div class="rounded-md border border-red-200 bg-red-50 p-3 text-sm space-y-2">
+          <p><strong class="text-red-700">Two confirmed defects found during the walk.</strong></p>
+          <p><strong>1.</strong> A mouse that vanishes between <span class="font-mono">connect()</span> and <span class="font-mono">report_rates()</span> escapes <span class="font-mono">_reconnect</span> and is logged as a daemon bug with a traceback. Reproduced: <span class="font-mono">ESCAPED _reconnect: MouseLost vanished between connect and report_rates</span>.</p>
+          <p><strong>2.</strong> An unrecognised slot-reading reason falls through to the success path. Reproduced: <span class="font-mono">read() returned: None</span> — the daemon silently concludes no slot is active — and <span class="font-mono">status</span> prints <em>"the device node could not be confirmed"</em>, which is false.</p>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-10">
+
+        <!-- 1 -->
+        <article id="c1" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="font-serif text-2xl mr-2">1. A mouse lost during connect is reported as a daemon bug</h2>
+            <span class="rounded-full bg-emerald-100 text-emerald-800 text-xs px-2 py-0.5">Strong</span>
+            <span class="rounded-full bg-red-100 text-red-800 text-xs px-2 py-0.5">confirmed defect</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-600">
+            <li>src/linghub/daemon/service.py — _connect · _reconnect · tick</li>
+            <li>src/linghub/hardware/mouse.py — RatbagMouse.report_rates</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-3">
+              <p class="label text-slate-500 mb-2">Before — the escape path</p>
+              <pre class="mermaid">
+flowchart LR
+  C[_connect] --> R["report_rates()<br/>raises MouseLost"]
+  R --> RC{"_reconnect<br/>catches Absent?<br/>Misconfigured?"}
+  RC -- no --> T["tick: except Exception"]
+  T --> B["'tick failed'<br/>+ traceback"]
+  RC -- "Absent / Misconfigured" --> A["absence starts<br/>warned once"]
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class R,B leak
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-3">
+              <p class="label text-slate-500 mb-2">After — connect leaves with a mouse or a connection failure</p>
+              <pre class="mermaid">
+flowchart LR
+  C[_connect] --> R["report_rates()<br/>raises MouseLost"]
+  R --> X["translate:<br/>MouseLost → MouseAbsent"]
+  X --> A["_reconnect:<br/>absence starts, warned once"]
+  A --> N["next tick reconnects"]
+  style X fill:#0f172a,color:#fff
+              </pre>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> <span class="font-mono">_reconnect</span> catches <span class="font-mono">MouseAbsent</span> and <span class="font-mono">MouseMisconfigured</span>, but <span class="font-mono">_connect</span> awaits <span class="font-mono">mouse.report_rates()</span>, which the <span class="font-mono">Mouse</span> protocol documents as raising <span class="font-mono">MouseLost</span>. A mouse that vanishes between <span class="font-mono">connect()</span> and <span class="font-mono">report_rates()</span> — a KVM flick, a flat battery — escapes <span class="font-mono">_reconnect</span>, is caught by <span class="font-mono">tick</span>'s blanket handler, and is logged as <span class="font-mono">tick failed</span> with a traceback. The absence never starts, so the user gets no warning and no <em>"back after"</em> line; they get a stack trace instead. The mouse is dropped correctly, so the next tick retries — the damage is the diagnosis, not the recovery.</p>
+          <p><strong>Solution.</strong> <span class="font-mono">_connect</span> is the step that establishes a connection, so it should leave with a connection or with a connection failure. Translate <span class="font-mono">MouseLost</span> from <span class="font-mono">report_rates</span> into <span class="font-mono">MouseAbsent</span> there: at connect time, a mouse that vanished is a mouse that isn't there. The existing <span class="font-mono">except MouseAbsent</span> in <span class="font-mono">_reconnect</span> then starts the absence and logs it once. This restores the invariant <span class="font-mono">connect()</span> already documents — <em>"and nothing else on purpose"</em>.</p>
+          <ul class="list-disc pl-5 text-sm space-y-1">
+            <li>locality: the connect step owns what "connected" means</li>
+            <li>the documented invariant becomes true again</li>
+            <li>a KVM flick during connect reads as an absence, not a bug</li>
+            <li>one test pins it: report_rates raises, tick logs no bug</li>
+          </ul>
+          <div class="rounded-md border border-amber-200 bg-amber-50 p-2 text-sm">Deeper option: make connecting atomic — the connector returns the mouse <em>with</em> its capabilities, so there is no second await that can fail. That changes the <span class="font-mono">MouseConnector</span> protocol and every fake; worth it only if the capability read grows.</div>
+        </article>
+
+        <!-- 2 -->
+        <article id="c2" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="font-serif text-2xl mr-2">2. The slot reading's reason is a string protocol with a silent fallback</h2>
+            <span class="rounded-full bg-emerald-100 text-emerald-800 text-xs px-2 py-0.5">Strong</span>
+            <span class="rounded-full bg-red-100 text-red-800 text-xs px-2 py-0.5">confirmed defect</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-600">
+            <li>src/linghub/hardware/active_slot.py — SlotReadings · ActiveSlotReader.read</li>
+            <li>src/linghub/cli.py — format_mouse</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-3">
+              <p class="label text-slate-500 mb-2">Before — three fields, four magic strings, two fallbacks</p>
+              <pre class="text-xs bg-slate-50 p-3 rounded overflow-x-auto"><code>@dataclass(frozen=True)
+class SlotReadings:
+    mouse: int | None
+    believed: int | None
+    reason: str | None = None   # "no answer" | ...
+    detail: str = ""
+
+# read(): anything unrecognised falls through
+if reason == "no answer": ...
+if reason == "host mode": ...
+if reason == "no permission": ...
+return readings.mouse          # None — "no slot active"</code></pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-3">
+              <p class="label text-slate-500 mb-2">After — the answer is a slot or a reason</p>
+              <pre class="text-xs bg-slate-50 p-3 rounded overflow-x-auto"><code>class Reason(enum.Enum):
+    UNCONFIRMED_NODE = "unconfirmed node"
+    NO_PERMISSION = "no permission"
+    HOST_MODE = "host mode"
+    NO_ANSWER = "no answer"
+
+@dataclass(frozen=True)
+class NoReading:
+    reason: Reason
+    detail: str = ""
+
+@dataclass(frozen=True)
+class SlotReadings:
+    answer: int | NoReading
+    believed: int | None</code></pre>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> <span class="font-mono">reason</span> is a <span class="font-mono">str | None</span> carrying four magic strings, matched in two modules. Both matches end in an <span class="font-mono">else</span> that assumes the worst case: <span class="font-mono">read()</span> falls through to the success path and returns <span class="font-mono">readings.mouse</span>, which is <span class="font-mono">None</span>, so the daemon silently concludes <em>no slot is active</em>; <span class="font-mono">format_mouse</span> reports <em>"the device node could not be confirmed"</em>, which is false. A typo, or a new reason added in one place only, produces a wrong answer rather than an error. The three fields also allow states that cannot happen: a reason with a mouse, or no mouse with no reason.</p>
+          <p><strong>Solution.</strong> Make the reason a closed value and fold it into the answer. <span class="font-mono">answer: int | NoReading</span>, where <span class="font-mono">NoReading</span> holds a <span class="font-mono">Reason</span> enum and its detail. Then <em>"the mouse said a slot"</em> and <em>"the mouse couldn't say, and here's why"</em> are different types: the <span class="font-mono">reason is None</span> check disappears, both <span class="font-mono">else</span> fallbacks disappear because the enum is exhaustive, and an unknown reason becomes unrepresentable. <span class="font-mono">read()</span> and <span class="font-mono">format_mouse</span> each match once.</p>
+          <ul class="list-disc pl-5 text-sm space-y-1">
+            <li>invalid states become unrepresentable</li>
+            <li>two silent fallbacks deleted, not centralised</li>
+            <li>the vocabulary lives in one module, as a type</li>
+            <li>tests assert the enum, not a string</li>
+          </ul>
+        </article>
+
+        <!-- 3 -->
+        <article id="c3" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="font-serif text-2xl mr-2">3. Dead code the three PRs left behind</h2>
+            <span class="rounded-full bg-amber-100 text-amber-800 text-xs px-2 py-0.5">Worth doing</span>
+            <span class="rounded-full bg-slate-100 text-slate-700 text-xs px-2 py-0.5">deletion</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-600">
+            <li>src/linghub/hardware/mouse.py:90 — WriteResult.skipped</li>
+            <li>src/linghub/daemon/service.py:112 — Daemon._clock</li>
+            <li>src/linghub/ui/window.py:522 — MainWindow._apply_bindings</li>
+            <li>src/linghub/ui/panel_rules.py:113 — any_default</li>
+          </ul>
+          <p><strong>Problem.</strong> Four members nothing reads. <span class="font-mono">WriteResult.skipped</span> is never set true. <span class="font-mono">Daemon._clock</span> is stored and never read — the clock is already passed to <span class="font-mono">Absence</span>, so the field is a second copy of a value the class does not use. <span class="font-mono">MainWindow._apply_bindings</span> has no caller. <span class="font-mono">panel_rules.any_default</span> has no caller. Each is a small lie about the interface: a field that suggests a skip path, a field that suggests the daemon reads time, two methods that suggest a caller exists.</p>
+          <p><strong>Solution.</strong> Delete them. If <span class="font-mono">skipped</span> is meant to come back, it comes back with the code that sets it. The <span class="font-mono">clock</span> parameter stays — <span class="font-mono">Absence</span> needs it — only the field goes.</p>
+          <ul class="list-disc pl-5 text-sm space-y-1">
+            <li>four fewer things a reader has to rule out</li>
+            <li>no behaviour change; the tests already pass without them</li>
+          </ul>
+        </article>
+
+        <!-- 4 -->
+        <article id="c4" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="font-serif text-2xl mr-2">4. Two write helpers that differ only in where the failure goes</h2>
+            <span class="rounded-full bg-amber-100 text-amber-800 text-xs px-2 py-0.5">Worth exploring</span>
+            <span class="rounded-full bg-slate-100 text-slate-700 text-xs px-2 py-0.5">duplication</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-600">
+            <li>src/linghub/ui/window.py:440 — _daemon_write (6 call sites)</li>
+            <li>src/linghub/ui/window.py:458 — _dialog_write (3 call sites)</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-3">
+              <p class="label text-slate-500 mb-2">Before — the same eight lines twice</p>
+              <pre class="text-xs bg-slate-50 p-3 rounded overflow-x-auto"><code>try:
+    ok = await change()
+except (RuntimeError, OSError) as exc:
+    REPORT(str(exc)); return False
+if not ok:
+    return False            # status: change said why
+    # dialog: REPORT(rejected)
+CLOSE()
+await self._refresh_now()
+return True</code></pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-3">
+              <p class="label text-slate-500 mb-2">After — one skeleton, two reporters</p>
+              <pre class="text-xs bg-slate-50 p-3 rounded overflow-x-auto"><code>async def _write(self, change, report, *,
+                 rejected=None, close=None) -> bool:
+    ...
+
+_daemon_write = _write(change,
+    report=self._status.set_text)
+_dialog_write = _write(change,
+    report=dialog.show_error,
+    rejected=..., close=dialog.close)</code></pre>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> The two helpers are the same eight lines: run the change, turn a transport error into text, treat a <span class="font-mono">False</span> return as failure, refresh on success. They differ in where the text goes and whether a dialog closes. Nine call sites now depend on the duplication staying in sync.</p>
+          <p><strong>Solution.</strong> One <span class="font-mono">_write(change, report, *, rejected=None, close=None)</span>. <span class="font-mono">_daemon_write</span> passes <span class="font-mono">self._status.set_text</span>; <span class="font-mono">_dialog_write</span> passes <span class="font-mono">dialog.show_error</span> and <span class="font-mono">close=dialog.close</span>. <span class="font-mono">rejected</span> stays optional because only the dialog path has one — the status path lets the change report its own reason.</p>
+          <div class="rounded-md border border-amber-200 bg-amber-50 p-2 text-sm">Caveat: if the merge needs a fifth parameter, stop. Two honest helpers beat one clever one.</div>
+        </article>
+
+        <!-- 5 -->
+        <article id="c5" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="font-serif text-2xl mr-2">5. The Mouse protocol is the one contract with no conformance test</h2>
+            <span class="rounded-full bg-amber-100 text-amber-800 text-xs px-2 py-0.5">Worth doing</span>
+            <span class="rounded-full bg-slate-100 text-slate-700 text-xs px-2 py-0.5">type boundary</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-600">
+            <li>tests/test_collaborators.py — PAIRS</li>
+            <li>src/linghub/daemon/service.py — Mouse · MouseConnector</li>
+            <li>src/linghub/hardware/mouse.py — RatbagMouse · RatbagConnector</li>
+          </ul>
+          <p><strong>Problem.</strong> <span class="font-mono">test_collaborators.py</span> ties the three D-Bus collaborators to their Protocols by signature, because a rename on one side used to fail only at runtime. The <span class="font-mono">Mouse</span> protocol — the seam the whole daemon is written against — has no such test. <span class="font-mono">RatbagMouse</span> could drift from it and the first failure would be on a user's machine.</p>
+          <p><strong>Solution.</strong> Add a second list, <span class="font-mono">SATISFIES</span>, checked for presence and signatures but <em>not</em> exhaustiveness. <span class="font-mono">RatbagMouse</span> is deliberately wider than <span class="font-mono">Mouse</span> — the CLI uses <span class="font-mono">slot_readings</span> and <span class="font-mono">device</span> — so the "adds nothing" rule that fits the collaborators does not fit here. Same for <span class="font-mono">RatbagConnector</span> against <span class="font-mono">MouseConnector</span>.</p>
+          <ul class="list-disc pl-5 text-sm space-y-1">
+            <li>the seam the daemon is written against becomes checked</li>
+            <li>the wider adapter stays wider, on purpose and on record</li>
+          </ul>
+        </article>
+
+        <!-- small -->
+        <article class="rounded-xl border border-slate-200 bg-white p-6 space-y-3">
+          <h2 class="font-serif text-xl">Small, no candidate needed</h2>
+          <ul class="list-disc pl-5 text-sm space-y-1">
+            <li><span class="font-mono">tests/test_writer.py</span> and its <span class="font-mono">WriterTests</span> class still name the deleted <span class="font-mono">ProfileWriter</span>. Rename to <span class="font-mono">test_mouse.py</span> / <span class="font-mono">MouseTests</span>.</li>
+            <li><span class="font-mono">Absence._connected_before</span> is a one-way latch meaning "ever connected". The name reads as "connected before this absence". Rename to <span class="font-mono">_ever_connected</span>.</li>
+            <li><span class="font-mono">mouse.py</span> imports <span class="font-mono">Variant</span> locally in three methods while <span class="font-mono">DBusError</span> is module-level. Hoist it.</li>
+            <li><span class="font-mono">WriteResult.changed</span> is built by four appends and read once, as <span class="font-mono">len(...)</span>. Either log the names or make it a count.</li>
+            <li><span class="font-mono">Report()</span> with no message is a sentinel for "nothing to say"; <span class="font-mono">None</span> would say it directly.</li>
+          </ul>
+          <p class="text-xs text-slate-500">Checked and fine: <span class="font-mono">Absence</span> (a real deep module, clock injected, tested directly), <span class="font-mono">DaemonVersion</span> + <span class="font-mono">describe</span> (four states, one rendering, the About bug is pinned), the <span class="font-mono">mouse.py</span> consolidation (four modules into one, <span class="font-mono">connect()</span> the only decision point), <span class="font-mono">_translated</span> (one place, order documented), <span class="font-mono">ActiveSlotReader</span>'s <span class="font-mono">to_thread</span> (keeps D-Bus answering), <span class="font-mono">version.from_git</span>/<span class="font-mono">resolve</span>, and the injected connector, detector, announcer and clock. No file crossed 1000 lines; the largest is <span class="font-mono">window.py</span> at 743.</p>
+        </article>
+      </section>
+
+      <section id="top-recommendation" class="rounded-xl deep text-white p-8 space-y-3">
+        <p class="label text-slate-400">Top recommendation</p>
+        <h2 class="font-serif text-2xl"><a href="#c1" class="underline decoration-emerald-400">1. A mouse lost during connect is reported as a daemon bug</a></h2>
+        <p class="text-slate-300">It is a confirmed defect with a three-line fix, and it restores an invariant the code already claims. Then <a href="#c2" class="underline decoration-emerald-400">2</a>, which is the one place here where a type change deletes branches instead of moving them.</p>
+      </section>
+    </main>
+  </body>
+</html>
