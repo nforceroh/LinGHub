@@ -39,7 +39,7 @@ linghub switch 1      # activate profile 1
 linghub detect        # report which configured game is running
 linghub run           # run the daemon in the foreground
 linghub ui            # open the graphical interface
-linghub status        # report what the running daemon is doing
+linghub status        # what the daemon is doing, and which slot the mouse says it is on
 linghub tray          # show a tray icon for switching profiles
 ```
 
