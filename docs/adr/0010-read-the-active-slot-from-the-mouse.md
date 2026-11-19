@@ -19,7 +19,10 @@ through ratbagd. LinGHub only reads the mouse directly.
 - **The node** comes from the ratbagd device the daemon has just confirmed
   (`.../device/hidrawN` → `/dev/hidrawN`). It is checked against sysfs to be
   a Logitech device, and if it isn't, the daemon uses ratbagd's answer for
-  that connection and logs an error once.
+  that connection and logs an error once. If the node is missing from sysfs
+  altogether, the mouse is gone and the connection fails: ratbagd lags the
+  kernel by about 2 s after a KVM switch, so for a moment it still lists a
+  mouse whose node no longer exists.
 - **The node is opened for each read** and closed straight after, so a node
   deleted by a KVM switch is never held open.
 - **Sharing:** ratbagd (software id `0x8`) and the kernel (`0x1`) use the same

@@ -100,12 +100,21 @@ def mouse_for(
 ) -> hidpp.OnboardProfiles | None:
     """A reader for the mouse behind a confirmed ratbagd device, or None.
 
-    None when the node cannot be confirmed as a Logitech device: reading an
-    unconfirmed node could read another device, so the daemon falls back to
+    None when the node exists but cannot be confirmed as a Logitech device:
+    reading it could read another device, so the daemon falls back to
     ratbagd's answer for this connection and says so once, loudly.
+
+    Raises DeviceNotFound when the node is already gone, so connecting fails
+    as it would for any missing mouse.
     """
     try:
         node = hidpp.node_for(device_path, sys_root=sys_root)
+    except hidpp.NodeGone as exc:
+        # ratbagd still lists a mouse the kernel has removed: the mouse is
+        # still missing, so this connection fails and the absence goes on.
+        from .ratbag import NOT_FOUND, DeviceNotFound
+
+        raise DeviceNotFound(NOT_FOUND) from exc
     except hidpp.NodeMismatch as exc:
         logger.error(
             "cannot read the active slot from the mouse: %s; using ratbagd's answer", exc
