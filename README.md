@@ -280,6 +280,7 @@ src/linghub/
 ├── discovery/       /proc and GameMode: is a game running?
 ├── daemon/
 │   ├── service.py   the run loop; detection and the mouse are injected
+│   ├── absence.py   one absence of the mouse, and what to say about it
 │   ├── state.py     which profile should be on the mouse, and why
 │   ├── writes.py    every config change, and the rule that persists it
 │   ├── slots.py     which slot a profile belongs in (ADR-0001)
