@@ -17,7 +17,7 @@ from dbus_fast import DBusError
 
 from ..domain.profile import Profile
 from . import mapping
-from .active_slot import ActiveSlotReader, MouseSlot, mouse_for
+from .active_slot import ActiveSlotReader, MouseSlot, SlotReadings, mouse_for
 from .failures import LoadRefused, MouseAbsent, MouseFailure, MouseLost
 from .ratbag import SERVICE, RatbagClient, Device, DeviceReplaced
 
@@ -191,6 +191,16 @@ class ProfileWriter:
         with _translated():
             await self._check_identity()
             return await self._slots.read()
+
+    async def slot_readings(self) -> SlotReadings:
+        """The mouse's answer and ratbagd's belief, side by side (#5).
+
+        For showing, not deciding: `active_slot` is what the daemon acts on.
+        Raises MouseLost if the mouse is gone.
+        """
+        with _translated():
+            await self._check_identity()
+            return await self._slots.readings()
 
     async def _believed_slot(self) -> int | None:
         """Which slot ratbagd believes is active, or None if none is."""

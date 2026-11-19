@@ -191,3 +191,58 @@ class MouseForTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReadingsTests(unittest.TestCase):
+    """Both answers, side by side, for `linghub status` (#5).
+
+    Unlike read(), readings() never decides for the caller: it reports what
+    each source said and why the mouse couldn't answer, and logs nothing.
+    """
+
+    def setUp(self):
+        self.believed = 1
+        self.mouse = FakeMouse(slot=1)
+
+    async def _believed(self):
+        return self.believed
+
+    def _readings(self, mouse="default"):
+        reader = ActiveSlotReader(self._believed, self.mouse if mouse == "default" else mouse)
+        return asyncio.run(reader.readings())
+
+    def test_both_answers_when_the_mouse_answers(self):
+        self.believed, self.mouse.slot = 2, 0
+        readings = self._readings()
+        self.assertEqual((readings.mouse, readings.believed, readings.reason), (0, 2, None))
+
+    def test_no_answer(self):
+        self.mouse.error = hidpp.NoReply("no reply")
+        readings = self._readings()
+        self.assertEqual((readings.mouse, readings.believed, readings.reason), (None, 1, "no answer"))
+
+    def test_a_hidpp_error_is_no_answer(self):
+        self.mouse.error = hidpp.HidppError("error 0x05")
+        self.assertEqual(self._readings().reason, "no answer")
+
+    def test_host_mode(self):
+        self.mouse.error = hidpp.HostMode("host mode")
+        self.assertEqual(self._readings().reason, "host mode")
+
+    def test_no_permission(self):
+        self.mouse.error = PermissionError(errno.EACCES, "denied")
+        readings = self._readings()
+        self.assertEqual((readings.mouse, readings.believed, readings.reason), (None, 1, "no permission"))
+
+    def test_an_unconfirmed_node(self):
+        self.assertEqual(self._readings(mouse=None).reason, "unconfirmed node")
+
+    def test_a_gone_node_still_propagates(self):
+        self.mouse.error = FileNotFoundError(errno.ENOENT, "gone")
+        with self.assertRaises(OSError):
+            self._readings()
+
+    def test_readings_log_nothing(self):
+        self.believed, self.mouse.slot = 2, 0
+        with self.assertNoLogs("linghub.hardware.active_slot", "DEBUG"):
+            self._readings()

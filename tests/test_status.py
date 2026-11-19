@@ -41,3 +41,107 @@ class FormatStatusTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FormatMouseTests(unittest.TestCase):
+    """The mouse section of `linghub status`, as the mouse itself reports it (#5)."""
+
+    NAMES = {0: "desktop", 1: "world-of-tanks"}
+
+    def _found(self, mouse, believed, reason=None, names=None):
+        from linghub.cli import MouseReport, format_mouse
+        from linghub.hardware.active_slot import SlotReadings
+
+        report = MouseReport(
+            name="Logitech G502", node="/dev/hidraw49",
+            readings=SlotReadings(mouse=mouse, believed=believed, reason=reason),
+        )
+        return format_mouse(report, self.NAMES if names is None else names)
+
+    def test_agreement(self):
+        self.assertEqual(
+            self._found(1, 1),
+            "Mouse          : Logitech G502 on /dev/hidraw49\n"
+            "Active slot    : 1 (world-of-tanks)",
+        )
+
+    def test_disagreement_shows_ratbagds_belief(self):
+        self.assertIn("Active slot    : 0 (desktop) · ratbagd says 2", self._found(0, 2))
+
+    def test_no_answer(self):
+        self.assertIn(
+            "Active slot    : unknown (the mouse did not answer; asleep?) · ratbagd says 1",
+            self._found(None, 1, "no answer"),
+        )
+
+    def test_host_mode(self):
+        self.assertIn(
+            "Active slot    : none (host mode: another tool controls the mouse)",
+            self._found(None, 1, "host mode"),
+        )
+
+    def test_no_permission_shows_ratbagds_answer_and_says_so(self):
+        self.assertIn(
+            "Active slot    : 1 (world-of-tanks) · ratbagd's answer; no permission to read the mouse",
+            self._found(None, 1, "no permission"),
+        )
+
+    def test_an_unconfirmed_node_shows_ratbagds_answer_and_says_so(self):
+        self.assertIn(
+            "· ratbagd's answer; the device node could not be confirmed",
+            self._found(None, 1, "unconfirmed node"),
+        )
+
+    def test_an_unnamed_slot_has_no_brackets(self):
+        """With the daemon down, only slot 0 has a name (from the config)."""
+        self.assertIn("Active slot    : 1", self._found(1, 1, names={0: "desktop"}))
+        self.assertNotIn("(", self._found(1, 1, names={0: "desktop"}).splitlines()[1])
+
+    def test_not_found_without_holders(self):
+        from linghub.cli import MouseReport, format_mouse
+
+        self.assertEqual(
+            format_mouse(MouseReport(absent=True), self.NAMES),
+            "Mouse          : not found (KVM, unplugged or asleep)",
+        )
+
+    def test_not_found_lists_holders_as_a_lead(self):
+        from linghub.cli import MouseReport, format_mouse
+        from linghub.hardware.diagnose import HidrawHolder
+
+        holder = HidrawHolder(pid=235448, command="winedevice.exe", node="/dev/hidraw15")
+        text = format_mouse(MouseReport(absent=True, holders=(holder,)), self.NAMES)
+        self.assertIn("a possible lead, often harmless", text)
+        self.assertIn("pid 235448 winedevice.exe (/dev/hidraw15)", text)
+        self.assertNotIn("kill", text.lower())
+
+    def test_a_misconfiguration_shows_its_message(self):
+        from linghub.cli import MouseReport, format_mouse
+
+        text = format_mouse(
+            MouseReport(misconfigured="multiple G502 devices found, so LinGHub cannot choose safely; unplug all but one"),
+            self.NAMES,
+        )
+        self.assertTrue(text.startswith("Mouse          : multiple G502 devices found"), text)
+
+
+class SlotNamesTests(unittest.TestCase):
+    """Which profile each slot holds, as far as `status` can know (#5)."""
+
+    def test_with_the_daemon_running_slot_1_is_what_it_last_loaded(self):
+        from linghub.cli import slot_names
+
+        self.assertEqual(
+            slot_names(desktop="desktop", loaded="world-of-tanks"),
+            {0: "desktop", 1: "world-of-tanks"},
+        )
+
+    def test_with_the_desktop_loaded_slot_1_is_unknown(self):
+        from linghub.cli import slot_names
+
+        self.assertEqual(slot_names(desktop="desktop", loaded="desktop"), {0: "desktop"})
+
+    def test_with_the_daemon_down_only_slot_0_is_named(self):
+        from linghub.cli import slot_names
+
+        self.assertEqual(slot_names(desktop="desktop", loaded=None), {0: "desktop"})
