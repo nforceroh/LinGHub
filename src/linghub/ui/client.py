@@ -197,33 +197,42 @@ class DaemonClient:
             ),
         )
 
-    async def daemon_version(self) -> str | None:
-        """The daemon's app version, or PREDATES_REPORTING for an older daemon.
+    async def daemon_version(self) -> version.DaemonVersion:
+        """What the daemon is running, as one value (ADR-0009).
 
         A property of its own rather than part of GetView, so a daemon from
         before version reporting answers "no such property" here and every
-        other read still works (ADR-0009). No daemon at all is still
-        DaemonUnavailable: that is a different thing to tell the user.
+        other read still works. The mapping from what the bus says to what
+        the user is told happens here, once, so the CLI, the tray and the
+        window cannot each decide it differently.
         """
         from dbus_fast import Variant
 
         from .. import version
 
         if self._bus is None:
-            raise RuntimeError("not connected to the daemon")
-        reply = await asyncio.wait_for(
-            self._bus.call(Message(
-                destination=SERVICE, path=PATH,
-                interface="org.freedesktop.DBus.Properties", member="Get",
-                signature="ss", body=[INTERFACE, contract.VERSION.name],
-            )),
-            timeout=5,
-        )
-        if reply.message_type == MessageType.ERROR and reply.error_name in _NO_PROPERTY:
-            return version.PREDATES_REPORTING
-        _raise_for_error(reply, contract.VERSION.name)
+            return version.DaemonVersion.not_running()
+        try:
+            reply = await asyncio.wait_for(
+                self._bus.call(Message(
+                    destination=SERVICE, path=PATH,
+                    interface="org.freedesktop.DBus.Properties", member="Get",
+                    signature="ss", body=[INTERFACE, contract.VERSION.name],
+                )),
+                timeout=5,
+            )
+        except (OSError, TimeoutError):
+            return version.DaemonVersion.unreadable()
+        if reply.message_type == MessageType.ERROR:
+            if reply.error_name in _NO_PROPERTY:
+                return version.DaemonVersion.predates_reporting()
+            if reply.error_name in _NO_DAEMON:
+                return version.DaemonVersion.not_running()
+            return version.DaemonVersion.unreadable()
         value = reply.body[0]
-        return str(value.value if isinstance(value, Variant) else value)
+        return version.DaemonVersion.known(
+            str(value.value if isinstance(value, Variant) else value)
+        )
 
     async def load_profile(self, name: str) -> bool:
         return bool(await self._invoke(contract.LOAD_PROFILE, name))

@@ -38,15 +38,17 @@ print("VERSION_LABEL", tray._version_item.get_label())
 print("VERSION_SENSITIVE", tray._version_item.get_sensitive())
 print("VERSION_IS_LAST", tray._menu.get_children()[-1] is tray._daemon_note_item
       and tray._menu.get_children()[-2] is tray._version_item)
-tray._apply_version(version.current())
+tray._apply_version(version.DaemonVersion.known(version.current()))
 print("NOTE_WHEN_SAME", tray._daemon_note_item.get_visible())
-tray._apply_version("9.9.9")
+tray._apply_version(version.DaemonVersion.known("9.9.9"))
 print("NOTE_WHEN_DIFFERENT", tray._daemon_note_item.get_visible())
 print("NOTE_TEXT", tray._daemon_note_item.get_label())
-tray._apply_version(version.PREDATES_REPORTING)
+tray._apply_version(version.DaemonVersion.predates_reporting())
 print("NOTE_WHEN_OLD", tray._daemon_note_item.get_label())
-tray._apply_version(version.DAEMON_NOT_RUNNING)
+tray._apply_version(version.DaemonVersion.not_running())
 print("NOTE_WHEN_ABSENT", tray._daemon_note_item.get_visible())
+tray._apply_version(version.DaemonVersion.unreadable())
+print("NOTE_WHEN_UNREADABLE", tray._daemon_note_item.get_visible())
 print("FALLBACK_REPEATS", tray._refresh())
 print("ONCE_REMOVES", tray._refresh_once())
 """
@@ -135,6 +137,10 @@ class TrayVersionTests(unittest.TestCase):
 
     def test_no_daemon_is_not_a_mismatch(self):
         self.assertEqual(self.menu["NOTE_WHEN_ABSENT"], "False")
+
+    def test_an_unreadable_version_is_not_a_mismatch(self):
+        """We do not know that it differs, so there is nothing to say."""
+        self.assertEqual(self.menu["NOTE_WHEN_UNREADABLE"], "False")
 
 
 if __name__ == "__main__":

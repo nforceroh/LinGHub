@@ -139,7 +139,7 @@ class WriteStatusTests(unittest.TestCase):
             async def daemon_version(self):
                 from linghub import version
 
-                return version.current()
+                return version.DaemonVersion.known(version.current())
 
         window = self._window()
         window._client = FakeClient()
@@ -262,7 +262,7 @@ class SelectionVersusLoadingTests(unittest.TestCase):
             async def daemon_version(self):
                 from linghub import version
 
-                return version.current()
+                return version.DaemonVersion.known(version.current())
 
         window = self._window()
         window._client = FakeClient()
@@ -290,35 +290,35 @@ class VersionTests(unittest.TestCase):
         self.window = make_window()
 
     def test_a_matching_daemon_shows_no_banner(self):
-        self.window._apply_daemon_version(self.version.current())
+        self.window._apply_daemon_version(self.version.DaemonVersion.known(self.version.current()))
         self.assertFalse(self.window._banner.get_revealed())
 
     def test_a_different_daemon_says_to_restart_it(self):
-        self.window._apply_daemon_version("9.9.9")
+        self.window._apply_daemon_version(self.version.DaemonVersion.known("9.9.9"))
         self.assertTrue(self.window._banner.get_revealed())
         self.assertEqual(self.window._banner.get_title(), "Daemon is running 9.9.9; restart it")
 
     def test_an_old_daemon_predates_version_reporting(self):
-        self.window._apply_daemon_version(self.version.PREDATES_REPORTING)
+        self.window._apply_daemon_version(self.version.DaemonVersion.predates_reporting())
         self.assertTrue(self.window._banner.get_revealed())
         self.assertEqual(
             self.window._banner.get_title(), "Daemon predates version reporting; restart it"
         )
 
     def test_no_daemon_is_not_a_mismatch(self):
-        self.window._apply_daemon_version("9.9.9")
-        self.window._apply_daemon_version(self.version.DAEMON_NOT_RUNNING)
+        self.window._apply_daemon_version(self.version.DaemonVersion.known("9.9.9"))
+        self.window._apply_daemon_version(self.version.DaemonVersion.not_running())
         self.assertFalse(self.window._banner.get_revealed())
 
     def test_the_about_dialog_shows_both_versions(self):
-        self.window._apply_daemon_version("9.9.9")
+        self.window._apply_daemon_version(self.version.DaemonVersion.known("9.9.9"))
         dialog = self.window._about_dialog()
         self.assertEqual(dialog.get_version(), self.version.current())
-        self.assertIn("Daemon 9.9.9", dialog.get_comments())
+        self.assertIn("Daemon  9.9.9", dialog.get_comments())
 
     def test_the_about_dialog_says_when_the_daemon_is_not_running(self):
-        self.window._apply_daemon_version(self.version.DAEMON_NOT_RUNNING)
-        self.assertIn("Daemon not running", self.window._about_dialog().get_comments())
+        self.window._apply_daemon_version(self.version.DaemonVersion.not_running())
+        self.assertIn("Daemon  not running", self.window._about_dialog().get_comments())
 
     def test_a_refresh_reads_the_daemon_version(self):
         import asyncio
@@ -328,7 +328,9 @@ class VersionTests(unittest.TestCase):
                 return view()
 
             async def daemon_version(self):
-                return "9.9.9"
+                from linghub import version
+
+                return version.DaemonVersion.known("9.9.9")
 
         self.window._client = FakeClient()
         asyncio.run(self.window._read_and_apply())
@@ -348,6 +350,23 @@ class VersionTests(unittest.TestCase):
         asyncio.run(self.window._read_and_apply())
         self.assertIn("world-of-tanks", self.window._status.get_text())
         self.assertFalse(self.window._banner.get_revealed())
+
+    def test_a_failed_version_read_does_not_say_the_daemon_is_not_running(self):
+        """The bug: About said "Daemon not running" while the daemon ran."""
+        import asyncio
+
+        class FakeClient:
+            async def get_view(self, _profile):
+                return view(active="world-of-tanks")
+
+            async def daemon_version(self):
+                raise RuntimeError("Get failed")
+
+        self.window._client = FakeClient()
+        asyncio.run(self.window._read_and_apply())
+        comments = self.window._about_dialog().get_comments()
+        self.assertNotIn("not running", comments)
+        self.assertIn("Daemon  unreadable", comments)
 
 
 if __name__ == "__main__":

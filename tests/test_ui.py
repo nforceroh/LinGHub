@@ -222,10 +222,15 @@ class DaemonVersionTests(unittest.TestCase):
         import asyncio
         from dbus_fast import Variant
 
+        from linghub import version
+
         client, sent = self._client_answering(SimpleNamespace(
             message_type=MessageType.METHOD_RETURN, body=[Variant("s", "0.1.0+3.g5c27eef")],
         ))
-        self.assertEqual(asyncio.run(client.daemon_version()), "0.1.0+3.g5c27eef")
+        self.assertEqual(
+            asyncio.run(client.daemon_version()),
+            version.DaemonVersion.known("0.1.0+3.g5c27eef"),
+        )
         self.assertEqual(sent[0].member, "Get")
         self.assertEqual(sent[0].body, [INTERFACE, "Version"])
 
@@ -237,19 +242,56 @@ class DaemonVersionTests(unittest.TestCase):
                      "org.freedesktop.DBus.Error.InvalidArgs"):
             with self.subTest(error=name):
                 client, _ = self._client_answering(self._error(name))
-                self.assertIs(
-                    asyncio.run(client.daemon_version()), version.PREDATES_REPORTING
+                self.assertEqual(
+                    asyncio.run(client.daemon_version()),
+                    version.DaemonVersion.predates_reporting(),
                 )
 
-    def test_no_daemon_is_unavailable_not_old(self):
+    def test_no_daemon_is_not_running_not_old(self):
         import asyncio
-        from linghub.ui.client import DaemonUnavailable
+        from linghub import version
 
         client, _ = self._client_answering(
             self._error("org.freedesktop.DBus.Error.ServiceUnknown")
         )
-        with self.assertRaises(DaemonUnavailable):
-            asyncio.run(client.daemon_version())
+        self.assertEqual(
+            asyncio.run(client.daemon_version()), version.DaemonVersion.not_running()
+        )
+
+    def test_any_other_error_is_unreadable_not_not_running(self):
+        """The bug: a running daemon whose version read failed said "not running"."""
+        import asyncio
+        from linghub import version
+
+        client, _ = self._client_answering(
+            self._error("org.freedesktop.DBus.Error.Failed")
+        )
+        self.assertEqual(
+            asyncio.run(client.daemon_version()), version.DaemonVersion.unreadable()
+        )
+
+    def test_a_timeout_is_unreadable(self):
+        import asyncio
+        from linghub import version
+
+        class Bus:
+            async def call(self, _message):
+                raise TimeoutError("no answer")
+
+        client = DaemonClient()
+        client._bus = Bus()
+        self.assertEqual(
+            asyncio.run(client.daemon_version()), version.DaemonVersion.unreadable()
+        )
+
+    def test_no_connection_is_not_running(self):
+        import asyncio
+        from linghub import version
+
+        self.assertEqual(
+            asyncio.run(DaemonClient().daemon_version()),
+            version.DaemonVersion.not_running(),
+        )
 
 
 if __name__ == "__main__":

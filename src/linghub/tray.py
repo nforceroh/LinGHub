@@ -133,13 +133,14 @@ class Tray:
 
     def _refresh_thread(self) -> None:
         state = None
-        daemon_version = version.DAEMON_NOT_RUNNING
+        daemon_version = version.DaemonVersion.not_running()
         try:
             state, daemon_version = daemon_access.state_and_version()
         except daemon_access.DaemonUnavailable as exc:
             logger.debug("daemon unavailable: %s", exc)
         except Exception:  # noqa: BLE001 - a tray must not die on a bad poll
             logger.exception("unexpected failure reading daemon state")
+            daemon_version = version.DaemonVersion.unreadable()
         finally:
             self._busy = False
         if state is not None:
@@ -175,7 +176,7 @@ class Tray:
 
     def _apply_version(self, daemon_version) -> bool:
         """Show a note when the daemon runs code other than this tray's."""
-        note = version.daemon_note(version.current(), daemon_version)
+        _line, note = version.describe(version.current(), daemon_version)
         self._daemon_note_item.set_label(note or "")
         self._daemon_note_item.set_visible(note is not None)
         return GLib.SOURCE_REMOVE

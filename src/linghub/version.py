@@ -6,25 +6,19 @@ commit. Without a clone, the version baked in at build time is used. See
 ADR-0009 for why.
 
 The daemon, tray and window each loaded the code when they started, so each
-has its own version, fixed at first read; `daemon_note` is what a client says
+has its own version, fixed at first read; `describe` is what a client says
 when the daemon's differs from its own.
 """
 
 from __future__ import annotations
 
+import enum
 import functools
 import re
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
-
-# What a client holds for the daemon's version when the daemon is too old to
-# report one.
-PREDATES_REPORTING = None
-
-# What a client holds when no daemon answered at all. Not a mismatch: there
-# is nothing running to restart.
-DAEMON_NOT_RUNNING = object()
 
 UNKNOWN = "unknown"
 
@@ -82,19 +76,66 @@ def resolve(
     return installed() or UNKNOWN
 
 
-def daemon_note(own: str, daemon: str | None) -> str | None:
-    """What to tell the user about the daemon's version, or None if it matches.
+class DaemonVersionKind(enum.Enum):
+    """Which of the four things a client can know about the daemon's version."""
 
-    An exact comparison: two processes started from the same commit with
-    different uncommitted edits compare equal, which git cannot tell apart.
+    KNOWN = "known"
+    PREDATES_REPORTING = "predates reporting"
+    NOT_RUNNING = "not running"
+    UNREADABLE = "unreadable"
+
+
+@dataclass(frozen=True)
+class DaemonVersion:
+    """What a client knows about the daemon's version, as one value.
+
+    Four states, each its own value rather than a sentinel that can be
+    mistaken for another: a daemon too old to report a version is not the
+    same as one that isn't running, and neither is the same as one that
+    answered badly. `version` is set only when the kind is KNOWN.
     """
-    if daemon is DAEMON_NOT_RUNNING:
-        return None
-    if daemon is PREDATES_REPORTING:
-        return "Daemon predates version reporting; restart it"
-    if daemon != own:
-        return f"Daemon is running {daemon}; restart it"
-    return None
+
+    kind: DaemonVersionKind
+    version: str = ""
+
+    @classmethod
+    def known(cls, version: str) -> DaemonVersion:
+        return cls(DaemonVersionKind.KNOWN, version)
+
+    @classmethod
+    def predates_reporting(cls) -> DaemonVersion:
+        return cls(DaemonVersionKind.PREDATES_REPORTING)
+
+    @classmethod
+    def not_running(cls) -> DaemonVersion:
+        return cls(DaemonVersionKind.NOT_RUNNING)
+
+    @classmethod
+    def unreadable(cls) -> DaemonVersion:
+        return cls(DaemonVersionKind.UNREADABLE)
+
+
+def describe(own: str, daemon: DaemonVersion) -> tuple[str, str | None]:
+    """The daemon's version line, and a note when it differs from ours.
+
+    The one rendering the CLI, the tray and the window share, so the three
+    cannot disagree about what the daemon is running. An exact comparison:
+    two processes started from the same commit with different uncommitted
+    edits compare equal, which git cannot tell apart.
+
+    An unreadable version gets no note: we do not know that it differs, and
+    a failed read is not worth a banner. It still gets its own line, so the
+    About dialog never calls a running daemon "not running".
+    """
+    if daemon.kind is DaemonVersionKind.NOT_RUNNING:
+        return "Daemon  not running", None
+    if daemon.kind is DaemonVersionKind.PREDATES_REPORTING:
+        return "Daemon  unknown", "Daemon predates version reporting; restart it"
+    if daemon.kind is DaemonVersionKind.UNREADABLE:
+        return "Daemon  unreadable", None
+    if daemon.version != own:
+        return f"Daemon  {daemon.version}", f"Daemon is running {daemon.version}; restart it"
+    return f"Daemon  {daemon.version}", None
 
 
 @functools.cache

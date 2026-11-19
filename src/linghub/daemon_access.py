@@ -23,6 +23,7 @@ import threading
 from typing import Any, Callable, TypeVar
 
 from .ui.client import DaemonState, DaemonUnavailable
+from .version import DaemonVersion
 
 
 logger = logging.getLogger("linghub.daemon_access")
@@ -73,10 +74,12 @@ def state() -> DaemonState:
     return call(read)
 
 
-def state_and_version() -> tuple[DaemonState, str | None]:
+def state_and_version() -> tuple[DaemonState, DaemonVersion]:
     """The daemon's state and its app version, on one connection.
 
-    The version is PREDATES_REPORTING for a daemon too old to report one.
+    The version is a value, not a sentinel: a daemon too old to report one,
+    one that isn't running, and one that answered badly are three different
+    things (see `version.DaemonVersion`).
     """
     async def read(client):
         return (await client.get_view("")).state, await client.daemon_version()

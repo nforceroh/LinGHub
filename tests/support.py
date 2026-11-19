@@ -96,7 +96,7 @@ def make_window(
     window._banner = Adw.Banner()
     from linghub import version
 
-    window._daemon_version = version.DAEMON_NOT_RUNNING
+    window._daemon_version = version.DaemonVersion.not_running()
     window._profile_list = Gtk.ListBox()
     window._profile_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
 

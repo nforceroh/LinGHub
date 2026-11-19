@@ -265,16 +265,10 @@ def format_status(
     return "\n".join(lines)
 
 
-DAEMON_NOT_RUNNING = version.DAEMON_NOT_RUNNING
-
-
-def format_version(own: str, daemon) -> str:
+def format_version(own: str, daemon: version.DaemonVersion) -> str:
     """This process's app version, the daemon's, and a note if they differ."""
-    if daemon is DAEMON_NOT_RUNNING:
-        return f"LinGHub {own}\nDaemon  not running"
-    shown = "unknown" if daemon is version.PREDATES_REPORTING else daemon
-    lines = [f"LinGHub {own}", f"Daemon  {shown}"]
-    note = version.daemon_note(own, daemon)
+    line, note = version.describe(own, daemon)
+    lines = [f"LinGHub {own}", line]
     if note is not None:
         lines.append(note)
     return "\n".join(lines)
@@ -291,8 +285,8 @@ class _VersionAction(argparse.Action):
         parser.exit()
 
 
-def _daemon_version():
-    """The running daemon's version, or DAEMON_NOT_RUNNING if none answers."""
+def _daemon_version() -> version.DaemonVersion:
+    """What the running daemon is running, or why we can't say."""
     from . import daemon_access
 
     async def read(client):
@@ -300,8 +294,10 @@ def _daemon_version():
 
     try:
         return daemon_access.call(read)
-    except (daemon_access.DaemonUnavailable, RuntimeError, OSError, TimeoutError):
-        return DAEMON_NOT_RUNNING
+    except daemon_access.DaemonUnavailable:
+        return version.DaemonVersion.not_running()
+    except (RuntimeError, OSError, TimeoutError):
+        return version.DaemonVersion.unreadable()
 
 
 def main() -> int:
