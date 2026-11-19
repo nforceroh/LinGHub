@@ -47,6 +47,8 @@ class FakeMouse:
         self.attempts = 0
         # What the next active-slot read does: None answers, or raises this.
         self.next_read: Exception | None = None
+        # What the next report_rates call does: None answers, or raises this.
+        self.next_report_rates: Exception | None = None
 
     async def apply(self, profile, slot):
         self.attempts += 1
@@ -64,6 +66,9 @@ class FakeMouse:
         return self.active
 
     async def report_rates(self):
+        if self.next_report_rates is not None:
+            error, self.next_report_rates = self.next_report_rates, None
+            raise error
         return [125, 250, 500, 1000]
 
 
@@ -243,6 +248,27 @@ class MouseLossTests(unittest.TestCase):
         h.tick()
         self.assertEqual(h.mouse.connects, 2, "the stale mouse was kept")
         self.assertEqual(h.written, [("desktop", 0)])
+
+    def test_a_mouse_lost_during_connect_is_an_absence_not_a_bug(self):
+        """A KVM flick between connect() and report_rates() is a lost mouse.
+
+        report_rates raises MouseLost, which _connect translates into
+        MouseAbsent: the absence starts and warns once, instead of tick's
+        blanket handler logging a traceback.
+        """
+        h = DaemonHarness(self)
+        h.mouse.mouse.next_report_rates = MouseLost("vanished between connect and report_rates")
+        with self.assertLogs("linghub.daemon", "DEBUG") as logs:
+            h.tick()
+        errors = [r.getMessage() for r in logs.records if r.levelname == "ERROR"]
+        self.assertEqual(errors, [], "a lost mouse was logged as a daemon bug")
+        warnings = [r.getMessage() for r in logs.records if r.levelname == "WARNING"]
+        self.assertEqual(len(warnings), 1, warnings)
+        self.assertIn("vanished between connect and report_rates", warnings[0])
+        self.assertEqual(h.written, [], "nothing to write to while the mouse is away")
+
+        h.tick()
+        self.assertEqual(h.written, [("desktop", 0)], "the next check did not reconnect")
 
     def test_a_refused_load_keeps_the_mouse(self):
         """A refused load is not a missing mouse: no reconnect."""

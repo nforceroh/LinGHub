@@ -1,8 +1,8 @@
-"""Tests for the profile writer's commit and activation sequence.
+"""Tests for the mouse adapter's commit and activation sequence.
 
 These use a fake RatbagClient so they run without hardware. The bug they
 guard against is real: writing a profile does not make it active, so the
-writer must call Profile.SetActive and commit again.
+adapter must call Profile.SetActive and commit again.
 """
 
 import unittest
@@ -99,7 +99,7 @@ class FakeDevice:
     path = "/device"
 
 
-class WriterTests(unittest.IsolatedAsyncioTestCase):
+class MouseTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.client = FakeClient()
         self.writer = RatbagMouse(self.client, FakeDevice())

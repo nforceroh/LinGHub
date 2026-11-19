@@ -16,9 +16,10 @@ The rules from #2 (ADR-0010):
 from __future__ import annotations
 
 import asyncio
+import enum
 import logging
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Protocol
+from typing import Awaitable, Callable, Protocol, assert_never
 
 from . import hidpp
 from .failures import SlotUnknown
@@ -30,19 +31,33 @@ class MouseSlot(Protocol):
     def active_slot(self) -> int: ...
 
 
+class Reason(enum.Enum):
+    """Why the mouse could not say which slot it is on."""
+
+    UNCONFIRMED_NODE = "unconfirmed node"
+    NO_PERMISSION = "no permission"
+    HOST_MODE = "host mode"
+    NO_ANSWER = "no answer"
+
+
+@dataclass(frozen=True)
+class NoReading:
+    """The mouse could not say which slot it is on, and why."""
+
+    reason: Reason
+    detail: str = ""
+
+
 @dataclass(frozen=True)
 class SlotReadings:
     """What each source said about the active slot, without a verdict.
 
-    `mouse` is None when the mouse couldn't say, and `reason` says why:
-    "no answer", "host mode", "no permission" or "unconfirmed node".
+    `answer` is the mouse's slot, or a NoReading saying why it couldn't say.
     `believed` is ratbagd's answer, None if it believes no slot is active.
     """
 
-    mouse: int | None
+    answer: int | NoReading
     believed: int | None
-    reason: str | None = None
-    detail: str = ""
 
 
 class ActiveSlotReader:
@@ -70,49 +85,29 @@ class ActiveSlotReader:
         """
         believed = await self._believed()
         if self._mouse is None:
-            return SlotReadings(None, believed, "unconfirmed node")
+            return SlotReadings(NoReading(Reason.UNCONFIRMED_NODE), believed)
         try:
             # Off the event loop: a silent mouse costs a timeout, and the
             # daemon's D-Bus interface must keep answering meanwhile.
             actual = await asyncio.to_thread(self._mouse.active_slot)
         except PermissionError as exc:
-            return SlotReadings(None, believed, "no permission", str(exc))
+            return SlotReadings(NoReading(Reason.NO_PERMISSION, str(exc)), believed)
         except hidpp.HostMode as exc:
-            return SlotReadings(None, believed, "host mode", str(exc))
+            return SlotReadings(NoReading(Reason.HOST_MODE, str(exc)), believed)
         except (hidpp.NoReply, hidpp.HidppError) as exc:
-            return SlotReadings(None, believed, "no answer", str(exc))
+            return SlotReadings(NoReading(Reason.NO_ANSWER, str(exc)), believed)
         return SlotReadings(actual, believed)
 
     async def read(self) -> int | None:
         """The active slot by the daemon's rules, logging each change once."""
         readings = await self.readings()
-        reason = readings.reason
 
-        if reason == "unconfirmed node":
-            return readings.believed
-        if reason == "no permission":
-            if not self._refused:
-                logger.warning(
-                    "permission to read the mouse was refused (%s); "
-                    "using ratbagd's answer until it comes back", readings.detail,
-                )
-                self._refused = True
-            return readings.believed
-        if reason == "host mode":
-            if not self._host_mode:
-                logger.warning(
-                    "the mouse is in host mode, so no slot is active; "
-                    "another tool may have taken it over"
-                )
-                self._host_mode = True
-            raise SlotUnknown("the mouse is in host mode")
-        if reason == "no answer":
-            logger.debug("the mouse did not say which slot it is on: %s", readings.detail)
-            raise SlotUnknown(readings.detail)
+        if isinstance(readings.answer, NoReading):
+            return self._without_an_answer(readings.answer, readings.believed)
 
         self._refused = False
         self._host_mode = False
-        believed, actual = readings.believed, readings.mouse
+        believed, actual = readings.believed, readings.answer
         if believed != actual:
             if self._disagreement != (believed, actual):
                 logger.info("ratbagd says slot %s, the mouse says slot %s", believed, actual)
@@ -120,3 +115,30 @@ class ActiveSlotReader:
         else:
             self._disagreement = None
         return actual
+
+    def _without_an_answer(self, no_reading: NoReading, believed: int | None) -> int | None:
+        """The daemon's verdict when the mouse could not say, logging once."""
+        match no_reading.reason:
+            case Reason.UNCONFIRMED_NODE:
+                return believed
+            case Reason.NO_PERMISSION:
+                if not self._refused:
+                    logger.warning(
+                        "permission to read the mouse was refused (%s); "
+                        "using ratbagd's answer until it comes back", no_reading.detail,
+                    )
+                    self._refused = True
+                return believed
+            case Reason.HOST_MODE:
+                if not self._host_mode:
+                    logger.warning(
+                        "the mouse is in host mode, so no slot is active; "
+                        "another tool may have taken it over"
+                    )
+                    self._host_mode = True
+                raise SlotUnknown("the mouse is in host mode")
+            case Reason.NO_ANSWER:
+                logger.debug("the mouse did not say which slot it is on: %s", no_reading.detail)
+                raise SlotUnknown(no_reading.detail)
+            case _:
+                assert_never(no_reading.reason)

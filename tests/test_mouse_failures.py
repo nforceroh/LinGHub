@@ -20,7 +20,7 @@ from linghub.hardware.failures import (
 from linghub.hardware.mouse import RatbagConnector, RatbagMouse
 
 from .test_ratbag import FakeBus
-from .test_writer import FakeClient, FakeDevice
+from .test_mouse import FakeClient, FakeDevice
 
 
 class FamilyTests(unittest.TestCase):
@@ -140,7 +140,7 @@ class SlotReadingsTests(unittest.IsolatedAsyncioTestCase):
         client = FailingClient()
         client._active = "/p1"                    # ratbagd believes slot 1
         readings = await RatbagMouse(client, FakeDevice(), mouse=Mouse()).slot_readings()
-        self.assertEqual((readings.mouse, readings.believed), (0, 1))
+        self.assertEqual((readings.answer, readings.believed), (0, 1))
 
     async def test_a_replaced_device_is_a_lost_mouse(self):
         client = FailingClient()

@@ -10,7 +10,7 @@ import errno
 import unittest
 
 from linghub.hardware import hidpp
-from linghub.hardware.active_slot import ActiveSlotReader, SlotUnknown
+from linghub.hardware.active_slot import ActiveSlotReader, NoReading, Reason, SlotUnknown
 
 
 class FakeMouse:
@@ -214,28 +214,30 @@ class ReadingsTests(unittest.TestCase):
     def test_both_answers_when_the_mouse_answers(self):
         self.believed, self.mouse.slot = 2, 0
         readings = self._readings()
-        self.assertEqual((readings.mouse, readings.believed, readings.reason), (0, 2, None))
+        self.assertEqual((readings.answer, readings.believed), (0, 2))
 
     def test_no_answer(self):
         self.mouse.error = hidpp.NoReply("no reply")
         readings = self._readings()
-        self.assertEqual((readings.mouse, readings.believed, readings.reason), (None, 1, "no answer"))
+        self.assertEqual(readings.believed, 1)
+        self.assertEqual(readings.answer, NoReading(Reason.NO_ANSWER, "no reply"))
 
     def test_a_hidpp_error_is_no_answer(self):
         self.mouse.error = hidpp.HidppError("error 0x05")
-        self.assertEqual(self._readings().reason, "no answer")
+        self.assertEqual(self._readings().answer.reason, Reason.NO_ANSWER)
 
     def test_host_mode(self):
         self.mouse.error = hidpp.HostMode("host mode")
-        self.assertEqual(self._readings().reason, "host mode")
+        self.assertEqual(self._readings().answer.reason, Reason.HOST_MODE)
 
     def test_no_permission(self):
         self.mouse.error = PermissionError(errno.EACCES, "denied")
         readings = self._readings()
-        self.assertEqual((readings.mouse, readings.believed, readings.reason), (None, 1, "no permission"))
+        self.assertEqual(readings.believed, 1)
+        self.assertEqual(readings.answer.reason, Reason.NO_PERMISSION)
 
     def test_an_unconfirmed_node(self):
-        self.assertEqual(self._readings(mouse=None).reason, "unconfirmed node")
+        self.assertEqual(self._readings(mouse=None).answer.reason, Reason.UNCONFIRMED_NODE)
 
     def test_a_gone_node_still_propagates(self):
         self.mouse.error = FileNotFoundError(errno.ENOENT, "gone")

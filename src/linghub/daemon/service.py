@@ -109,7 +109,6 @@ class Daemon:
         self._connector = mouse if mouse is not None else RatbagConnector()
         self._bus_announcer = BusAnnouncer()
         self._announce = announce if announce is not None else self._bus_announcer
-        self._clock = clock
         # One absence: from losing the mouse (or not finding it at startup)
         # to the next connection. It sets how much the daemon logs (#4).
         self._absence = Absence(clock)
@@ -155,10 +154,19 @@ class Daemon:
         return True
 
     async def _connect(self) -> None:
+        """Connect, and leave with a mouse or a connection failure.
+
+        `report_rates` can raise MouseLost: the mouse vanished between being
+        found and being asked. At connect time that is a mouse that isn't
+        there, so it joins MouseAbsent rather than escaping as a bug.
+        """
         mouse = await self._connector.connect()
-        # A missing capability must not stop the daemon: an empty list just
-        # means the UI offers no rate choices.
-        self._report_rates = await mouse.report_rates()
+        try:
+            # A missing capability must not stop the daemon: an empty list
+            # just means the UI offers no rate choices.
+            self._report_rates = await mouse.report_rates()
+        except MouseLost as exc:
+            raise MouseAbsent(str(exc)) from exc
         self._mouse = mouse
         logger.info("using the mouse (report rates %s)", self._report_rates)
 
@@ -296,9 +304,9 @@ class Daemon:
         self._log(self._absence.lost(message))
 
     @staticmethod
-    def _log(report: Report) -> None:
+    def _log(report: Report | None) -> None:
         """Say what the absence module decided, if it decided anything."""
-        if report.message is not None:
+        if report is not None:
             logger.log(report.level, "%s", report.message)
 
     async def _apply_target(self) -> None:
@@ -334,7 +342,10 @@ class Daemon:
             return
 
         self._state.mark_loaded(target.name)
-        logger.info("loaded profile %r into slot %d (%d changes)", target.name, slot, len(result.changed))
+        logger.info(
+            "loaded profile %r into slot %d (%s)",
+            target.name, slot, ", ".join(result.changed) or "no changes",
+        )
 
         self._announce.profile_loaded(target.name)
         await self._notify_switch(target.name)

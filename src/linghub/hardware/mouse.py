@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from dbus_fast import DBusError
+from dbus_fast import DBusError, Variant
 
 from ..domain.profile import Profile
 from . import hidpp, mapping
@@ -63,8 +63,6 @@ def _payloads_match(actual, expected) -> bool:
     Macro payloads arrive as a list of (event, value) tuples; scalars arrive
     bare or wrapped in a Variant depending on the signature.
     """
-    from dbus_fast import Variant
-
     if isinstance(actual, Variant):
         actual = actual.value
     if isinstance(expected, Variant):
@@ -87,7 +85,6 @@ class WriteError(RuntimeError):
 class WriteResult:
     slot: int
     changed: tuple[str, ...]
-    skipped: bool = False
 
 
 class RatbagMouse:
@@ -216,8 +213,6 @@ class RatbagMouse:
         path = paths[index]
 
         if "dpi" in resolution:
-            from dbus_fast import Variant
-
             await self._client.set(
                 path, "Resolution", "Resolution", "v", Variant("u", resolution["dpi"])
             )
@@ -231,8 +226,6 @@ class RatbagMouse:
             await self._client.invoke(path, "Resolution", "SetActive")
 
     async def _write_binding(self, profile_path: str, index: int, binding) -> None:
-        from dbus_fast import Variant
-
         paths = await self._client.get(profile_path, "Profile", "Buttons")
         if index >= len(paths):
             raise WriteError(f"profile has no button {index}")

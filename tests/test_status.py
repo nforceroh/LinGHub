@@ -7,6 +7,7 @@ kept separate from the D-Bus call and can be tested without a bus.
 import unittest
 
 from linghub.cli import format_status
+from linghub.hardware.active_slot import Reason
 
 
 class FormatStatusTests(unittest.TestCase):
@@ -48,15 +49,20 @@ class FormatMouseTests(unittest.TestCase):
 
     NAMES = {0: "desktop", 1: "world-of-tanks"}
 
-    def _found(self, mouse, believed, reason=None, names=None):
+    def _found(self, answer, believed, names=None):
         from linghub.cli import MouseReport, format_mouse
         from linghub.hardware.active_slot import SlotReadings
 
         report = MouseReport(
             name="Logitech G502", node="/dev/hidraw49",
-            readings=SlotReadings(mouse=mouse, believed=believed, reason=reason),
+            readings=SlotReadings(answer=answer, believed=believed),
         )
         return format_mouse(report, self.NAMES if names is None else names)
+
+    def _no_reading(self, reason, believed, names=None):
+        from linghub.hardware.active_slot import NoReading
+
+        return self._found(NoReading(reason), believed, names)
 
     def test_agreement(self):
         self.assertEqual(
@@ -71,25 +77,25 @@ class FormatMouseTests(unittest.TestCase):
     def test_no_answer(self):
         self.assertIn(
             "Active slot    : unknown (the mouse did not answer; asleep?) · ratbagd says 1",
-            self._found(None, 1, "no answer"),
+            self._no_reading(Reason.NO_ANSWER, 1),
         )
 
     def test_host_mode(self):
         self.assertIn(
             "Active slot    : none (host mode: another tool controls the mouse)",
-            self._found(None, 1, "host mode"),
+            self._no_reading(Reason.HOST_MODE, 1),
         )
 
     def test_no_permission_shows_ratbagds_answer_and_says_so(self):
         self.assertIn(
             "Active slot    : 1 (world-of-tanks) · ratbagd's answer; no permission to read the mouse",
-            self._found(None, 1, "no permission"),
+            self._no_reading(Reason.NO_PERMISSION, 1),
         )
 
     def test_an_unconfirmed_node_shows_ratbagds_answer_and_says_so(self):
         self.assertIn(
             "· ratbagd's answer; the device node could not be confirmed",
-            self._found(None, 1, "unconfirmed node"),
+            self._no_reading(Reason.UNCONFIRMED_NODE, 1),
         )
 
     def test_an_unnamed_slot_has_no_brackets(self):

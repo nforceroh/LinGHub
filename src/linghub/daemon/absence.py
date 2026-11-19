@@ -23,13 +23,14 @@ from typing import Callable
 
 @dataclass(frozen=True)
 class Report:
-    """What to log about one event, if anything.
+    """What to log about one event.
 
-    `message` is None when there is nothing to say. `level` is the level for
-    the first report of an absence; later ones are debug.
+    `level` is the level for the first report of an absence; later ones are
+    debug. A method returns None instead of a Report when there is nothing
+    to say.
     """
 
-    message: str | None = None
+    message: str
     level: int = logging.WARNING
 
 
@@ -44,7 +45,7 @@ class Absence:
         self._clock = clock
         self._since: float | None = None
         self._reported = False
-        self._connected_before = False
+        self._ever_connected = False
 
     @property
     def ongoing(self) -> bool:
@@ -58,7 +59,7 @@ class Absence:
         once-per-absence search reports, so it is always said. Losing it
         also means we had it, so coming back is worth a "back" line.
         """
-        self._connected_before = True
+        self._ever_connected = True
         self._start()
         return Report(message, logging.WARNING)
 
@@ -71,23 +72,23 @@ class Absence:
         self._start()
         return self._first(message, level)
 
-    def found(self) -> Report:
+    def found(self) -> Report | None:
         """The mouse is back: say how long it was away, unless it never left.
 
         A mouse missing at startup has no "back" line: the connector's own
         "found ..." line is the first thing the user sees, and "back after
-        0s" would be noise.
+        0s" would be noise. None means there is nothing to say.
         """
         if self._since is None:
-            self._connected_before = True
-            return Report()
+            self._ever_connected = True
+            return None
         away = _duration(self._clock() - self._since)
-        first = not self._connected_before
+        first = not self._ever_connected
         self._since = None
         self._reported = False
-        self._connected_before = True
+        self._ever_connected = True
         if first:
-            return Report()
+            return None
         return Report(f"device is back after {away}", logging.INFO)
 
     def _start(self) -> None:

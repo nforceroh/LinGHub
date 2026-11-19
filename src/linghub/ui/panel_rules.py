@@ -109,7 +109,3 @@ def default_mask(
     mask[toggled] = False
     return tuple(mask)
 
-
-def any_default(mask: Sequence[bool]) -> bool:
-    """True when at least one slot is marked default."""
-    return any(mask)

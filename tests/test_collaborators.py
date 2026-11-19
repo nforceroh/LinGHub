@@ -14,6 +14,8 @@ import unittest
 from typing import Protocol
 
 from linghub.daemon import collaborators, writes
+from linghub.daemon.service import Mouse, MouseConnector
+from linghub.hardware.mouse import RatbagConnector, RatbagMouse
 
 
 def _signature(fn) -> inspect.Signature:
@@ -47,6 +49,14 @@ PAIRS = (
     (collaborators.ProfileLifecycle, writes.ProfileLifecycle),
     (collaborators.Bindings, writes.Bindings),
     (collaborators.DeviceSettings, writes.DeviceSettings),
+)
+
+# The daemon's seam to the hardware. The adapters are deliberately wider than
+# the Protocols (the CLI uses `slot_readings` and `device`), so these are
+# checked for presence and signatures, not for adding nothing.
+SATISFIES = (
+    (Mouse, RatbagMouse),
+    (MouseConnector, RatbagConnector),
 )
 
 
@@ -86,6 +96,45 @@ class ConformanceTests(unittest.TestCase):
 
     def test_return_annotations_match(self):
         for proto, impl in PAIRS:
+            for name, wanted in _protocol_methods(proto).items():
+                with self.subTest(protocol=proto.__name__, method=name):
+                    actual = _implementation_methods(impl)[name]
+                    self.assertEqual(
+                        actual.return_annotation, wanted.return_annotation,
+                        f"{impl.__name__}.{name} returns a different type",
+                    )
+
+
+class SatisfiesTests(unittest.TestCase):
+    """The hardware adapters must satisfy the daemon's Protocols.
+
+    The daemon is written against `Mouse` and `MouseConnector`; the adapters
+    are what runs in production. A rename on either side would otherwise only
+    fail on a user's machine. The adapters are wider on purpose, so only the
+    Protocol's own members are checked.
+    """
+
+    def test_every_protocol_method_is_implemented(self):
+        for proto, impl in SATISFIES:
+            for name in _protocol_methods(proto):
+                with self.subTest(protocol=proto.__name__, method=name):
+                    self.assertIn(
+                        name, _implementation_methods(impl),
+                        f"{impl.__name__} does not implement {name}",
+                    )
+
+    def test_signatures_match(self):
+        for proto, impl in SATISFIES:
+            for name, wanted in _protocol_methods(proto).items():
+                with self.subTest(protocol=proto.__name__, method=name):
+                    actual = _implementation_methods(impl)[name]
+                    self.assertEqual(
+                        list(actual.parameters), list(wanted.parameters),
+                        f"{impl.__name__}.{name} takes different arguments",
+                    )
+
+    def test_return_annotations_match(self):
+        for proto, impl in SATISFIES:
             for name, wanted in _protocol_methods(proto).items():
                 with self.subTest(protocol=proto.__name__, method=name):
                     actual = _implementation_methods(impl)[name]

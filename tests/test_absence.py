@@ -85,10 +85,10 @@ class FoundTests(unittest.TestCase):
     def test_a_mouse_missing_at_startup_has_no_back_line(self):
         """The connector's own "found ..." line is the first thing seen."""
         self.absence.search_failed("no G502 found")
-        self.assertIsNone(self.absence.found().message)
+        self.assertIsNone(self.absence.found())
 
     def test_a_mouse_that_never_left_has_nothing_to_say(self):
-        self.assertIsNone(self.absence.found().message)
+        self.assertIsNone(self.absence.found())
 
     def test_finding_it_ends_the_absence(self):
         self.absence.lost("lost the device: gone")

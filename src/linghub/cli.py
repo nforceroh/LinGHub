@@ -6,6 +6,7 @@ import logging
 import sys
 import time
 from dataclasses import dataclass
+from typing import assert_never
 
 from dbus_fast import BusType
 from dbus_fast.aio import MessageBus
@@ -14,7 +15,7 @@ from dbus_fast.errors import DBusFastError
 from . import config as config_module
 from . import version
 from .discovery.detector import Detection, detect
-from .hardware.active_slot import SlotReadings
+from .hardware.active_slot import NoReading, Reason, SlotReadings
 from .hardware.ratbag import RatbagClient
 
 
@@ -220,16 +221,20 @@ def format_mouse(report: MouseReport, names: dict[int, str]) -> str:
 
     r = report.readings
     ratbagd = f"ratbagd says {slot(r.believed)}"
-    if r.reason is None:
-        value = slot(r.mouse) + ("" if r.mouse == r.believed else f" · {ratbagd}")
-    elif r.reason == "no answer":
-        value = f"unknown (the mouse did not answer; asleep?) · {ratbagd}"
-    elif r.reason == "host mode":
-        value = "none (host mode: another tool controls the mouse)"
-    elif r.reason == "no permission":
-        value = f"{slot(r.believed)} · ratbagd's answer; no permission to read the mouse"
+    if isinstance(r.answer, NoReading):
+        match r.answer.reason:
+            case Reason.NO_ANSWER:
+                value = f"unknown (the mouse did not answer; asleep?) · {ratbagd}"
+            case Reason.HOST_MODE:
+                value = "none (host mode: another tool controls the mouse)"
+            case Reason.NO_PERMISSION:
+                value = f"{slot(r.believed)} · ratbagd's answer; no permission to read the mouse"
+            case Reason.UNCONFIRMED_NODE:
+                value = f"{slot(r.believed)} · ratbagd's answer; the device node could not be confirmed"
+            case _:
+                assert_never(r.answer.reason)
     else:
-        value = f"{slot(r.believed)} · ratbagd's answer; the device node could not be confirmed"
+        value = slot(r.answer) + ("" if r.answer == r.believed else f" · {ratbagd}")
     return f"Mouse          : {report.name} on {report.node}\nActive slot    : {value}"
 
 
