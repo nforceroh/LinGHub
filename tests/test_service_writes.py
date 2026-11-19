@@ -159,6 +159,12 @@ class ValidationTests(unittest.TestCase):
         self.assertFalse(h.bindings.set("wot", 1, "nonsense", "x"))
         self.assertEqual(h.saved, 0)
 
+    def test_an_unencodable_key_is_rejected_before_saving(self):
+        """SetBinding used to save it, and the daemon then crashed writing it (#8)."""
+        h = _Harness()
+        self.assertFalse(h.bindings.set("wot", 1, "key", "KEY_BOGUS"))
+        self.assertEqual(h.saved, 0)
+
     def test_an_invalid_led_setting_is_rejected(self):
         h = _Harness()
         self.assertFalse(h.settings.set_leds("wot", {"mode": "strobe"}))

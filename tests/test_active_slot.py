@@ -172,10 +172,11 @@ class MouseForTests(unittest.TestCase):
         it, so the daemon "reconnected" to a mouse on the other machine,
         logged an error, and announced it back after 0 s."""
         from linghub.hardware.active_slot import mouse_for
-        from linghub.hardware.ratbag import NOT_FOUND, DeviceNotFound
+        from linghub.hardware.failures import MouseAbsent
+        from linghub.hardware.ratbag import NOT_FOUND
 
         with self.assertNoLogs("linghub.hardware.active_slot", "ERROR"):
-            with self.assertRaises(DeviceNotFound) as raised:
+            with self.assertRaises(MouseAbsent) as raised:
                 mouse_for("/org/freedesktop/ratbag1/device/hidraw31", sys_root=self.sys)
         self.assertEqual(str(raised.exception), NOT_FOUND)
 

@@ -30,6 +30,11 @@ _Avoid_: desync, mismatch
 Writing a profile's contents into a slot and committing it to the mouse.
 _Avoid_: push, apply, upload, sync
 
+**Refused load**:
+A load the mouse or its driver would not accept. It is not retried until the
+profile, the config or the connection changes.
+_Avoid_: failed write, rejected profile
+
 **Desktop profile**:
 The profile loaded into slot 0, active whenever no game is running.
 _Avoid_: default profile, base profile, normal profile

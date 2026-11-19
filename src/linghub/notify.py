@@ -118,3 +118,12 @@ def profile_message(profile: str, game: str | None) -> tuple[str, str]:
     if game:
         return f"Playing {game}", f"Loaded <b>{profile}</b>"
     return "Back to the desktop", f"Loaded <b>{profile}</b>"
+
+
+def refused_message(profile: str, reason: str) -> tuple[str, str]:
+    """The summary and body for a refused load.
+
+    Worth a notification: the mouse is now on the wrong profile, and without
+    one the user finds out in game (#8).
+    """
+    return f'Couldn\'t load "{profile}"', reason

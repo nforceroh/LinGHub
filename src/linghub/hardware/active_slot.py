@@ -21,16 +21,9 @@ from pathlib import Path
 from typing import Awaitable, Callable, Protocol
 
 from . import hidpp
+from .failures import MouseAbsent, SlotUnknown
 
 logger = logging.getLogger(__name__)
-
-
-class SlotUnknown(Exception):
-    """The mouse could not say which slot it is on, this time.
-
-    Deliberately not a RuntimeError or OSError: the daemon reads those as a
-    lost mouse and reconnects, and a sleeping mouse is not lost.
-    """
 
 
 class MouseSlot(Protocol):
@@ -104,7 +97,7 @@ def mouse_for(
     reading it could read another device, so the daemon falls back to
     ratbagd's answer for this connection and says so once, loudly.
 
-    Raises DeviceNotFound when the node is already gone, so connecting fails
+    Raises MouseAbsent when the node is already gone, so connecting fails
     as it would for any missing mouse.
     """
     try:
@@ -112,9 +105,9 @@ def mouse_for(
     except hidpp.NodeGone as exc:
         # ratbagd still lists a mouse the kernel has removed: the mouse is
         # still missing, so this connection fails and the absence goes on.
-        from .ratbag import NOT_FOUND, DeviceNotFound
+        from .ratbag import NOT_FOUND
 
-        raise DeviceNotFound(NOT_FOUND) from exc
+        raise MouseAbsent(NOT_FOUND) from exc
     except hidpp.NodeMismatch as exc:
         logger.error(
             "cannot read the active slot from the mouse: %s; using ratbagd's answer", exc

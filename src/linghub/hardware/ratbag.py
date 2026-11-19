@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from dbus_fast import Message, MessageType, Variant
 from dbus_fast.aio import MessageBus
 
+from .failures import MouseAbsent, MouseMisconfigured
+
 
 SERVICE = "org.freedesktop.ratbag1"
 ROOT = "/org/freedesktop/ratbag1"
@@ -32,15 +34,6 @@ NOT_FOUND = (
     "no G502 found; it may be switched to another machine (KVM), unplugged, "
     "or asleep. LinGHub will pick it up when it returns."
 )
-
-
-class DeviceNotFound(RuntimeError):
-    """No matching device is visible to ratbagd.
-
-    Distinct from other failures because it is usually transient: the mouse
-    may be switched to another machine, unplugged, or asleep. The daemon
-    keeps looking rather than exiting.
-    """
 
 
 class DeviceReplaced(RuntimeError):
@@ -90,7 +83,10 @@ class RatbagClient:
     async def find_device(self) -> Device:
         version = await self._property(ROOT, "Manager", "APIVersion")
         if version != 2:
-            raise RuntimeError(f"unsupported ratbagd API version {version} (expected 2)")
+            raise MouseMisconfigured(
+                f"unsupported ratbagd API version {version} (expected 2); "
+                "LinGHub needs a ratbagd that speaks API version 2"
+            )
         paths = await self._property(ROOT, "Manager", "Devices")
         matches = []
         for path in paths:
@@ -98,9 +94,12 @@ class RatbagClient:
             if "G502" in name:
                 matches.append(Device(name, path))
         if not matches:
-            raise DeviceNotFound(NOT_FOUND)
+            raise MouseAbsent(NOT_FOUND)
         if len(matches) > 1:
-            raise RuntimeError("multiple G502 devices found; cannot choose safely")
+            raise MouseMisconfigured(
+                "multiple G502 devices found, so LinGHub cannot choose safely; "
+                "unplug all but one"
+            )
         return matches[0]
 
     async def report_rates(self, device: Device) -> list[int]:

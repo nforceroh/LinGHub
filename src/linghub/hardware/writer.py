@@ -8,13 +8,42 @@ and a mismatch is raised rather than reported as success.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from dataclasses import dataclass
+from pathlib import Path
+
+from dbus_fast import DBusError
 
 from ..domain.profile import Profile
 from . import mapping
 from .active_slot import ActiveSlotReader, MouseSlot, mouse_for
+from .failures import LoadRefused, MouseAbsent, MouseFailure, MouseLost
 from .ratbag import SERVICE, RatbagClient, Device, DeviceReplaced
+
+# What a vanished mouse or a broken ratbagd looks like from down here: D-Bus
+# errors arrive as RuntimeError (DeviceReplaced among them), a gone hidraw
+# node as OSError.
+_UNREACHABLE = (RuntimeError, OSError, DBusError, EOFError)
+
+
+@contextlib.contextmanager
+def _translated(refused: tuple[type[BaseException], ...] = ()):
+    """Turn failures from below into the Mouse seam's vocabulary (#8).
+
+    The one place where the order of these clauses matters: a WriteError is
+    a RuntimeError, so refusals are matched first. Errors this doesn't
+    recognise propagate untouched; they are bugs, and the daemon logs them
+    with their traceback.
+    """
+    try:
+        yield
+    except MouseFailure:
+        raise
+    except refused as exc:
+        raise LoadRefused(str(exc)) from exc
+    except _UNREACHABLE as exc:
+        raise MouseLost(str(exc)) from exc
 
 
 def _payloads_match(actual, expected) -> bool:
@@ -65,8 +94,12 @@ class ProfileWriter:
         return self._device
 
     async def report_rates(self) -> list[int]:
-        """The report rates this device accepts, in Hz; empty if unpublished."""
-        return await self._client.report_rates(self._device)
+        """The report rates this device accepts, in Hz; empty if unpublished.
+
+        Raises MouseLost if the mouse is gone.
+        """
+        with _translated():
+            return await self._client.report_rates(self._device)
 
     async def _check_identity(self) -> None:
         """Fail if the device path no longer names the device we found.
@@ -103,7 +136,15 @@ class ProfileWriter:
         return await self._client._property(path, interface, name)
 
     async def apply(self, profile: Profile, slot: int) -> WriteResult:
-        """Write `profile` into `slot`, commit, and verify."""
+        """Write `profile` into `slot`, commit, verify, and activate it.
+
+        Raises LoadRefused if the mouse or ratbagd won't take it (including a
+        binding the encoder can't encode), MouseLost if the mouse is gone.
+        """
+        with _translated(refused=(WriteError, mapping.BindingError)):
+            return await self._apply(profile, slot)
+
+    async def _apply(self, profile: Profile, slot: int) -> WriteResult:
         await self._check_identity()
         path = await self._profile_path(slot)
         changed: list[str] = []
@@ -144,10 +185,12 @@ class ProfileWriter:
 
         Read each time rather than remembered, so the daemon notices when
         something outside it moved the mouse. Raises SlotUnknown when the
-        mouse cannot say; see `active_slot` for the rules.
+        mouse cannot say, MouseLost if it is gone; see `active_slot` for the
+        rules.
         """
-        await self._check_identity()
-        return await self._slots.read()
+        with _translated():
+            await self._check_identity()
+            return await self._slots.read()
 
     async def _believed_slot(self) -> int | None:
         """Which slot ratbagd believes is active, or None if none is."""
@@ -255,25 +298,32 @@ class RatbagConnector:
 
     The production adapter for the daemon's mouse connection. It owns the
     system bus, reusing it across reconnects, and closes it on disconnect.
-    Raises DeviceNotFound when no G502 is attached.
+    `connect` raises MouseAbsent (not found, or ratbagd not answering) or
+    MouseMisconfigured (two G502s, an unsupported ratbagd), and nothing else
+    on purpose.
     """
 
-    def __init__(self):
+    def __init__(self, connect_bus=None, sys_root: Path = Path("/sys/class/hidraw")):
+        """`connect_bus` makes the system bus connection; the tests pass a fake."""
+        self._connect_bus = connect_bus or _system_bus
+        self._sys_root = sys_root
         self._bus = None
 
     async def connect(self) -> ProfileWriter:
-        from dbus_fast import BusType
-        from dbus_fast.aio import MessageBus
-
-        if self._bus is None:
-            self._bus = await asyncio.wait_for(
-                MessageBus(bus_type=BusType.SYSTEM).connect(), timeout=5
-            )
-        client = RatbagClient(self._bus)
-        device = await client.find_device()
-        # Before announcing the find: ratbagd can still list a mouse the
-        # kernel has removed, and mouse_for raises DeviceNotFound for that.
-        mouse = mouse_for(device.path)
+        try:
+            if self._bus is None:
+                self._bus = await asyncio.wait_for(self._connect_bus(), timeout=5)
+            client = RatbagClient(self._bus)
+            device = await client.find_device()
+            # Before announcing the find: ratbagd can still list a mouse the
+            # kernel has removed, and mouse_for raises MouseAbsent for that.
+            mouse = mouse_for(device.path, sys_root=self._sys_root)
+        except MouseFailure:
+            raise
+        except _UNREACHABLE as exc:
+            # A bus that failed may be broken for good: make a new one next time.
+            self.disconnect()
+            raise MouseAbsent(f"cannot reach the mouse through ratbagd: {exc}") from exc
         logging.getLogger(__name__).info("found %s at %s", device.name, device.path)
         return ProfileWriter(client, device, mouse=mouse)
 
@@ -281,3 +331,10 @@ class RatbagConnector:
         if self._bus is not None:
             self._bus.disconnect()
             self._bus = None
+
+
+async def _system_bus():
+    from dbus_fast import BusType
+    from dbus_fast.aio import MessageBus
+
+    return await MessageBus(bus_type=BusType.SYSTEM).connect()
