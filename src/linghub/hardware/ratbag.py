@@ -52,7 +52,8 @@ class RatbagClient:
     def __init__(self, bus: MessageBus):
         self._bus = bus
 
-    async def _call(self, message: Message) -> Message:
+    async def call(self, message: Message) -> Message:
+        """Send one message and return its reply, raising on an error reply."""
         try:
             reply = await asyncio.wait_for(self._bus.call(message), timeout=5)
         except TimeoutError as exc:
@@ -62,8 +63,9 @@ class RatbagClient:
             raise RuntimeError(f"D-Bus call {message.member} failed: {detail}")
         return reply
 
-    async def _property(self, path: str, interface: str, name: str):
-        reply = await self._call(Message(
+    async def get(self, path: str, interface: str, name: str):
+        """Read one property of one object."""
+        reply = await self.call(Message(
             destination=SERVICE, path=path, interface=PROPERTIES, member="Get",
             signature="ss", body=[f"{SERVICE}.{interface}", name],
         ))
@@ -72,25 +74,35 @@ class RatbagClient:
             raise RuntimeError(f"invalid D-Bus response for {interface}.{name}")
         return value.value
 
-    async def _method(self, path: str, interface: str, method: str) -> None:
-        reply = await self._call(Message(
+    async def invoke(self, path: str, interface: str, method: str) -> None:
+        """Call one method of one object, raising if it reports an error."""
+        reply = await self.call(Message(
             destination=SERVICE, path=path,
             interface=f"{SERVICE}.{interface}", member=method,
         ))
         if reply.body[0] != 0:
             raise RuntimeError(f"{interface}.{method} returned error {reply.body[0]}")
 
+    async def set(self, path: str, interface: str, name: str, signature: str, value) -> None:
+        """Write one property of one object."""
+        await self.call(Message(
+            destination=SERVICE, path=path,
+            interface=PROPERTIES, member="Set",
+            signature="ssv",
+            body=[f"{SERVICE}.{interface}", name, Variant(signature, value)],
+        ))
+
     async def find_device(self) -> Device:
-        version = await self._property(ROOT, "Manager", "APIVersion")
+        version = await self.get(ROOT, "Manager", "APIVersion")
         if version != 2:
             raise MouseMisconfigured(
                 f"unsupported ratbagd API version {version} (expected 2); "
                 "LinGHub needs a ratbagd that speaks API version 2"
             )
-        paths = await self._property(ROOT, "Manager", "Devices")
+        paths = await self.get(ROOT, "Manager", "Devices")
         matches = []
         for path in paths:
-            name = await self._property(path, "Device", "Name")
+            name = await self.get(path, "Device", "Name")
             if "G502" in name:
                 matches.append(Device(name, path))
         if not matches:
@@ -116,18 +128,18 @@ class RatbagClient:
                 return []
             return [
                 int(rate)
-                for rate in await self._property(profiles[0].path, "Profile", "ReportRates")
+                for rate in await self.get(profiles[0].path, "Profile", "ReportRates")
             ]
         except (RuntimeError, OSError):
             return []
 
     async def profiles(self, device: Device) -> list[Profile]:
-        paths = await self._property(device.path, "Device", "Profiles")
+        paths = await self.get(device.path, "Device", "Profiles")
         profiles = []
         for path in paths:
-            index = await self._property(path, "Profile", "Index")
-            active = await self._property(path, "Profile", "IsActive")
-            disabled = await self._property(path, "Profile", "Disabled")
+            index = await self.get(path, "Profile", "Index")
+            active = await self.get(path, "Profile", "IsActive")
+            disabled = await self.get(path, "Profile", "Disabled")
             profiles.append(Profile(index, path, active, disabled))
         return profiles
 
@@ -140,8 +152,8 @@ class RatbagClient:
             return False
         if selected.disabled:
             raise RuntimeError(f"profile {index} is disabled")
-        await self._method(selected.path, "Profile", "SetActive")
-        if not await self._property(selected.path, "Profile", "IsActive"):
+        await self.invoke(selected.path, "Profile", "SetActive")
+        if not await self.get(selected.path, "Profile", "IsActive"):
             raise RuntimeError(f"ratbagd did not activate profile {index}")
-        await self._method(device.path, "Device", "Commit")
+        await self.invoke(device.path, "Device", "Commit")
         return True

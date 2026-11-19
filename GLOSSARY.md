@@ -21,6 +21,12 @@ The slot the mouse is using right now, as the mouse itself reports it.
 ratbagd's answer is only its belief about the active slot.
 _Avoid_: current profile, selected slot
 
+**Mouse**:
+The connected G502 as the daemon sees it: found through ratbagd, its hidraw
+node confirmed, then written to and read from. One module owns those
+connection rules, so "is this the right device?" is answered in one place.
+_Avoid_: device, hardware, writer
+
 **Drift**:
 The active slot differing from the slot the daemon last loaded a profile
 into, whatever moved it: a profile button, a KVM switch, or another tool.

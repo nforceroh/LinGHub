@@ -3,7 +3,7 @@
 The hardware modules fail in many ways: D-Bus errors, ratbagd refusing a
 write, a hidraw node vanishing, the encoder rejecting a key name. The daemon
 needs to know only what each failure *means*, so the public methods of
-`ProfileWriter` and `RatbagConnector` translate every failure into one of
+`RatbagMouse` and `RatbagConnector` translate every failure into one of
 these, once. Anything else that escapes is a bug.
 
 Deliberately not RuntimeError, OSError or ValueError: lower modules raise

@@ -9,7 +9,7 @@ import unittest
 
 from linghub.domain.profile import Binding, Profile
 from linghub.hardware.failures import LoadRefused, MouseLost
-from linghub.hardware.writer import ProfileWriter
+from linghub.hardware.mouse import RatbagMouse
 
 
 class FakeClient:
@@ -32,29 +32,14 @@ class FakeClient:
         # can renumber hidraw nodes, so this can become another device.
         self.device_name = "Logitech G502"
 
-    async def _call(self, message):
+    async def call(self, message):
         from types import SimpleNamespace
-        from dbus_fast import MessageType, Variant
+        from dbus_fast import MessageType
 
         self.calls.append((message.path, message.member))
-        if message.member == "Set":
-            interface, name, variant = message.body
-            if name == "ReportRate" and self.ignore_report_rate:
-                # Simulate ratbagd accepting the write but not applying it.
-                self._dirty = True
-                return SimpleNamespace(message_type=MessageType.METHOD_RETURN, body=[0])
-            if name == "Mapping" and self.ignore_mapping_payload:
-                # Simulate ratbagd accepting the write but keeping the old
-                # payload: same action type, different value.
-                action_type, _payload = variant.value
-                self._values[(message.path, name)] = (action_type, 999)
-                self._dirty = True
-                return SimpleNamespace(message_type=MessageType.METHOD_RETURN, body=[0])
-            self._values[(message.path, name)] = variant.value
-            self._dirty = True
         return SimpleNamespace(message_type=MessageType.METHOD_RETURN, body=[0])
 
-    async def _property(self, path, interface, name):
+    async def get(self, path, interface, name):
         if name == "Name":
             return self.device_name
         if name == "Profiles":
@@ -75,7 +60,31 @@ class FakeClient:
             return self._values.get((path, "Mapping"), (1, 1))
         raise AssertionError(f"unexpected property {name}")
 
-    async def _method(self, path, interface, method):
+    async def set(self, path, interface, name, signature, value):
+        self.calls.append((path, "Set"))
+        if name == "ReportRate" and self.ignore_report_rate:
+            # Simulate ratbagd accepting the write but not applying it.
+            self._dirty = True
+            return
+        if name == "Mapping" and self.ignore_mapping_payload:
+            # Simulate ratbagd accepting the write but keeping the old
+            # payload: same action type, different value.
+            action_type, _payload = value
+            self._values[(path, name)] = (action_type, 999)
+            self._dirty = True
+            return
+        self._values[(path, name)] = value
+        self._dirty = True
+
+    async def profiles(self, device):
+        from linghub.hardware.ratbag import Profile
+
+        return [
+            Profile(index, path, path == self._active, False)
+            for index, path in enumerate(self._profiles)
+        ]
+
+    async def invoke(self, path, interface, method):
         self.calls.append((path, method))
         if method == "Commit":
             self._dirty = False
@@ -93,7 +102,7 @@ class FakeDevice:
 class WriterTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.client = FakeClient()
-        self.writer = ProfileWriter(self.client, FakeDevice())
+        self.writer = RatbagMouse(self.client, FakeDevice())
 
     async def test_activates_the_slot_after_writing(self):
         profile = Profile(name="desktop", bindings={0: Binding("button", 1)})
@@ -168,7 +177,7 @@ class DeviceIdentityTests(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         self.client = FakeClient()
-        self.writer = ProfileWriter(self.client, FakeDevice())
+        self.writer = RatbagMouse(self.client, FakeDevice())
         self.client.device_name = "Logitech Candy"
 
     async def test_apply_reports_a_replaced_device_not_a_refused_write(self):
@@ -199,13 +208,13 @@ class ActiveSlotSourceTests(unittest.IsolatedAsyncioTestCase):
 
         client = FakeClient()
         client._active = "/p1"          # ratbagd believes slot 1
-        writer = ProfileWriter(client, FakeDevice(), mouse=Mouse())
+        writer = RatbagMouse(client, FakeDevice(), mouse=Mouse())
         self.assertEqual(await writer.active_slot(), 0)
 
     async def test_without_a_mouse_reader_ratbagd_answers(self):
         client = FakeClient()
         client._active = "/p1"
-        self.assertEqual(await ProfileWriter(client, FakeDevice()).active_slot(), 1)
+        self.assertEqual(await RatbagMouse(client, FakeDevice()).active_slot(), 1)
 
     async def test_a_replaced_device_is_found_before_the_mouse_is_asked(self):
         class Mouse:
@@ -215,7 +224,7 @@ class ActiveSlotSourceTests(unittest.IsolatedAsyncioTestCase):
         client = FakeClient()
         client.device_name = "Logitech Candy"
         with self.assertRaises(MouseLost):
-            await ProfileWriter(client, FakeDevice(), mouse=Mouse()).active_slot()
+            await RatbagMouse(client, FakeDevice(), mouse=Mouse()).active_slot()
 
 
 if __name__ == "__main__":

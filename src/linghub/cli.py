@@ -169,7 +169,7 @@ async def _read_mouse() -> MouseReport:
     """Find the G502 and ask it, through the adapter the daemon uses."""
     from .hardware import diagnose
     from .hardware.failures import MouseAbsent, MouseLost, MouseMisconfigured
-    from .hardware.writer import RatbagConnector
+    from .hardware.mouse import RatbagConnector
 
     connector = RatbagConnector()
     try:
