@@ -93,6 +93,10 @@ def make_window(
     window._state = DaemonState()
     window._title = Adw.WindowTitle(title="t")
     window._status = Gtk.Label()
+    window._banner = Adw.Banner()
+    from linghub import version
+
+    window._daemon_version = version.DAEMON_NOT_RUNNING
     window._profile_list = Gtk.ListBox()
     window._profile_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
 

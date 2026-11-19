@@ -30,6 +30,9 @@ class FakeClient:
 
         return SimpleNamespace(state="state")
 
+    async def daemon_version(self):
+        return "0.1.0"
+
     def set_change_handler(self, handler):
         self._on_change = handler
 
@@ -128,6 +131,10 @@ class CallTests(unittest.TestCase):
 
     def test_state_is_a_convenience_for_the_common_case(self):
         self.assertEqual(daemon_access.state(), "state")
+
+    def test_state_and_version_are_read_on_one_connection(self):
+        self.assertEqual(daemon_access.state_and_version(), ("state", "0.1.0"))
+        self.assertEqual(len(FakeClient.instances), 1)
 
 
 class WatcherTests(unittest.TestCase):

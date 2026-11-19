@@ -15,6 +15,7 @@ from dbus_fast import BusType
 from dbus_fast.aio import MessageBus
 
 from .. import config as config_module
+from .. import version
 from ..discovery.detector import Detection, detect
 from ..discovery.gamemode import GameModeClient
 from dbus_fast import DBusError as DBusFastError
@@ -174,6 +175,7 @@ class Daemon:
             bindings=self.bindings,
             settings=self.settings,
             get_view=self.view,
+            app_version=version.current(),
         )
         self._session_bus.export(PATH, self._interface)
         self._bus_announcer.attach(self._interface)
@@ -356,6 +358,9 @@ class Daemon:
             )
 
     async def run(self) -> None:
+        # Fix the app version now, before anything else: it must describe the
+        # code this process loaded, not whatever the clone holds later.
+        logger.info("LinGHub %s starting", version.current())
         if not self.load_config():
             # A bad config is not transient: restarting will not fix it, so
             # exit non-zero and let systemd's RestartPreventExitStatus stop

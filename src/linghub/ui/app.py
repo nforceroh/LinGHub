@@ -12,6 +12,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gio, GLib
 
+from .. import version
 from .asyncbridge import run_and_report
 from .client import DaemonClient
 from .window import MainWindow
@@ -51,6 +52,9 @@ class LingHubApplication(Adw.Application):
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    # Fix the app version at startup, so it describes the code this process
+    # loaded rather than whatever the clone holds when About is opened.
+    logger.info("LinGHub %s", version.current())
     app = LingHubApplication()
     # Pass only the program name: GApplication treats extra arguments as files
     # to open, and "ui" is our subcommand, not a file.

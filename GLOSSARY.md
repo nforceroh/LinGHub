@@ -86,6 +86,17 @@ The single file holding every profile plus application settings. The daemon is
 its only writer.
 _Avoid_: settings, preferences, store, database
 
+**Config format**:
+The numbered layout of the config file, raised only when the file's structure
+changes. Unrelated to the app version.
+_Avoid_: config version, schema version
+
+**App version**:
+The build of LinGHub a running process loaded when it started: a release
+number, plus how far past that release the code is. The daemon, tray and
+window each have one, and they can differ until a stale process restarts.
+_Avoid_: version (alone), build number, release
+
 **Config change**:
 One edit to the config: a new binding, a DPI slot, a lighting effect, or a
 whole profile. Every config change obeys the same rule — apply it, save it, and

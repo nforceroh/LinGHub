@@ -23,7 +23,7 @@ gi.require_version("AppIndicator3", "0.1")
 
 from gi.repository import AppIndicator3, GLib, Gtk
 
-from . import daemon_access
+from . import daemon_access, version
 
 
 logger = logging.getLogger("linghub.tray")
@@ -61,6 +61,17 @@ class Tray:
         quit_item = Gtk.MenuItem(label="Quit tray")
         quit_item.connect("activate", lambda _w: self._quit())
         self._menu.append(quit_item)
+        self._menu.append(Gtk.SeparatorMenuItem())
+
+        # This process's app version, fixed at startup, then a note that
+        # appears only when the daemon is running different code.
+        self._version_item = Gtk.MenuItem(label=f"LinGHub {version.current()}")
+        self._version_item.set_sensitive(False)
+        self._menu.append(self._version_item)
+        self._daemon_note_item = Gtk.MenuItem(label="")
+        self._daemon_note_item.set_sensitive(False)
+        self._daemon_note_item.set_no_show_all(True)
+        self._menu.append(self._daemon_note_item)
 
         self._menu.show_all()
         self._indicator.set_menu(self._menu)
@@ -121,18 +132,19 @@ class Tray:
         threading.Thread(target=self._refresh_thread, daemon=True).start()
 
     def _refresh_thread(self) -> None:
+        state = None
+        daemon_version = version.DAEMON_NOT_RUNNING
         try:
-            state = daemon_access.state()
+            state, daemon_version = daemon_access.state_and_version()
         except daemon_access.DaemonUnavailable as exc:
             logger.debug("daemon unavailable: %s", exc)
-            state = None
         except Exception:  # noqa: BLE001 - a tray must not die on a bad poll
             logger.exception("unexpected failure reading daemon state")
-            state = None
         finally:
             self._busy = False
         if state is not None:
             GLib.idle_add(self._apply, state)
+        GLib.idle_add(self._apply_version, daemon_version)
 
     def _apply(self, state) -> bool:
         """Update the menu from a daemon state snapshot."""
@@ -159,6 +171,13 @@ class Tray:
             self._indicator.set_title(
                 f"LinGHub — {state.active_profile or 'unknown'}"
             )
+        return GLib.SOURCE_REMOVE
+
+    def _apply_version(self, daemon_version) -> bool:
+        """Show a note when the daemon runs code other than this tray's."""
+        note = version.daemon_note(version.current(), daemon_version)
+        self._daemon_note_item.set_label(note or "")
+        self._daemon_note_item.set_visible(note is not None)
         return GLib.SOURCE_REMOVE
 
     def _rebuild_profiles(self, names: tuple[str, ...]) -> None:

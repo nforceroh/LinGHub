@@ -33,6 +33,20 @@ print("ITEMS", ",".join(i.get_label() for i in tray._profile_items))
 print("ITEM_VISIBLE", ",".join(str(i.get_visible()) for i in tray._profile_items))
 print("SENSITIVE", ",".join(str(i.get_sensitive()) for i in tray._profile_items))
 print("STATUS", tray._status_item.get_label())
+from linghub import version
+print("VERSION_LABEL", tray._version_item.get_label())
+print("VERSION_SENSITIVE", tray._version_item.get_sensitive())
+print("VERSION_IS_LAST", tray._menu.get_children()[-1] is tray._daemon_note_item
+      and tray._menu.get_children()[-2] is tray._version_item)
+tray._apply_version(version.current())
+print("NOTE_WHEN_SAME", tray._daemon_note_item.get_visible())
+tray._apply_version("9.9.9")
+print("NOTE_WHEN_DIFFERENT", tray._daemon_note_item.get_visible())
+print("NOTE_TEXT", tray._daemon_note_item.get_label())
+tray._apply_version(version.PREDATES_REPORTING)
+print("NOTE_WHEN_OLD", tray._daemon_note_item.get_label())
+tray._apply_version(version.DAEMON_NOT_RUNNING)
+print("NOTE_WHEN_ABSENT", tray._daemon_note_item.get_visible())
 print("FALLBACK_REPEATS", tray._refresh())
 print("ONCE_REMOVES", tray._refresh_once())
 """
@@ -86,6 +100,41 @@ class TrayMenuTests(unittest.TestCase):
     def test_a_signal_refresh_does_not_rearm(self):
         """idle_add removes the source; a truthy return would repeat forever."""
         self.assertEqual(self.menu["ONCE_REMOVES"], "False")
+
+
+class TrayVersionTests(unittest.TestCase):
+    """The tray shows its app version, and the daemon's when it differs."""
+
+    @classmethod
+    def setUpClass(cls):
+        from linghub import version
+
+        cls.menu = run_menu()
+        cls.own = version.current()
+
+    def test_the_tray_shows_its_own_version(self):
+        self.assertEqual(self.menu["VERSION_LABEL"], f"LinGHub {self.own}")
+
+    def test_the_version_line_is_not_clickable(self):
+        self.assertEqual(self.menu["VERSION_SENSITIVE"], "False")
+
+    def test_the_version_lines_close_the_menu(self):
+        self.assertEqual(self.menu["VERSION_IS_LAST"], "True")
+
+    def test_a_matching_daemon_shows_no_note(self):
+        self.assertEqual(self.menu["NOTE_WHEN_SAME"], "False")
+
+    def test_a_different_daemon_says_to_restart_it(self):
+        self.assertEqual(self.menu["NOTE_WHEN_DIFFERENT"], "True")
+        self.assertEqual(self.menu["NOTE_TEXT"], "Daemon is running 9.9.9; restart it")
+
+    def test_an_old_daemon_predates_version_reporting(self):
+        self.assertEqual(
+            self.menu["NOTE_WHEN_OLD"], "Daemon predates version reporting; restart it"
+        )
+
+    def test_no_daemon_is_not_a_mismatch(self):
+        self.assertEqual(self.menu["NOTE_WHEN_ABSENT"], "False")
 
 
 if __name__ == "__main__":

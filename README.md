@@ -181,6 +181,7 @@ editing the config file.
 | `ActiveProfile` | property `s` | Profile currently on the mouse, empty if unknown |
 | `DetectedGame` | property `s` | Game currently detected, empty if none |
 | `DesktopProfile` | property `s` | Profile used when no game is running |
+| `Version` | property `s` | The daemon's app version: the code it loaded when it started (see ADR-0009) |
 | `ProfileChanged(s)` | signal | A profile was loaded onto the mouse |
 | `GameDetected(s)` | signal | A game started being detected |
 | `GameExited(s)` | signal | A detected game stopped running |

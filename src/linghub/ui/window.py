@@ -16,7 +16,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import Adw, Gio, GLib, Gtk
 
 from .asyncbridge import run_and_report
 from .binding_editor import BindingEditor
@@ -24,6 +24,7 @@ from .buttonmap import BUTTONS, describe, manual_number
 from .client import DaemonClient, DaemonState, DaemonView
 from .diagram import MouseDiagram
 from . import presentation
+from .. import version
 from .dpi_panel import DpiPanel
 from .led_panel import LedPanel
 
@@ -52,6 +53,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._view: DaemonView | None = None
         self._refresh_task = None
         self._refresh_pending = False
+        self._daemon_version = version.DAEMON_NOT_RUNNING
 
         self.set_default_size(980, 620)
 
@@ -59,6 +61,7 @@ class MainWindow(Adw.ApplicationWindow):
         header = Adw.HeaderBar()
         header.set_title_widget(Adw.WindowTitle(title="LinGHub", subtitle=""))
         self._title = header.get_title_widget()
+        header.pack_end(self._build_main_menu())
         toolbar.add_top_bar(header)
 
         self._status = Gtk.Label(label="Connecting…")
@@ -66,6 +69,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._status.set_margin_top(6)
         self._status.set_margin_bottom(6)
         toolbar.add_top_bar(self._status)
+
+        # Shown only when the daemon runs code other than this window's.
+        self._banner = Adw.Banner()
+        toolbar.add_top_bar(self._banner)
 
         toolbar.set_content(self._build_content())
         self.set_content(toolbar)
@@ -306,8 +313,52 @@ class MainWindow(Adw.ApplicationWindow):
             view = await self._client.get_view(self._editing_profile() or "")
         except (RuntimeError, OSError) as exc:
             self._status.set_text(f"Daemon unavailable: {exc}")
+            self._apply_daemon_version(version.DAEMON_NOT_RUNNING)
             return
         self._apply_view(view)
+        # Read after the view, and on its own: a failure here must not cost
+        # the user the state they came to see.
+        try:
+            daemon_version = await self._client.daemon_version()
+        except (RuntimeError, OSError) as exc:
+            logger.debug("cannot read the daemon's version: %s", exc)
+            daemon_version = version.DAEMON_NOT_RUNNING
+        self._apply_daemon_version(daemon_version)
+
+    def _apply_daemon_version(self, daemon_version) -> None:
+        """Remember the daemon's version, and flag it if it differs from ours."""
+        self._daemon_version = daemon_version
+        note = version.daemon_note(version.current(), daemon_version)
+        self._banner.set_title(note or "")
+        self._banner.set_revealed(note is not None)
+
+    def _build_main_menu(self) -> Gtk.MenuButton:
+        """The header bar's menu, which holds About."""
+        menu = Gio.Menu()
+        menu.append("About LinGHub", "win.about")
+        about = Gio.SimpleAction.new("about", None)
+        about.connect("activate", lambda *_args: self._about_dialog().present(self))
+        self.add_action(about)
+        return Gtk.MenuButton(
+            icon_name="open-menu-symbolic", menu_model=menu, tooltip_text="Main menu",
+        )
+
+    def _about_dialog(self) -> Adw.AboutDialog:
+        """This window's app version, with the daemon's beside it."""
+        daemon = self._daemon_version
+        if daemon is version.DAEMON_NOT_RUNNING:
+            line = "Daemon not running"
+        elif daemon is version.PREDATES_REPORTING:
+            line = "Daemon version unknown: it predates version reporting"
+        else:
+            line = f"Daemon {daemon}"
+        note = version.daemon_note(version.current(), daemon)
+        comments = line if note is None or daemon is version.PREDATES_REPORTING else f"{line}\n{note}"
+        return Adw.AboutDialog(
+            application_name="LinGHub",
+            version=version.current(),
+            comments=f"Profile manager for the Logitech G502 family\n\n{comments}",
+        )
 
     def _apply_view(self, view: DaemonView) -> None:
         self._view = view

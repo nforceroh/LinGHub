@@ -73,6 +73,17 @@ def state() -> DaemonState:
     return call(read)
 
 
+def state_and_version() -> tuple[DaemonState, str | None]:
+    """The daemon's state and its app version, on one connection.
+
+    The version is PREDATES_REPORTING for a daemon too old to report one.
+    """
+    async def read(client):
+        return (await client.get_view("")).state, await client.daemon_version()
+
+    return call(read)
+
+
 class Watcher:
     """A long-lived connection that reports when the daemon changes.
 

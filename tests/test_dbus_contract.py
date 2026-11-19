@@ -63,6 +63,34 @@ class ContractMatchesDaemonTests(unittest.TestCase):
                 self.assertEqual(member.output, actual)
 
 
+class VersionPropertyTests(unittest.TestCase):
+    """The daemon's version is a property, not part of GetView (ADR-0009).
+
+    A client reads it separately, so a daemon too old to have it answers
+    "no such property" instead of breaking every other read.
+    """
+
+    def test_the_contract_property_exists_on_the_daemon_with_its_signature(self):
+        properties = {p.name: p for p in make_interface().introspect().properties}
+        self.assertIn(dbus_contract.VERSION.name, properties)
+        self.assertEqual(
+            properties[dbus_contract.VERSION.name].signature,
+            dbus_contract.VERSION.signature,
+        )
+
+    def test_the_property_reports_the_version_it_was_given(self):
+        interface = ManagerInterface(
+            profiles=_Stub(), bindings=_Stub(), settings=_Stub(),
+            get_view=lambda profile: None, app_version="0.1.0+3.g5c27eef",
+        )
+        self.assertEqual(interface.Version, "0.1.0+3.g5c27eef")
+
+    def test_by_default_the_property_reports_this_process_version(self):
+        from linghub import version
+
+        self.assertEqual(make_interface().Version, version.current())
+
+
 class CallBodyTests(unittest.TestCase):
     def test_accepts_the_declared_arity(self):
         self.assertEqual(

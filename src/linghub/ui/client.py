@@ -23,6 +23,13 @@ INTERFACE = contract.INTERFACE
 
 logger = logging.getLogger("linghub.ui.client")
 
+# A daemon's answers when it has no such property: dbus-fast says
+# UnknownProperty, GLib-based services say InvalidArgs.
+_NO_PROPERTY = frozenset({
+    "org.freedesktop.DBus.Error.UnknownProperty",
+    "org.freedesktop.DBus.Error.InvalidArgs",
+})
+
 # The bus's answers when nothing owns the daemon's name. Connecting to the bus
 # succeeds without the daemon, so these replies are the only sign it is absent.
 _NO_DAEMON = frozenset({
@@ -189,6 +196,34 @@ class DaemonClient:
                 report_rate=int(rate),
             ),
         )
+
+    async def daemon_version(self) -> str | None:
+        """The daemon's app version, or PREDATES_REPORTING for an older daemon.
+
+        A property of its own rather than part of GetView, so a daemon from
+        before version reporting answers "no such property" here and every
+        other read still works (ADR-0009). No daemon at all is still
+        DaemonUnavailable: that is a different thing to tell the user.
+        """
+        from dbus_fast import Variant
+
+        from .. import version
+
+        if self._bus is None:
+            raise RuntimeError("not connected to the daemon")
+        reply = await asyncio.wait_for(
+            self._bus.call(Message(
+                destination=SERVICE, path=PATH,
+                interface="org.freedesktop.DBus.Properties", member="Get",
+                signature="ss", body=[INTERFACE, contract.VERSION.name],
+            )),
+            timeout=5,
+        )
+        if reply.message_type == MessageType.ERROR and reply.error_name in _NO_PROPERTY:
+            return version.PREDATES_REPORTING
+        _raise_for_error(reply, contract.VERSION.name)
+        value = reply.body[0]
+        return str(value.value if isinstance(value, Variant) else value)
 
     async def load_profile(self, name: str) -> bool:
         return bool(await self._invoke(contract.LOAD_PROFILE, name))

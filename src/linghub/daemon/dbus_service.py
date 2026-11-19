@@ -21,6 +21,7 @@ from dbus_fast.service import (
 )
 
 
+from .. import version
 from ..dbus_contract import INTERFACE, PATH, SERVICE
 
 logger = logging.getLogger("linghub.dbus")
@@ -33,19 +34,21 @@ class ManagerInterface(ServiceInterface):
     the callbacks it is given, so it can be tested without a bus.
     """
 
-    def __init__(self, profiles, bindings, settings, get_view):
+    def __init__(self, profiles, bindings, settings, get_view, app_version: str | None = None):
         """Take the three collaborators the methods act on, plus one reader.
 
         Grouping by what each method acts on keeps the interface small: adding
         a member means adding it to one collaborator, not to a fifteen-argument
         constructor. Every read goes through `get_view(profile)`, which
         returns a `snapshot.View`; this class only turns it into D-Bus types.
+        `app_version` defaults to this process's own.
         """
         super().__init__(INTERFACE)
         self._profiles = profiles
         self._bindings = bindings
         self._settings = settings
         self._get_view = get_view
+        self._app_version = app_version if app_version is not None else version.current()
 
     def _state(self):
         return self._get_view("").state
@@ -190,6 +193,11 @@ class ManagerInterface(ServiceInterface):
             "duration": duration,
             "color": (red, green, blue),
         }))
+
+    @dbus_property(access=PropertyAccess.READ)
+    def Version(self) -> "s":
+        """The daemon's app version: the code it loaded when it started."""
+        return self._app_version
 
     @dbus_property(access=PropertyAccess.READ)
     def ActiveProfile(self) -> "s":
