@@ -28,7 +28,7 @@ system directory, so the two names must differ or the clone silently wins.
   typelibs still come from the host), it unpacks to `/tmp` on every start, it
   breaks the tray's "Open LinGHub" (which spawns `sys.executable -m
   linghub.cli ui`, and a frozen `sys.executable` is the binary), and Fedora
-  rejects bundled binaries, which forecloses COPR.
+  rejects bundled binaries, so it could not be packaged for Fedora at all.
 - **An AppImage** — the same bundling problem with a larger surface: GTK4
   themes, gschemas and portals all need shipping, and the result is the
   wrong-theme class of bug. It also cannot install a systemd user unit, which
@@ -55,4 +55,8 @@ system directory, so the two names must differ or the clone silently wins.
 - `linghub init` writes the factory default config, and the unit runs it with
   `--if-missing` before the daemon. A missing config is handled once; a
   broken one is still left alone so the daemon fails loudly on it.
-- COPR is a publishing step that can wait: the spec is the same either way.
+- The RPMs are published as release artifacts on GitHub rather than through
+  COPR. A release is a tag plus two attached files, which needs no Fedora
+  account and no extra service; COPR would add a repository to subscribe to,
+  and the spec is the same either way. If a `dnf` repository is ever wanted,
+  the built RPMs are what it would serve.

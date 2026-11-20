@@ -15,8 +15,9 @@ Usable. Game detection, automatic profile switching, and a UI that edits
 bindings, DPI, report rate and lighting all work and have been exercised
 against a G502 Lightspeed on Fedora with World of Tanks and Star Citizen.
 
-Packaged as an RPM for Fedora. Not done yet: testing on the other six G502
-variants, and a COPR repository to publish the package from.
+Packaged as an RPM for Fedora, published as a release artifact on the
+[releases page](https://github.com/nforceroh/LinGHub/releases). Not done yet:
+testing on the other six G502 variants.
 
 ## Requirements
 
@@ -29,6 +30,9 @@ variants, and a COPR repository to publish the package from.
 Two kinds of install are supported, and they can coexist on one machine.
 
 ### Packaged install
+
+Download the two RPMs from the [latest release](https://github.com/nforceroh/LinGHub/releases/latest),
+then:
 
 ```bash
 sudo dnf install ./python3-linghub-0.5.0-1.fc45.noarch.rpm \
