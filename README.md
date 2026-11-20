@@ -15,8 +15,8 @@ Usable. Game detection, automatic profile switching, and a UI that edits
 bindings, DPI, report rate and lighting all work and have been exercised
 against a G502 Lightspeed on Fedora with World of Tanks and Star Citizen.
 
-Not done yet: packaging (it installs from a clone), and testing on the other six
-G502 variants.
+Packaged as an RPM for Fedora. Not done yet: testing on the other six G502
+variants, and a COPR repository to publish the package from.
 
 ## Requirements
 
@@ -26,14 +26,54 @@ G502 variants.
 
 ## Install
 
+Two kinds of install are supported, and they can coexist on one machine.
+
+### Packaged install
+
+```bash
+sudo dnf install ./python3-linghub-0.5.0-1.fc45.noarch.rpm \
+                 ./linghub-ui-0.5.0-1.fc45.noarch.rpm
+systemctl --user enable --now linghub.service
+```
+
+`python3-linghub` is the daemon and the CLI and needs no graphical toolkit;
+`linghub-ui` adds the window and the tray. The package installs the units but
+cannot enable them — there is no user session at install time — so the
+`systemctl` line is yours to run. The unit writes the factory default config
+on first start if there is none.
+
+To build the package from a clone:
+
+```bash
+sudo dnf install rpm-build
+git switch main && git pull
+git tag v0.5.0 && git push origin v0.5.0   # a packaged release needs a tag
+./scripts/build-rpm.sh
+```
+
+The script refuses a version containing `+` or `dirty`, builds the wheel,
+wraps it in the RPM, and smoke-tests the result by unpacking it and importing
+it. See [ADR-0011](docs/adr/0011-package-as-an-rpm-built-from-a-wheel.md).
+
+### Clone install
+
+For development, or to run code that is not released:
+
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e .
+./scripts/install-service.sh
 ```
+
+The clone install's unit is `linghub-dev.service`, not `linghub.service`: a
+unit in `~/.config/systemd/user` shadows one in `/usr/lib/systemd/user`, so
+the two installs must not share a name. Both read the same
+`~/.config/linghub/config.json`.
 
 ## Usage
 
 ```bash
+linghub init          # write the factory default config if there is none
 linghub list          # list hardware profiles
 linghub switch 1      # activate profile 1
 linghub detect        # report which configured game is running
@@ -45,6 +85,17 @@ linghub tray          # show a tray icon for switching profiles
 
 `switch` reports that ratbagd has queued a commit. Commits are asynchronous, so
 that message does not confirm the hardware write succeeded.
+
+`init` writes one desktop profile holding the G502's own settings — 1000 Hz,
+400/800/1000 DPI with 800 active, buttons 1–5, DPI up/down on 6 and 7, and a
+cycling LED. It never replaces an existing config, whatever state that config
+is in: a broken one must still fail loudly at daemon start rather than be
+silently overwritten. The unit runs it with `--if-missing` before the daemon,
+so a fresh install starts working and a broken config still stops it.
+
+The first load writes that profile into slot 0, replacing whatever the mouse
+held there. That is deliberate: the alternative is reading the mouse's current
+settings back, which needs a decode path LinGHub does not have.
 
 ## Graphical interface
 
@@ -133,15 +184,26 @@ worth it only if you want click-to-open and profile switching from the tray.
 
 ## Running as a service
 
+A packaged install ships `linghub.service` and `linghub-tray.service` in
+`/usr/lib/systemd/user`; enable them yourself, since a package cannot:
+
 ```bash
-./scripts/install-service.sh     # install and start the user service
+systemctl --user enable --now linghub.service
+systemctl --user enable --now linghub-tray.service   # optional
+```
+
+A clone install uses its own units, so the two never collide:
+
+```bash
+./scripts/install-service.sh     # install and start linghub-dev.service
 ./scripts/uninstall-service.sh   # stop and remove it
 ```
 
-The install script also offers to install `linghub-tray.service`, which puts the
-tray icon in the session. It is a prompt rather than an assumption because the
-tray needs a graphical session and a StatusNotifier host, and a headless machine
-has neither. Set `LINGHUB_TRAY=yes` or `LINGHUB_TRAY=no` to skip the prompt.
+The install script also offers to install `linghub-dev-tray.service`, which
+puts the tray icon in the session. It is a prompt rather than an assumption
+because the tray needs a graphical session and a StatusNotifier host, and a
+headless machine has neither. Set `LINGHUB_TRAY=yes` or `LINGHUB_TRAY=no` to
+skip the prompt.
 
 The daemon watches for games and loads the matching profile into slot 1,
 restoring the desktop profile into slot 0 when the last game exits. It reloads
@@ -155,7 +217,8 @@ registration signals also trigger an immediate check, so games launched through
 games that do not register with it are still detected by polling.
 
 ```bash
-systemctl --user status linghub.service
+systemctl --user status linghub.service        # packaged install
+systemctl --user status linghub-dev.service    # clone install
 journalctl --user -u linghub.service -f
 ```
 
@@ -178,13 +241,16 @@ cannot be read, the line says `Daemon  unreadable` and no note is added: we
 do not know that it differs. To restart both services:
 
 ```bash
-systemctl --user restart linghub.service linghub-tray.service
+systemctl --user restart linghub.service linghub-tray.service        # packaged
+systemctl --user restart linghub-dev.service linghub-dev-tray.service # clone
 ```
 
 The tray's last menu line and the window's About dialog show the same version,
 and say the same thing when the daemon differs.
 
-The version comes from git, read when each process starts:
+In a clone install the version comes from git, read when each process starts.
+In a packaged install there is no clone, so it is the version baked in at build
+time — the same string, without the `+N.gHASH` suffix:
 
 | Version | Meaning |
 | --- | --- |
@@ -197,14 +263,16 @@ To cut a release, tag `main`:
 
 ```bash
 git switch main && git pull
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.5.0
+git push origin v0.5.0
 ```
 
 Tag after a branch is merged, not on the branch itself: if the merge squashes
 or rebases it, a tag made on the branch points at a commit `main` never
 contains. Nothing needs bumping by hand; the version is the tag. See
-[ADR-0009](docs/adr/0009-app-version-from-git-at-runtime.md) for why.
+[ADR-0009](docs/adr/0009-app-version-from-git-at-runtime.md) for why, and
+[ADR-0011](docs/adr/0011-package-as-an-rpm-built-from-a-wheel.md) for how the
+package is built from it.
 
 ## D-Bus interface
 
@@ -250,14 +318,26 @@ busctl --user call org.linghub.Manager /org/linghub/Manager \
 
 ## Configuration
 
-The daemon reads `~/.config/linghub/config.json`. See
-[config.example.json](config.example.json) for the shape. One file holds every
-profile plus application settings (ADR-0004). The daemon is its only writer: the
-UI edits over D-Bus and hand edits are picked up by watching the file.
+The daemon reads `~/.config/linghub/config.json`. `linghub init` writes the
+factory default there — one desktop profile — and the unit runs it with
+`--if-missing` before the daemon, so a fresh install starts with a working
+config. See [config.example.json](config.example.json) for the shape. One file
+holds every profile plus application settings (ADR-0004). The daemon is its
+only writer: the UI edits over D-Bus and hand edits are picked up by watching
+the file.
+
+A profile created from the UI starts as a copy of the desktop profile's device
+settings — bindings, DPI table, report rate and lighting — so it arrives with
+something to edit rather than writing nothing to the mouse.
 
 Keys the daemon does not model are preserved when it writes, so a hand-written
 comment or an extra field survives an edit from the UI. A config that fails to
 validate is never written over.
+
+`linghub hotspots` writes placed diagram positions to
+`~/.local/share/linghub/hotspots.json`, not into the package: the package
+directory is read-only once installed, and these are data rather than
+settings. The packaged file is used until you place your own.
 
 ## Documentation
 
@@ -292,9 +372,16 @@ src/linghub/
 │   ├── presentation.py   what the window should show, decided without a widget
 │   ├── panel_rules.py    the DPI and lighting rules, without a widget
 │   ├── binding_modes.py  how the editor's modes map to stored bindings
+│   ├── images/      the diagram, shipped inside the package
 │   └── *_panel.py   widget wiring only
 ├── dbus_contract.py  one owner for member names and signatures
 └── daemon_access.py  the shared entry point for CLI and tray
+
+packaging/
+├── linghub.spec     the RPM, built from the wheel
+├── units/           the packaged systemd user units
+├── icons/           the application icon
+└── *.desktop, *.metainfo.xml
 ```
 
 The pattern throughout: a decision that does not need a framework lives in a

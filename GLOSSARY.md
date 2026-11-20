@@ -138,3 +138,21 @@ lifecycle, bindings, or device settings. Grouping by what a method acts on
 keeps the adapter's interface narrow and its implementations testable without
 a bus.
 _Avoid_: helper, handler, backend
+
+**Clone install**:
+LinGHub run from a git clone through an editable install, where the app
+version is read from git at startup (ADR-0009). Its service is
+`linghub-dev.service`, so it never collides with a packaged install.
+_Avoid_: dev install, development install, source install
+
+**Packaged install**:
+LinGHub installed from an RPM, where the app version is the one baked in at
+build time. Its service is `linghub.service`, and it owns the desktop entry,
+the icon and the AppStream metadata.
+_Avoid_: production install, system install, release install
+
+**Factory default**:
+The config a fresh install starts with: one desktop profile holding the
+G502's own settings. Written by `linghub init`, never by the daemon, and never
+over an existing file.
+_Avoid_: default config, starter config, template
