@@ -51,9 +51,12 @@ To build the package from a clone:
 ```bash
 sudo dnf install rpm-build
 git switch main && git pull
-git tag v0.5.0 && git push origin v0.5.0   # a packaged release needs a tag
+git tag v0.6.0 && git push origin v0.6.0   # the next release number
 ./scripts/build-rpm.sh
 ```
+
+The tag must sit on the commit you build from. One commit past it and the
+version gains a `+N.gHASH` suffix, which the script refuses.
 
 The script refuses a version containing `+` or `dirty`, builds the wheel,
 wraps it in the RPM, and smoke-tests the result by unpacking it and importing
@@ -267,13 +270,20 @@ To cut a release, tag `main`:
 
 ```bash
 git switch main && git pull
-git tag v0.5.0
-git push origin v0.5.0
+git tag v0.6.0
+git push origin v0.6.0
 ```
 
 Tag after a branch is merged, not on the branch itself: if the merge squashes
 or rebases it, a tag made on the branch points at a commit `main` never
-contains. Nothing needs bumping by hand; the version is the tag. See
+contains.
+
+The tag must land on the commit you build the package from. A commit after it
+makes the version `0.6.0+1.gHASH`, and `scripts/build-rpm.sh` refuses any
+version containing `+` — so tag the commit you intend to release, and build
+before anything else lands on top of it.
+
+Nothing needs bumping by hand; the version is the tag. See
 [ADR-0009](docs/adr/0009-app-version-from-git-at-runtime.md) for why, and
 [ADR-0011](docs/adr/0011-package-as-an-rpm-built-from-a-wheel.md) for how the
 package is built from it.
