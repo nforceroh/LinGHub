@@ -324,3 +324,47 @@ class LedValidationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FactoryDefaultTests(unittest.TestCase):
+    """The config a fresh install starts with, and `linghub init` writing it."""
+
+    def test_factory_default_has_one_desktop_profile(self):
+        config = config_module.factory_default()
+        self.assertEqual([p.name for p in config.profiles], ["desktop"])
+        self.assertEqual(config.desktop_profile, "desktop")
+        self.assertTrue(config.desktop.is_desktop)
+
+    def test_factory_default_round_trips_through_save_and_load(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "nested" / "config.json"
+            config_module.write_default(path)
+            loaded = load(path)
+        self.assertEqual(loaded.desktop_profile, "desktop")
+        self.assertEqual(loaded.desktop.report_rate, 1000)
+        self.assertEqual(len(loaded.desktop.resolutions), 3)
+        self.assertEqual(loaded.desktop.bindings[7].value, "resolution-up")
+        self.assertEqual(len(loaded.desktop.leds), 2)
+
+    def test_write_default_creates_the_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "a" / "b" / "config.json"
+            config_module.write_default(path)
+            self.assertTrue(path.exists())
+
+    def test_write_default_refuses_to_replace_an_existing_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            path.write_text('{"version": 1, "profiles": {"mine": {}}}', encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                config_module.write_default(path)
+            self.assertIn("mine", path.read_text(encoding="utf-8"))
+
+    def test_write_default_leaves_a_broken_config_alone(self):
+        """A broken config must fail loudly at daemon start, not be replaced."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            path.write_text("not json", encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                config_module.write_default(path)
+            self.assertEqual(path.read_text(encoding="utf-8"), "not json")

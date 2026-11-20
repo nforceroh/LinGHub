@@ -128,6 +128,59 @@ def _parse_leds(raw: list) -> tuple[dict, ...]:
     return tuple(leds)
 
 
+def factory_default() -> Config:
+    """The config a fresh install starts with: one desktop profile.
+
+    The values are the G502's own defaults, not a copy of whatever the mouse
+    happens to hold. Reading the mouse instead would need a decode path that
+    does not exist, and would make the first run depend on the device being
+    plugged in. The consequence is deliberate: the daemon's first tick loads
+    this profile into slot 0, replacing what was there.
+
+    Only the desktop profile is created. A gaming profile with no game bound
+    to it would never be selected, so the user adds those as they need them.
+    """
+    desktop = Profile(
+        name="desktop",
+        report_rate=1000,
+        resolutions=(
+            {"dpi": 400},
+            {"dpi": 800, "active": True, "default": True},
+            {"dpi": 1000},
+        ),
+        bindings={
+            0: Binding("button", 1),
+            1: Binding("button", 2),
+            2: Binding("button", 3),
+            3: Binding("button", 4),
+            4: Binding("button", 5),
+            6: Binding("special", "resolution-down"),
+            7: Binding("special", "resolution-up"),
+        },
+        leds=(
+            {"index": 0, "mode": "cycle", "duration": 8000},
+            {"index": 1, "mode": "cycle", "duration": 8000},
+        ),
+    )
+    return Config(profiles=[desktop], desktop_profile="desktop", poll_interval=2.0)
+
+
+def write_default(path: Path | str = DEFAULT_CONFIG_PATH, *, overwrite: bool = False) -> bool:
+    """Write the factory default config, creating its directory.
+
+    Returns whether a file was written. An existing file is never replaced
+    unless `overwrite` is set: a broken config must still fail loudly at
+    daemon start rather than be silently replaced, which would destroy the
+    user's profiles.
+    """
+    path = Path(path)
+    if path.exists() and not overwrite:
+        raise ConfigError(f"config already exists: {path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    save(path, factory_default())
+    return True
+
+
 def _parse_profile(name: str, raw: dict) -> Profile:
     games = tuple(Game(executable=g) for g in raw.get("games", []))
     return Profile(

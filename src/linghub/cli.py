@@ -6,6 +6,7 @@ import logging
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import assert_never
 
 from dbus_fast import BusType
@@ -99,6 +100,27 @@ def _run_daemon(args: argparse.Namespace) -> int:
     except (RuntimeError, OSError, DBusFastError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    return 0
+
+
+def _run_init(args: argparse.Namespace) -> int:
+    """Write the factory default config, or say why it was not written.
+
+    The unit runs this with `--if-missing` before the daemon, so a fresh
+    install starts with a working config while a broken one still fails
+    loudly at daemon start instead of being replaced.
+    """
+    path = Path(args.config)
+    if args.if_missing and path.exists():
+        print(f"Config already exists: {path}")
+        return 0
+    try:
+        config_module.write_default(path)
+    except (config_module.ConfigError, OSError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"Wrote the default config to {path}")
     return 0
 
 
@@ -329,6 +351,15 @@ def main() -> int:
 
     commands.add_parser("ui", help="open the graphical interface")
 
+    init_cmd = commands.add_parser(
+        "init", help="write the default config if there is none"
+    )
+    init_cmd.add_argument("--config", default=config_module.DEFAULT_CONFIG_PATH, help="config file path")
+    init_cmd.add_argument(
+        "--if-missing", action="store_true",
+        help="leave an existing config alone instead of refusing",
+    )
+
     commands.add_parser(
         "status", help="report what the running daemon is doing"
     )
@@ -338,21 +369,26 @@ def main() -> int:
     hotspots_cmd = commands.add_parser(
         "hotspots", help="place button hotspots on a mouse image"
     )
-    hotspots_cmd.add_argument("--image", default="images/g502_trans.png", help="image to annotate")
+    hotspots_cmd.add_argument("--image", default=None, help="image to annotate")
     hotspots_cmd.add_argument("--out", default=None, help="where to write the hotspots")
 
     args = parser.parse_args()
 
     if args.command == "hotspots":
-        from .ui.hotspot_editor import DEFAULT_OUTPUT, main as editor_main
+        from .ui.hotspot_editor import main as editor_main
 
-        argv = ["--image", args.image]
+        argv = []
+        if args.image is not None:
+            argv += ["--image", args.image]
         if args.out is not None:
             argv += ["--out", args.out]
         return editor_main(argv)
 
     if args.command == "status":
         return _run_status()
+
+    if args.command == "init":
+        return _run_init(args)
 
     if args.command == "tray":
         # Imported lazily: the tray is GTK3 and the rest of the app is GTK4.
