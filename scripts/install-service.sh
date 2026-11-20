@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# Install the LinGHub user service.
+# Install the LinGHub user service for a clone install.
+#
+# The unit is named linghub-dev.service, not linghub.service: a packaged
+# install owns that name in /usr/lib/systemd/user, and a unit in the user
+# directory shadows one in the system directory. Two installs of the same app
+# must not fight over one unit name.
 #
 # The unit's ExecStart must point at an interpreter that can import linghub.
 # A virtualenv's console script hardcodes its own path, so this script writes
@@ -9,7 +14,8 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
-UNIT_PATH="$UNIT_DIR/linghub.service"
+UNIT_PATH="$UNIT_DIR/linghub-dev.service"
+TRAY_UNIT_PATH="$UNIT_DIR/linghub-dev-tray.service"
 PYTHON="${LINGHUB_PYTHON:-$REPO_DIR/.venv/bin/python}"
 
 if [ ! -x "$PYTHON" ]; then
@@ -26,10 +32,10 @@ fi
 
 mkdir -p "$UNIT_DIR"
 
-sed "s|^ExecStart=.*|ExecStart=$PYTHON -m linghub.cli run|" \
-    "$REPO_DIR/data/linghub.service" > "$UNIT_PATH"
+sed "s|^ExecStart=.*|ExecStart=$PYTHON -m linghub.cli run|; \
+     s|^ExecStartPre=.*|ExecStartPre=-$PYTHON -m linghub.cli init --if-missing|" \
+    "$REPO_DIR/data/linghub-dev.service" > "$UNIT_PATH"
 
-TRAY_UNIT_PATH="$UNIT_DIR/linghub-tray.service"
 # The tray is optional: it needs a graphical session and a StatusNotifier host,
 # and a headless machine has neither.
 INSTALL_TRAY="${LINGHUB_TRAY:-ask}"
@@ -48,17 +54,17 @@ fi
 
 if [ "$INSTALL_TRAY" = "yes" ]; then
     sed "s|^ExecStart=.*|ExecStart=$PYTHON -m linghub.cli tray|" \
-        "$REPO_DIR/data/linghub-tray.service" > "$TRAY_UNIT_PATH"
+        "$REPO_DIR/data/linghub-dev-tray.service" > "$TRAY_UNIT_PATH"
 fi
 
 systemctl --user daemon-reload
-systemctl --user enable --now linghub.service
+systemctl --user enable --now linghub-dev.service
 
 if [ "$INSTALL_TRAY" = "yes" ]; then
-    systemctl --user enable --now linghub-tray.service
+    systemctl --user enable --now linghub-dev-tray.service
     echo "Installed $TRAY_UNIT_PATH"
 fi
 
 echo "Installed $UNIT_PATH"
-echo "Check status with: systemctl --user status linghub.service"
-echo "Follow logs with:  journalctl --user -u linghub.service -f"
+echo "Check status with: systemctl --user status linghub-dev.service"
+echo "Follow logs with:  journalctl --user -u linghub-dev.service -f"

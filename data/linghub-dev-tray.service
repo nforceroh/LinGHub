@@ -1,10 +1,10 @@
 [Unit]
-Description=LinGHub tray icon
+Description=LinGHub tray icon (clone install)
 Documentation=https://github.com/nforceroh/LinGHub
 # The tray needs a graphical session: StatusNotifierWatcher lives on the
 # session bus and is owned by the desktop shell.
-After=graphical-session.target linghub.service
-Wants=linghub.service
+After=graphical-session.target linghub-dev.service
+Wants=linghub-dev.service
 PartOf=graphical-session.target
 
 [Service]

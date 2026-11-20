@@ -1,5 +1,5 @@
 [Unit]
-Description=LinGHub - load G502 profiles when games start
+Description=LinGHub (clone install) - load G502 profiles when games start
 Documentation=https://github.com/nforceroh/LinGHub
 # ratbagd is D-Bus activated, so it does not need to be running first, but
 # the graphical session must exist for the user bus to be reachable.
@@ -8,6 +8,10 @@ After=default.target
 [Service]
 Type=simple
 ExecStart=/usr/bin/linghub run
+# A fresh clone has no config; write the factory default before the daemon
+# starts. The leading '-' means an existing config is not an error, and a
+# broken one is still left alone so the daemon fails loudly on it.
+ExecStartPre=-/usr/bin/linghub init --if-missing
 Restart=on-failure
 RestartSec=5s
 # Exit 78 is EX_CONFIG: a missing or invalid config will not fix itself, so
