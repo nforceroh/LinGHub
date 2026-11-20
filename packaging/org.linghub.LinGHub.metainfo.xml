@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.linghub.LinGHub</id>
+  <name>LinGHub</name>
+  <summary>Profile manager for the Logitech G502 family</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>
+      LinGHub edits named profiles for the Logitech G502 family — button
+      bindings, DPI table, LED settings and report rate — and loads the right
+      one into the mouse when a game starts.
+    </p>
+    <p>
+      It talks to ratbagd over the system D-Bus and writes every binding to the
+      mouse's own memory, so games see real hardware events rather than
+      synthetic ones.
+    </p>
+  </description>
+  <launchable type="desktop-id">org.linghub.LinGHub.desktop</launchable>
+  <url type="homepage">https://github.com/nforceroh/LinGHub</url>
+  <url type="bugtracker">https://github.com/nforceroh/LinGHub/issues</url>
+  <developer id="org.linghub">
+    <name>LinGHub contributors</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.5.0" date="2026-11-19">
+      <description>
+        <p>First packaged release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

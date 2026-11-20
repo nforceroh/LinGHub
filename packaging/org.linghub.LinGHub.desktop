@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=LinGHub
+GenericName=Mouse Profile Manager
+Comment=Edit G502 profiles and load them when games start
+Exec=linghub ui
+Icon=org.linghub.LinGHub
+Terminal=false
+Categories=Settings;HardwareSettings;
+Keywords=mouse;logitech;g502;profile;dpi;
+StartupNotify=true

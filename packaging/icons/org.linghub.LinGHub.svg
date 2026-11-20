@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <title>LinGHub</title>
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4a4f57"/>
+      <stop offset="1" stop-color="#23262b"/>
+    </linearGradient>
+  </defs>
+  <!-- Mouse body: a rounded shell, wider at the back. -->
+  <path d="M64 10c22 0 34 16 34 40v28c0 22-14 40-34 40S30 100 30 78V50c0-24 12-40 34-40z"
+        fill="url(#body)" stroke="#8b929c" stroke-width="3"/>
+  <!-- Button split down the middle. -->
+  <path d="M64 12v34" stroke="#8b929c" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- Scroll wheel. -->
+  <rect x="58" y="30" width="12" height="20" rx="6" fill="#1b1d21" stroke="#8b929c" stroke-width="2"/>
+  <path d="M60 36h8M60 41h8M60 46h8" stroke="#8b929c" stroke-width="1.5" stroke-linecap="round"/>
+  <!-- The G mark, in the brand blue. -->
+  <circle cx="64" cy="86" r="15" fill="none" stroke="#00b8fc" stroke-width="5"/>
+  <path d="M64 71v15h13" fill="none" stroke="#00b8fc" stroke-width="5" stroke-linecap="round"/>
+</svg>

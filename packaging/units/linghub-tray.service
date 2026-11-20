@@ -1,0 +1,18 @@
+[Unit]
+Description=LinGHub tray icon
+Documentation=https://github.com/nforceroh/LinGHub
+# The tray needs a graphical session: StatusNotifierWatcher lives on the
+# session bus and is owned by the desktop shell.
+After=graphical-session.target linghub.service
+Wants=linghub.service
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/linghub tray
+Restart=on-failure
+RestartSec=5s
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=graphical-session.target
