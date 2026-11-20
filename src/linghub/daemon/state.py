@@ -282,14 +282,31 @@ class DaemonState:
         return True
 
     def create_profile(self, name: str, executable: str = "") -> bool:
-        """Add a profile, optionally bound to a game executable."""
+        """Add a profile, seeded from the desktop profile.
+
+        A new profile starts as a copy of the desktop one's device settings —
+        bindings, DPI table, report rate and lighting — so the user edits what
+        they recognise instead of an empty profile that writes nothing to the
+        mouse. The name and games are the new profile's own.
+        """
         name = name.strip()
         if not name or self.config.profile_named(name) is not None:
             return False
         games = (Game(executable),) if executable.strip() else ()
+        template = self.config.desktop
+        seeded = (
+            {}
+            if template is None
+            else {
+                "report_rate": template.report_rate,
+                "resolutions": template.resolutions,
+                "bindings": dict(template.bindings),
+                "leds": template.leds,
+            }
+        )
         self.config = replace(
             self.config,
-            profiles=[*self.config.profiles, Profile(name=name, games=games)],
+            profiles=[*self.config.profiles, Profile(name=name, games=games, **seeded)],
         )
         return True
 

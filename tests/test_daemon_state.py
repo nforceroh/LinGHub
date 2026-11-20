@@ -637,3 +637,48 @@ class RefusedLoadTests(unittest.TestCase):
     def test_the_refusal_is_reported(self):
         self.assertEqual(self._refused().refused_profile, "desktop")
         self.assertIsNone(DaemonState(config=make_config(DESKTOP, WOT)).refused_profile)
+
+
+class SeededProfileTests(unittest.TestCase):
+    """A new profile starts as a copy of the desktop profile's device settings.
+
+    An empty profile writes nothing to the mouse, so loading one only changed
+    which slot was active — which reads as broken in the UI.
+    """
+
+    def _state(self):
+        desktop = Profile(
+            name="desktop",
+            report_rate=1000,
+            resolutions=({"dpi": 800, "default": True},),
+            bindings={0: Binding("button", 1), 7: Binding("special", "resolution-up")},
+            leds=({"index": 0, "mode": "cycle", "duration": 8000},),
+        )
+        return DaemonState(config=make_config(desktop, WOT))
+
+    def test_a_new_profile_copies_the_desktop_bindings(self):
+        state = self._state()
+        state.create_profile("new-game")
+        profile = state.config.profile_named("new-game")
+        self.assertEqual(profile.bindings[7].value, "resolution-up")
+
+    def test_a_new_profile_copies_the_desktop_device_settings(self):
+        state = self._state()
+        state.create_profile("new-game")
+        profile = state.config.profile_named("new-game")
+        self.assertEqual(profile.report_rate, 1000)
+        self.assertEqual(profile.resolutions, ({"dpi": 800, "default": True},))
+        self.assertEqual(profile.leds[0]["mode"], "cycle")
+
+    def test_the_copy_is_independent_of_the_desktop_profile(self):
+        state = self._state()
+        state.create_profile("new-game")
+        state.set_binding("new-game", 0, Binding("key", "KEY_F"))
+        self.assertEqual(state.config.desktop.bindings[0].value, 1)
+
+    def test_the_new_profile_keeps_its_own_name_and_games(self):
+        state = self._state()
+        state.create_profile("new-game", executable="NewGame.exe")
+        profile = state.config.profile_named("new-game")
+        self.assertEqual(profile.name, "new-game")
+        self.assertEqual(profile.games[0].executable, "NewGame.exe")
