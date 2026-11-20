@@ -8,6 +8,8 @@ build-backend = "setuptools.build_meta"
 name = "linghub"
 dynamic = ["version"]
 description = "Profile manager for the Logitech G502 family on Linux"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = ["dbus-fast>=5.2,<6"]
 
@@ -21,6 +23,11 @@ linghub = "linghub.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+# The diagram and the placed hotspots are read at runtime, so they must be in
+# the wheel: a packaged install has no clone to find them in.
+"linghub.ui" = ["hotspots.json", "images/*.png"]
 
 [tool.setuptools_scm]
 # Builds outside a clone (an sdist without git metadata) still get a version.
