@@ -333,7 +333,7 @@ def mouse_for(
 
 
 @dataclass(frozen=True)
-class RatbagConnection:
+class Connected:
     """A mouse that is ready to use, and what it can do.
 
     The capabilities come back with the mouse rather than from a second call
@@ -348,7 +348,7 @@ class RatbagConnection:
 
 async def connect(
     bus, *, sys_root: Path = Path("/sys/class/hidraw")
-) -> RatbagConnection:
+) -> Connected:
     """Find the G502 through ratbagd and return it ready to use.
 
     The one place that decides whether a connection succeeds: the device is
@@ -366,7 +366,7 @@ async def connect(
     found = RatbagMouse(client, device, mouse=mouse)
     rates = await _report_rates(client, device)
     logger.info("found %s at %s (report rates %s)", device.name, device.path, rates)
-    return RatbagConnection(found, rates)
+    return Connected(found, rates)
 
 
 class RatbagConnector:
@@ -383,7 +383,7 @@ class RatbagConnector:
         self._sys_root = sys_root
         self._bus = None
 
-    async def connect(self) -> RatbagConnection:
+    async def connect(self) -> Connected:
         try:
             if self._bus is None:
                 self._bus = await asyncio.wait_for(self._connect_bus(), timeout=5)

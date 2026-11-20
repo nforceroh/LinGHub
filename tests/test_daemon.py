@@ -17,7 +17,7 @@ from linghub.discovery.detector import Detection, Match
 from linghub.discovery.processes import ProcessInfo
 from linghub.domain.profile import Game, Profile
 from linghub.hardware.failures import LoadRefused, MouseAbsent, MouseLost, MouseMisconfigured
-from linghub.hardware.mouse import RatbagConnection
+from linghub.hardware.mouse import Connected
 
 DESKTOP = Profile(name="desktop")
 WOT = Profile(name="world-of-tanks", games=(Game("WorldOfTanks.exe"),))
@@ -88,7 +88,7 @@ class FakeConnector:
         if self.next_connect_error is not None:
             error, self.next_connect_error = self.next_connect_error, None
             raise error
-        return RatbagConnection(self.mouse, [125, 250, 500, 1000])
+        return Connected(self.mouse, [125, 250, 500, 1000])
 
     def disconnect(self):
         pass

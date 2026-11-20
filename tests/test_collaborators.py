@@ -21,11 +21,17 @@ from linghub.hardware.mouse import RatbagConnector, RatbagMouse
 
 
 def _signature(fn) -> inspect.Signature:
-    """The signature without `self`: that is what a caller supplies."""
-    return inspect.Signature(
-        [
+    """The signature without `self`: that is what a caller supplies.
+
+    The return annotation is carried over explicitly. Rebuilding a Signature
+    from parameters alone drops it, which made the return check below compare
+    two empty annotations and pass whatever the implementation returned.
+    """
+    signature = inspect.signature(fn)
+    return signature.replace(
+        parameters=[
             parameter
-            for name, parameter in inspect.signature(fn).parameters.items()
+            for name, parameter in signature.parameters.items()
             if name != "self"
         ]
     )

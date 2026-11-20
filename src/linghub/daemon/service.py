@@ -24,7 +24,7 @@ from ..domain.profile import Profile
 from ..hardware.failures import (
     LoadRefused, MouseAbsent, MouseLost, MouseMisconfigured, SlotUnknown,
 )
-from ..hardware.mouse import RatbagConnector, WriteResult
+from ..hardware.mouse import Connected, RatbagConnector, WriteResult
 from ..notify import Notifier, profile_message, refused_message
 from . import slots
 from .absence import Absence, Report
@@ -61,17 +61,6 @@ class Mouse(Protocol):
     async def apply(self, profile: Profile, slot: int) -> WriteResult: ...
 
     async def active_slot(self) -> int | None: ...
-
-
-class Connected(Protocol):
-    """A mouse that is ready to use, and what it can do.
-
-    The capabilities come back with the mouse, so connecting is one step that
-    can fail rather than two.
-    """
-
-    mouse: Mouse
-    report_rates: list[int]
 
 
 class MouseConnector(Protocol):
