@@ -229,6 +229,21 @@ systemctl --user status linghub-dev.service    # clone install
 journalctl --user -u linghub.service -f
 ```
 
+### "the G502 is connected but ratbagd has not picked it up"
+
+ratbagd enumerates hidraw nodes once at startup and does not rescan, so a
+mouse that finishes initializing after ratbagd started is never added — and
+there is no D-Bus call to force a rescan. When the daemon sees a G502 in sysfs
+that ratbagd has no device for, it says so and names the node. The nudge has
+to run as root; the daemon cannot do it for you:
+
+```console
+$ sudo udevadm trigger --action=add --sysname-match=hidraw12
+```
+
+Use the node from the message. This re-runs the device-add path, so ratbagd
+picks the mouse up on its own; no restart of ratbagd is needed.
+
 ## Versions and releases
 
 The daemon, the tray and the window are separate processes, and each runs the

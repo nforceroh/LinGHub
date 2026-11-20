@@ -16,6 +16,13 @@ profiles feature `0x8100`: `getOnboardMode`, then `getCurrentProfile`), on
 every check. When ratbagd disagrees, the mouse wins. All writes still go
 through ratbagd. LinGHub only reads the mouse directly.
 
+A load is confirmed the same way: after the commit, the daemon asks the mouse
+which slot is active and refuses the load if the answer is not the slot it
+wrote. ratbagd's `IsActive` is not trusted for this, for the same reason its
+active-slot answer is not: it is ratbagd's belief, and it has been wrong. A
+mouse that cannot answer does not fail the load — the write itself was
+verified, and the next drift check asks again.
+
 - **The node** comes from the ratbagd device the daemon has just confirmed
   (`.../device/hidrawN` → `/dev/hidrawN`). It is checked against sysfs to be
   a Logitech device, and if it isn't, the daemon uses ratbagd's answer for
@@ -65,3 +72,35 @@ A failed read means different things, and only one of them is a lost mouse:
 - `ratbagctl` can still show a different active profile than the mouse. The
   daemon logs each disagreement once, which keeps a record of ratbagd's wrong
   answers.
+
+## Amendment: reading sysfs when ratbagd finds no mouse
+
+On 2026-11-20 the daemon spent 50 minutes reporting the mouse absent while it
+was connected and working. ratbagd had started at 08:42:06 and the G502's
+HID++ stack came up at 08:43:02; ratbagd enumerates hidraw nodes once at
+startup (its initial scan skips nodes udev has not finished initializing) and
+does not rescan. A mouse that initializes late is
+therefore never added, and no number of retries helps: `Manager.Devices` has
+no rescan method in any released version. A udev `add` for the node does make
+ratbagd pick it up.
+
+The original decision found the node *from* a ratbagd device, which cannot
+detect this case, because there is no ratbagd device to start from. The rule
+is therefore extended by the smallest amount that answers "is the mouse there
+at all?": when ratbagd reports no G502, LinGHub scans sysfs itself and looks
+for a hidraw node the kernel names as a Logitech G502.
+
+This does **not** weaken the decision that writes go through ratbagd:
+
+- The scan never chooses a device to write to. It only decides which of two
+  failures to report.
+- A node found this way is never used to read the active slot either: without
+  a ratbagd device there is nothing to load a profile into, so the slot is
+  moot.
+- The result is a `MouseMisconfigured` naming the fix (a udev remove/add for
+  that node), not a connection. The mouse stays absent until ratbagd sees it,
+  so the existing retry loop is untouched.
+
+The alternative — auto-restarting ratbagd — was rejected for now: it needs
+either a root helper or a polkit rule in the package, and it would hide an
+upstream bug rather than surface it.

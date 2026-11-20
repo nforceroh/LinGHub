@@ -44,6 +44,12 @@ _HOST_MODE = 2
 _NODE_NAME = re.compile(r"^hidraw\d+$")
 _LOGITECH = "0000046D"
 
+# The kernel's name for a G502, as seen in sysfs. Used only when ratbagd
+# reports no G502, to decide whether the mouse is really away or ratbagd
+# missed it. The product ids are not spelled out: the kernel already names
+# the device, and a list here would drift from the models in the field.
+_G502_NAME = re.compile(r"Logitech G502\b")
+
 
 class NoReply(Exception):
     """The mouse did not answer in time: asleep, out of range, or busy.
@@ -107,6 +113,42 @@ class HidrawTransport:
 
     def close(self) -> None:
         os.close(self._fd)
+
+
+def _hid_fields(node: Path) -> dict[str, str]:
+    """The `KEY=VALUE` lines of one hidraw node's uevent; empty if unreadable."""
+    try:
+        text = (node / "device" / "uevent").read_text()
+    except OSError:
+        return {}
+    fields = {}
+    for line in text.splitlines():
+        key, _, value = line.partition("=")
+        fields[key] = value
+    return fields
+
+
+def g502_nodes(sys_root: Path = Path("/sys/class/hidraw")) -> list[Path]:
+    """The hidraw nodes the kernel names as a Logitech G502.
+
+    Only used to explain a ratbagd that found no mouse: it answers "is a G502
+    present in the kernel at all?", which ratbagd's device list cannot. Never
+    used to pick a device to write to (ADR-0010).
+    """
+    try:
+        nodes = sorted(sys_root.iterdir())
+    except OSError:
+        return []
+    found = []
+    for node in nodes:
+        if not _NODE_NAME.match(node.name):
+            continue
+        fields = _hid_fields(node)
+        if _LOGITECH not in fields.get("HID_ID", "").upper():
+            continue
+        if _G502_NAME.search(fields.get("HID_NAME", "")):
+            found.append(node)
+    return found
 
 
 def node_for(device_path: str, sys_root: Path = Path("/sys/class/hidraw")) -> Path:

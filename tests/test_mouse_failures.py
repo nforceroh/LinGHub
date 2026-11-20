@@ -203,10 +203,13 @@ class ConnectorTests(unittest.IsolatedAsyncioTestCase):
         bus.values[(profile, "Profile", "Disabled")] = ("b", False)
         bus.values[(profile, "Profile", "ReportRates")] = ("au", [125, 250, 500, 1000])
 
-    def _node(self, name, hid_id="0003:0000046D:0000407F"):
+    def _node(self, name, hid_id="0003:0000046D:0000407F", hid_name=""):
         uevent = self.sys / name / "device" / "uevent"
         uevent.parent.mkdir(parents=True)
-        uevent.write_text(f"HID_ID={hid_id}\n")
+        text = f"HID_ID={hid_id}\n"
+        if hid_name:
+            text += f"HID_NAME={hid_name}\n"
+        uevent.write_text(text)
 
     async def test_a_g502_on_a_logitech_node_connects(self):
         bus = FailingBus()
@@ -223,9 +226,39 @@ class ConnectorTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(MouseAbsent, "no G502 found"):
             await self._connector(bus).connect()
 
+    async def test_a_g502_ratbagd_missed_is_misconfigured_and_says_the_fix(self):
+        """Seen live on 2026-11-20: ratbagd started at 08:42:06 and the mouse
+        initialized at 08:43:02, so ratbagd never added it. The mouse was
+        present and working, and the daemon reported it absent for 50 min."""
+        bus = FailingBus()
+        self._devices(bus, ("/org/freedesktop/ratbag1/device/hidraw13", "Logitech Candy"))
+        self._node("hidraw12", hid_name="Logitech G502")
+        with self.assertRaisesRegex(MouseMisconfigured, "ratbagd has not picked it up"):
+            await self._connector(bus).connect()
+
+    async def test_the_missed_mouse_message_names_the_node_and_the_command(self):
+        bus = FailingBus()
+        self._devices(bus, ("/org/freedesktop/ratbag1/device/hidraw13", "Logitech Candy"))
+        self._node("hidraw12", hid_name="Logitech G502")
+        with self.assertRaises(MouseMisconfigured) as raised:
+            await self._connector(bus).connect()
+        message = str(raised.exception)
+        self.assertIn("--sysname-match=hidraw12", message)
+        self.assertIn("--action=add", message)
+        # The old wording blamed causes that were all false in the real case.
+        self.assertNotIn("KVM", message)
+
     async def test_ratbagd_not_answering_is_absent_and_says_so(self):
         bus = FailingBus(RuntimeError("org.freedesktop.DBus.Error.ServiceUnknown"))
         with self.assertRaisesRegex(MouseAbsent, "ratbagd"):
+            await self._connector(bus).connect()
+
+    async def test_not_answering_stays_absent_even_with_a_node_present(self):
+        """A ratbagd that is not running is not a ratbagd that missed the
+        mouse: the fix is to start it, not to nudge udev."""
+        bus = FailingBus(RuntimeError("org.freedesktop.DBus.Error.ServiceUnknown"))
+        self._node("hidraw12", hid_name="Logitech G502")
+        with self.assertRaises(MouseAbsent):
             await self._connector(bus).connect()
 
     async def test_the_race_with_the_kernel_is_absent(self):

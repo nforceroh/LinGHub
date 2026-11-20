@@ -233,5 +233,55 @@ class NodeTests(unittest.TestCase):
         self.assertFalse(issubclass(hidpp.NodeMismatch, hidpp.NodeGone))
 
 
+class ScanTests(unittest.TestCase):
+    """Finding a G502 in sysfs, to explain a ratbagd that found none (#19).
+
+    This answers "is a G502 present in the kernel at all?", which ratbagd's
+    device list cannot. It never chooses a node to write to: ADR-0010 keeps
+    writes going through ratbagd.
+    """
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.sys = Path(directory.name)
+
+    def _node(self, name, hid_name, hid_id="0003:0000046D:0000407F"):
+        uevent = self.sys / name / "device" / "uevent"
+        uevent.parent.mkdir(parents=True)
+        uevent.write_text(f"HID_ID={hid_id}\nHID_NAME={hid_name}\n")
+
+    def test_a_g502_node_is_found(self):
+        self._node("hidraw12", "Logitech G502")
+        self.assertEqual(hidpp.g502_nodes(self.sys), [self.sys / "hidraw12"])
+
+    def test_other_logitech_devices_are_not_g502s(self):
+        """The PowerPlay pad and the keyboard are Logitech too, and are the
+        two devices ratbagd *did* list while the mouse was missing."""
+        self._node("hidraw13", "Logitech Candy", hid_id="0003:0000046D:0000405F")
+        self._node("hidraw7", "Logitech G815 RGB MECHANICAL GAMING KEYBOARD",
+                   hid_id="0003:0000046D:0000C33F")
+        self.assertEqual(hidpp.g502_nodes(self.sys), [])
+
+    def test_a_g502_named_by_another_vendor_is_not_ours(self):
+        """The name is only half the check: the vendor must be Logitech."""
+        self._node("hidraw12", "Logitech G502", hid_id="0003:00000BDA:00001100")
+        self.assertEqual(hidpp.g502_nodes(self.sys), [])
+
+    def test_a_longer_model_name_still_matches(self):
+        """The kernel names the wireless variant 'Logitech G502' and other
+        models 'Logitech G502 HERO'; both are G502s."""
+        self._node("hidraw31", "Logitech G502 HERO")
+        self.assertEqual(hidpp.g502_nodes(self.sys), [self.sys / "hidraw31"])
+
+    def test_a_missing_sysfs_is_no_nodes_rather_than_an_error(self):
+        self.assertEqual(hidpp.g502_nodes(self.sys / "absent"), [])
+
+    def test_a_node_without_a_uevent_is_skipped(self):
+        """A node can be listed before its uevent is readable."""
+        (self.sys / "hidraw12").mkdir(parents=True)
+        self.assertEqual(hidpp.g502_nodes(self.sys), [])
+
+
 if __name__ == "__main__":
     unittest.main()

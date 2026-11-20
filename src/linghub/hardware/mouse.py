@@ -27,8 +27,11 @@ from dbus_fast import DBusError, Variant
 from ..domain.profile import Profile
 from . import hidpp, mapping
 from .active_slot import ActiveSlotReader, MouseSlot, SlotReadings
-from .failures import LoadRefused, MouseAbsent, MouseFailure, MouseLost
-from .ratbag import NOT_FOUND, RatbagClient, Device, DeviceReplaced
+from .failures import (
+    LoadRefused, MouseAbsent, MouseFailure, MouseLost, MouseMisconfigured,
+    SlotUnknown,
+)
+from .ratbag import NOT_FOUND, RATBAGD_MISSED, RatbagClient, Device, DeviceReplaced
 
 logger = logging.getLogger(__name__)
 
@@ -206,8 +209,37 @@ class RatbagMouse:
             raise WriteError(f"profile slot {slot} did not become active")
         await self._client.invoke(self._device.path, "Device", "Commit")
         await self._wait_for_commit(path)
+        await self._confirm_active_slot(slot)
 
         return WriteResult(changed=tuple(changed))
+
+    async def _confirm_active_slot(self, slot: int) -> None:
+        """Ask the mouse itself whether the switch took, not ratbagd.
+
+        ratbagd's `IsActive` is its own belief, and ADR-0010 exists because
+        that belief has been wrong: it has reported slot 1 while the mouse sat
+        on slot 0, and a disabled slot after a KVM switch. A load that trusted
+        it would report success while the buttons stayed on the old profile,
+        which is exactly the failure that started this.
+
+        The mouse answers `getCurrentProfile` immediately after the commit, so
+        this costs one short request per load. When the mouse cannot say (no
+        reader for this connection, no permission, asleep, host mode) the load
+        is not failed: the write itself was verified, and the next drift check
+        asks again. Only a mouse that answers with a different slot is a
+        refusal, because then the profile is known not to be in use.
+        """
+        if self._slots.mouse is None:
+            return
+        try:
+            actual = await self._slots.read()
+        except SlotUnknown as exc:
+            logger.debug("cannot confirm slot %d from the mouse: %s", slot, exc)
+            return
+        if actual is not None and actual != slot:
+            raise WriteError(
+                f"the mouse is on slot {actual} after loading slot {slot}"
+            )
 
     async def _write_resolution(self, profile_path: str, index: int, resolution: dict) -> None:
         paths = await self._client.get(profile_path, "Profile", "Resolutions")
@@ -355,11 +387,23 @@ async def connect(
     found, the hidraw node behind it is confirmed, the mouse is built, and
     its capabilities are read. Raises MouseAbsent (not found, or a node the
     kernel already removed), MouseMisconfigured (two G502s, an unsupported
-    ratbagd) or MouseLost (the mouse vanished before it could be asked), and
-    nothing else on purpose.
+    ratbagd, or a G502 the kernel has that ratbagd missed) or MouseLost (the
+    mouse vanished before it could be asked), and nothing else on purpose.
     """
     client = RatbagClient(bus)
-    device = await client.find_device()
+    try:
+        device = await client.find_device()
+    except MouseAbsent:
+        # ratbagd found no G502, but that is not the same as no G502 being
+        # there: it enumerates once at startup, so a mouse that initialized
+        # late is never added and no retry will help (#19). Ask the kernel
+        # whether the mouse exists, and say which of the two it is.
+        nodes = hidpp.g502_nodes(sys_root)
+        if not nodes:
+            raise
+        raise MouseMisconfigured(
+            RATBAGD_MISSED.format(node=nodes[0].name)
+        ) from None
     # Before announcing the find: ratbagd can still list a mouse the kernel
     # has removed, and mouse_for raises MouseAbsent for that.
     mouse = mouse_for(device.path, sys_root=sys_root)

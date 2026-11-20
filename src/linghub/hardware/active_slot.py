@@ -76,6 +76,15 @@ class ActiveSlotReader:
         self._refused = False
         self._host_mode = False
 
+    @property
+    def mouse(self) -> MouseSlot | None:
+        """The reader for the mouse itself, or None when there is none.
+
+        Exposed so a caller can tell "the mouse says nothing" from "there is
+        no mouse to ask", which are different reasons to skip a check.
+        """
+        return self._mouse
+
     async def readings(self) -> SlotReadings:
         """Both answers, and why the mouse couldn't give one, if it couldn't.
 

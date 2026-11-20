@@ -27,6 +27,14 @@ node confirmed, then written to and read from. One module owns those
 connection rules, so "is this the right device?" is answered in one place.
 _Avoid_: device, hardware, writer
 
+**Ratbagd miss**:
+The kernel having a G502 that ratbagd has no device for, because ratbagd
+enumerates once at startup and cannot rescan. Distinct from an absent mouse:
+the mouse is there and the driver is unaware of it, so the cure is a udev
+nudge rather than waiting. LinGHub tells them apart by scanning sysfs, and
+only to choose which to report.
+_Avoid_: stale device, desync, missing mouse
+
 **Drift**:
 The active slot differing from the slot the daemon last loaded a profile
 into, whatever moved it: a profile button, a KVM switch, or another tool.
@@ -37,8 +45,10 @@ Writing a profile's contents into a slot and committing it to the mouse.
 _Avoid_: push, apply, upload, sync
 
 **Refused load**:
-A load the mouse or its driver would not accept. It is not retried until the
-profile, the config or the connection changes.
+A load the mouse or its driver would not accept, including one the mouse
+itself denies: after the commit it is asked which slot is active, and an
+answer other than the slot written refuses the load. It is not retried until
+the profile, the config or the connection changes.
 _Avoid_: failed write, rejected profile
 
 **Desktop profile**:

@@ -35,6 +35,18 @@ NOT_FOUND = (
     "or asleep. LinGHub will pick it up when it returns."
 )
 
+# ratbagd enumerates hidraw nodes once at startup and does not rescan, so a
+# G502 that finishes initializing afterwards is never added and no amount of
+# retrying changes that list. Seen on 2026-11-20: ratbagd started at 08:42:06,
+# the mouse's HID++ stack came up at 08:43:02, and LinGHub sat blind for 50
+# minutes while the mouse worked. Manager exposes no rescan, so the fix is a
+# udev add for the node, which makes ratbagd pick it up.
+RATBAGD_MISSED = (
+    "the G502 is connected but ratbagd has not picked it up; ratbagd "
+    "enumerates once at startup and does not rescan. Fix with: "
+    "sudo udevadm trigger --action=add --sysname-match={node}"
+)
+
 
 class DeviceReplaced(RuntimeError):
     """The device path now names a different device.

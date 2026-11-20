@@ -123,6 +123,7 @@ class MouseTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(LoadRefused, "did not become active"):
             await self.mouse.apply(profile, 1)
 
+
     async def test_raises_when_report_rate_does_not_take_effect(self):
         self.client.ignore_report_rate = True
         profile = Profile(name="desktop", report_rate=500)
@@ -164,6 +165,64 @@ class MouseTests(unittest.IsolatedAsyncioTestCase):
             await self.mouse.apply(profile, 0)
 
 
+class ConfirmationTests(unittest.IsolatedAsyncioTestCase):
+    """A load is confirmed by the mouse, not by ratbagd's belief (ADR-0010).
+
+    ratbagd's `IsActive` has been wrong in the field, so a load that trusted
+    it could report success while the buttons stayed on the old profile.
+    """
+
+    def setUp(self):
+        self.client = FakeClient()
+
+    def _mouse(self, slot):
+        """A mouse whose own answer is `slot`, or raises if it is an exception."""
+        class Reader:
+            def active_slot(_self):
+                if isinstance(slot, Exception):
+                    raise slot
+                return slot
+
+        return RatbagMouse(self.client, FakeDevice(), mouse=Reader())
+
+    async def test_a_switch_the_mouse_confirms_succeeds(self):
+        profile = Profile(name="desktop", bindings={0: Binding("button", 1)})
+        await self._mouse(1).apply(profile, 1)
+
+    async def test_a_switch_the_mouse_denies_is_a_refused_load(self):
+        """ratbagd said the slot became active; the mouse says otherwise."""
+        profile = Profile(name="desktop", bindings={0: Binding("button", 1)})
+        with self.assertRaisesRegex(LoadRefused, "the mouse is on slot 0"):
+            await self._mouse(0).apply(profile, 1)
+
+    async def test_a_mouse_that_cannot_say_does_not_fail_the_load(self):
+        """The write was verified; an unreadable slot is not a refusal."""
+        from linghub.hardware.failures import SlotUnknown
+
+        profile = Profile(name="desktop", bindings={0: Binding("button", 1)})
+        await self._mouse(SlotUnknown("asleep")).apply(profile, 1)
+
+    async def test_without_a_reader_the_load_still_succeeds(self):
+        """A connection with no confirmed node has only ratbagd to go on."""
+        profile = Profile(name="desktop", bindings={0: Binding("button", 1)})
+        await RatbagMouse(self.client, FakeDevice()).apply(profile, 1)
+
+    async def test_the_mouse_is_asked_after_the_commit(self):
+        """Confirming before the commit would read the old slot."""
+        asked = []
+
+        class Reader:
+            def active_slot(_self):
+                asked.append(len(self.client.calls))
+                return 1
+
+        profile = Profile(name="desktop", bindings={0: Binding("button", 1)})
+        await RatbagMouse(self.client, FakeDevice(), mouse=Reader()).apply(profile, 1)
+        last_commit = max(
+            i for i, call in enumerate(self.client.calls) if call[1] == "Commit"
+        )
+        self.assertTrue(asked, "the mouse was never asked")
+        self.assertGreater(asked[0], last_commit)
 
 class DeviceIdentityTests(unittest.IsolatedAsyncioTestCase):
     """ratbagd names devices by hidraw node, and nodes get reused.
