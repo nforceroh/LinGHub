@@ -165,20 +165,18 @@ def factory_default() -> Config:
     return Config(profiles=[desktop], desktop_profile="desktop", poll_interval=2.0)
 
 
-def write_default(path: Path | str = DEFAULT_CONFIG_PATH, *, overwrite: bool = False) -> bool:
+def write_default(path: Path | str = DEFAULT_CONFIG_PATH) -> None:
     """Write the factory default config, creating its directory.
 
-    Returns whether a file was written. An existing file is never replaced
-    unless `overwrite` is set: a broken config must still fail loudly at
-    daemon start rather than be silently replaced, which would destroy the
-    user's profiles.
+    An existing file is never replaced, whatever state it is in: a broken
+    config must still fail loudly at daemon start rather than be silently
+    replaced, which would destroy the user's profiles.
     """
     path = Path(path)
-    if path.exists() and not overwrite:
+    if path.exists():
         raise ConfigError(f"config already exists: {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
     save(path, factory_default())
-    return True
 
 
 def _parse_profile(name: str, raw: dict) -> Profile:
