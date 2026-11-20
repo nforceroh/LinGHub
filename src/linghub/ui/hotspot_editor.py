@@ -33,10 +33,10 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk
 
-from .buttonmap import BY_INDEX, NAMES, describe, manual_number
+from .buttonmap import BY_INDEX, DIAGRAM_IMAGE, NAMES, describe, manual_number, user_hotspots
 
 
-DEFAULT_OUTPUT = Path(__file__).resolve().parent / "hotspots.json"
+DEFAULT_OUTPUT = user_hotspots()
 RADIUS = 16.0
 
 
@@ -465,7 +465,7 @@ class EditorWindow(Adw.ApplicationWindow):
     def _on_save(self, _button) -> None:
         points = self._editor.points
         payload = {
-            "image": "images/g502_trans.png",
+            "image": DIAGRAM_IMAGE.name,
             "hotspots": [
                 {"index": index, "x": round(x, 4), "y": round(y, 4)}
                 for index, (x, y) in sorted(points.items())
@@ -508,7 +508,7 @@ def main(argv: list[str] | None = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(description="Place button hotspots on a mouse image.")
-    parser.add_argument("--image", default="images/g502_trans.png", help="image to annotate")
+    parser.add_argument("--image", default=str(DIAGRAM_IMAGE), help="image to annotate")
     parser.add_argument("--out", default=str(DEFAULT_OUTPUT), help="where to write the hotspots")
     args = parser.parse_args(argv)
 

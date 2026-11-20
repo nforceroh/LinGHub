@@ -20,7 +20,7 @@ from gi.repository import Adw, Gio, GLib, Gtk
 
 from .asyncbridge import run_and_report
 from .binding_editor import BindingEditor
-from .buttonmap import BUTTONS, describe, manual_number
+from .buttonmap import BUTTONS, DIAGRAM_IMAGE, describe, manual_number
 from .client import DaemonClient, DaemonState, DaemonView
 from .diagram import MouseDiagram
 from . import presentation
@@ -31,7 +31,8 @@ from .led_panel import LedPanel
 
 logger = logging.getLogger("linghub.ui.window")
 
-IMAGE = Path(__file__).resolve().parents[3] / "images" / "g502_trans.png"
+# Shipped inside the package, so a wheel and an RPM find it the same way.
+IMAGE = DIAGRAM_IMAGE
 
 
 class MainWindow(Adw.ApplicationWindow):

@@ -1,18 +1,42 @@
 """The G502 button map: names, ratbag indices and diagram positions.
 
 Positions come from hotspots.json, which `linghub hotspots` writes when you
-place the markers by hand. The built-in fallback is only used when that file
-is missing, so the diagram still renders before anyone has placed them.
+place the markers by hand. The packaged file is the fallback, and the built-in
+positions are the fallback below that, so the diagram still renders before
+anyone has placed them.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
 
-HOTSPOTS_FILE = Path(__file__).resolve().parent / "hotspots.json"
+# Shipped inside the package: read-only once installed.
+PACKAGED_HOTSPOTS = Path(__file__).resolve().parent / "hotspots.json"
+
+# The diagram the hotspots are placed on, shipped inside the package so a
+# wheel and an RPM find it the same way.
+DIAGRAM_IMAGE = Path(__file__).resolve().parent / "images" / "g502_trans.png"
+
+
+def user_hotspots() -> Path:
+    """Where `linghub hotspots` writes: user data, not configuration.
+
+    The package directory is read-only in a packaged install, and these are
+    placed positions rather than settings, so they belong in the XDG data
+    directory. ADR-0004 keeps `~/.config/linghub/` holding the one config file.
+    """
+    data_home = os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share"
+    return Path(data_home) / "linghub" / "hotspots.json"
+
+
+def hotspots_file() -> Path:
+    """The file to read: the user's own if they have placed any, else the packaged one."""
+    user = user_hotspots()
+    return user if user.exists() else PACKAGED_HOTSPOTS
 
 
 @dataclass(frozen=True)
@@ -70,20 +94,24 @@ FALLBACK_POSITIONS: dict[int, tuple[float, float]] = {
 }
 
 
-def load_positions(path: Path = HOTSPOTS_FILE) -> dict[int, tuple[float, float]]:
-    """Read placed hotspots, falling back to the built-in positions."""
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return dict(FALLBACK_POSITIONS)
+def load_positions(path: Path | None = None) -> dict[int, tuple[float, float]]:
+    """Read placed hotspots, over the built-in positions.
 
-    positions = {}
+    Merged rather than replaced: a user file holding one placed button must
+    not drop the other ten, which is what returning only its entries did.
+    """
+    positions = dict(FALLBACK_POSITIONS)
+    try:
+        data = json.loads((path or hotspots_file()).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return positions
+
     for entry in data.get("hotspots", []):
         try:
             positions[int(entry["index"])] = (float(entry["x"]), float(entry["y"]))
         except (KeyError, TypeError, ValueError):
             continue
-    return positions or dict(FALLBACK_POSITIONS)
+    return positions
 
 
 def _build() -> tuple[ButtonSpot, ...]:
