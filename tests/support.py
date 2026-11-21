@@ -51,14 +51,21 @@ def view(
     active: str = "desktop",
     profiles: tuple[str, ...] = ("desktop", "world-of-tanks", "star-citizen"),
     leds=None,
+    summaries=None,
 ):
     """A DaemonView, for tests that apply one to an existing window.
 
     The poll delivers a view; a test that simulates a poll builds one of these
     rather than hand-rolling the two-level dataclass.
     """
-    from linghub.daemon_view import DaemonView, ProfileView, ViewState
+    from linghub.daemon_view import DaemonView, ProfileSummary, ProfileView, ViewState
 
+    if summaries is None:
+        summaries = tuple(
+            ProfileSummary(name=name)
+            for name in ("desktop", "world-of-tanks", "star-citizen", "wot")
+            if name in profiles
+        )
     return DaemonView(
         state=ViewState(
             active_profile=active,
@@ -66,6 +73,7 @@ def view(
             desktop_profile="desktop",
         ),
         profile=ProfileView(leds=leds or {}),
+        summaries=summaries,
     )
 
 
@@ -110,6 +118,15 @@ def make_window(
     window._stack = Gtk.Stack()
     window._stack.add_named(Gtk.Label(label="home"), "home")
     window._stack.add_named(Gtk.Label(label="editor"), "editor")
+    from linghub.ui.manage_profiles import ManageProfiles
+
+    window._manage = ManageProfiles(
+        on_add_game=lambda: None,
+        on_edit_game=lambda *a: None, on_details=lambda name: None,
+        on_add_profile=lambda: None, on_duplicate=lambda name: None,
+        on_delete=lambda name: None,
+    )
+    window._stack.add_named(window._manage, "manage")
     window._stack.set_visible_child_name("home")
     window._back_button = Gtk.Button()
     window._back_button.set_visible(False)

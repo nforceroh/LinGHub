@@ -218,7 +218,8 @@ class GetViewTests(unittest.TestCase):
         )
         view = call(make_interface(daemon), "GetView", "wot")
         self.assertEqual(daemon.viewed, "wot")
-        active, detected, desktop, names, bindings, leds, res, rates, rate, summaries = view
+        main, summaries = view
+        active, detected, desktop, names, bindings, leds, res, rates, rate = main
         self.assertEqual(
             [(s[0], s[1], s[2], list(s[3])) for s in summaries],
             [("desktop", 0, 0, []), ("wot", 1600, 500, [("x.exe", "x")])],
@@ -232,13 +233,13 @@ class GetViewTests(unittest.TestCase):
         self.assertEqual(rate, 500)
 
     def test_nothing_loaded_and_no_game_are_empty_strings(self):
-        view = call(make_interface(FakeDaemon()), "GetView", "")
-        self.assertEqual(view[:2], ("", ""))
+        main, _summaries = call(make_interface(FakeDaemon()), "GetView", "")
+        self.assertEqual(main[:2], ("", ""))
 
     def test_an_led_zone_missing_settings_gets_defaults(self):
         daemon = FakeDaemon(profile=ProfileSnapshot(leds=({"index": 2},)))
-        view = call(make_interface(daemon), "GetView", "wot")
-        self.assertEqual(view[5], [(2, "off", (0, 0, 0), 255, 0)])
+        main, _summaries = call(make_interface(daemon), "GetView", "wot")
+        self.assertEqual(main[5], [(2, "off", (0, 0, 0), 255, 0)])
 
     def test_set_resolution_routes_to_the_daemon(self):
         daemon = FakeDaemon()

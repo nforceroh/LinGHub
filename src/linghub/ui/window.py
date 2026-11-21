@@ -27,8 +27,9 @@ from .daemon_write import DaemonWrite
 from .pending_edits import PendingEditsFor
 from .profile_selector import ProfileSelector
 from .home_card import HomeCard
+from .manage_profiles import ManageProfiles
 from ..hardware.battery import battery, model_name
-from ..daemon_view import DaemonView, ViewState
+from ..daemon_view import DaemonView, ProfileSummary, ViewState
 from .diagram import MouseDiagram
 from . import presentation
 from .. import version
@@ -80,7 +81,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._back_button = Gtk.Button(icon_name="go-previous-symbolic")
         self._back_button.set_tooltip_text("Back to the device")
         self._back_button.add_css_class("flat")
-        self._back_button.connect("clicked", lambda _b: self._show_view("home"))
+        self._back_button.connect("clicked", lambda _b: self._back_clicked())
         self._back_button.set_visible(False)
         header.pack_start(self._back_button)
 
@@ -106,13 +107,15 @@ class MainWindow(Adw.ApplicationWindow):
         self._banner = Adw.Banner()
         toolbar.add_top_bar(self._banner)
 
-        # Two views in one window: the home screen the window opens on, and the
-        # editor reached by clicking the mouse. A stack rather than two windows,
-        # so there is one place to refresh and one thing to manage.
+        # Three views in one window: the home screen the window opens on, the
+        # editor reached by clicking the mouse, and the manage-profiles canvas
+        # reached from the selector. A stack rather than three windows, so
+        # there is one place to refresh and one thing to manage.
         self._stack = Gtk.Stack()
         self._stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
         self._stack.add_named(self._build_home(), "home")
         self._stack.add_named(self._build_editor(), "editor")
+        self._stack.add_named(self._build_manage(), "manage")
 
         toolbar.set_content(self._stack)
         self.set_content(toolbar)
@@ -186,6 +189,18 @@ class MainWindow(Adw.ApplicationWindow):
         centre.set_valign(Gtk.Align.CENTER)
         centre.append(self._card)
         return centre
+
+    def _build_manage(self) -> Gtk.Widget:
+        """The manage-profiles canvas: games across the top, profiles below."""
+        self._manage = ManageProfiles(
+            on_add_game=self._prompt_add_game,
+            on_edit_game=self._prompt_rename_game,
+            on_details=self._canvas_details,
+            on_add_profile=self._prompt_new_profile,
+            on_duplicate=self._prompt_duplicate_profile,
+            on_delete=self._prompt_canvas_delete,
+        )
+        return self._manage
 
     def _build_editor(self) -> Gtk.Widget:
         """Diagram and bindings on top, the device panels across the bottom.
@@ -880,10 +895,267 @@ class MainWindow(Adw.ApplicationWindow):
     def _open_manage_profiles(self) -> None:
         """Open the manage-profiles canvas.
 
-        Not built yet: the canvas is step 5 of the build order. Until then the
-        selector's Manage action says so rather than doing nothing.
+        The canvas is a view in this window, not a separate one: one source
+        of truth, one place to refresh. Opening it with edits pending asks
+        first, reusing the switch-profile prompt — it is the same question,
+        because leaving the profile being edited behind is what both do
+        (spec §2.7).
         """
-        self._status.set_text("Managing profiles is not built yet.")
+        if self._pending.dirty:
+            self._confirm_switch_for_canvas()
+            return
+        self._show_canvas()
+
+    # --- canvas actions --------------------------------------------------
+
+    def _fill_canvas(self, view: DaemonView) -> None:
+        """Fill the canvas from a view, if one has been read.
+
+        A daemon from before the canvas publishes no summaries, so the tiles
+        are built from the profile names alone: name-only tiles are what a
+        user can act on, and the summary line arrives when the daemon does.
+        """
+        if view is None or self._manage is None:
+            return
+        summaries = view.summaries or tuple(
+            ProfileSummary(name=name) for name in view.state.profiles
+        )
+        self._manage.show(summaries, view.state.desktop_profile)
+
+    def _prompt_add_game(self) -> None:
+        """Add a game: the executable to match, a name, and its profile."""
+        self._manage.open_add_game(
+            self,
+            self._state.profiles,
+            self._create_game_profile,
+        )
+
+    def _prompt_rename_game(self, executable: str, name: str) -> None:
+        """Rename a game's display name, by re-opening the dialog filled in.
+
+        The dialog's callback takes (executable, name, profile); editing
+        never moves the game between profiles, so the profile arrives empty
+        and the owning profile is looked up here, from the view.
+        """
+        self._manage.open_edit_game(
+            self, executable, name,
+            self._state.profiles,
+            lambda _exec, new_name, _profile:
+                self._rename_game(executable, new_name.strip()),
+        )
+
+    def _create_game_profile(self, executable: str, name: str, profile: str) -> None:
+        """Create the profile a new game belongs to, carrying the game.
+
+        ADD GAME creates both: in LinGHub a game is owned by a profile, so a
+        game with no profile left matches nothing. A profile name that is
+        already in use is refused by the daemon and reported, not silently
+        attached to the existing one.
+        """
+        profile = profile.strip()
+        if profile in self._state.profiles:
+            self._status.set_text(
+                f"Profile {profile!r} already exists; "
+                "rename it or choose another name."
+            )
+            return
+        run_and_report(
+            self._do_create_game_profile(executable, name, profile),
+            self._on_async_error,
+        )
+
+    async def _do_create_game_profile(
+        self, executable: str, name: str, profile: str
+    ) -> None:
+        async def change() -> bool:
+            ok = await self._client.create_profile(profile, executable)
+            if not ok:
+                return False
+            if name and name != executable:
+                return await self._client.rename_game(profile, executable, name)
+            return True
+
+        await self._writes.run(
+            change,
+            report=self._status.set_text,
+            failure="Could not add the game",
+            rejected=(
+                f"Cannot add {executable!r}. The profile name may be in use."
+            ),
+            success=f"Added {name or executable} to {profile}.",
+        )
+
+    def _rename_game(self, executable: str, name: str) -> None:
+        """Set a game's display name, reporting on the status line.
+
+        The prompt has closed by the time the daemon answers, so its errors
+        belong on the status line rather than in a dialog nobody is looking
+        at.
+        """
+        profile = self._profile_of_game(executable)
+        if profile is None:
+            self._status.set_text(f"No profile carries {executable}.")
+            return
+
+        async def change() -> bool:
+            return await self._client.rename_game(profile, executable, name)
+
+        async def do():
+            await self._writes.run(
+                change,
+                report=self._status.set_text,
+                failure="Could not rename the game",
+                rejected=f"Cannot rename {executable!r}.",
+                success=f"Renamed the game to {name}.",
+            )
+
+        run_and_report(do(), self._on_async_error)
+
+    def _profile_of_game(self, executable: str) -> str | None:
+        """The profile carrying this game, from the last view read."""
+        if self._view is None:
+            return None
+        for summary in self._view.summaries:
+            for game_executable, _name in summary.games:
+                if game_executable.casefold() == executable.casefold():
+                    return summary.name
+        return None
+
+    def _canvas_details(self, name: str) -> None:
+        """Close the canvas and edit the profile, without loading it.
+
+        The main window is where bindings, DPI and lighting are edited; a
+        second editor would be a second place for the same rules. Editing
+        deliberately does not load: DETAILS is an edit-side action, and
+        taking over the mouse is the selector's job (spec §2.7).
+        """
+        if self._pending.dirty:
+            self._confirm_switch(name, load=False)
+            return
+        self._edit_without_loading(name)
+
+    def _edit_without_loading(self, name: str) -> None:
+        self._editing = name
+        self._pending.clear()
+        self._sync_save_buttons()
+        self._stack.set_visible_child_name("editor")
+        self._back_button.set_visible(True)
+        self._status.set_text(f"Editing {name} (not loaded).")
+        self._rebuild_profiles()
+        self._refresh()
+
+    def _prompt_duplicate_profile(self, name: str) -> None:
+        self._ask_for_text(
+            title=f"Duplicate {name}",
+            label="New profile name",
+            initial=f"{name} copy",
+            on_accept=lambda new, _exec, dialog: run_and_report(
+                self._do_duplicate_profile(name, new.strip(), dialog),
+                self._on_async_error,
+            ),
+        )
+
+    async def _do_duplicate_profile(self, old: str, new: str, dialog) -> None:
+        if not new:
+            dialog.show_error("Enter a name for the copy.")
+            return
+
+        async def change() -> bool:
+            return await self._client.duplicate_profile(old, new)
+
+        await self._writes.run(
+            change,
+            report=dialog.show_error,
+            failure="Could not duplicate the profile",
+            rejected=f"Cannot name the copy {new!r}. The name may be in use.",
+            success=f"Copied {old} to {new}.",
+            on_success=dialog.close,
+        )
+
+    def _prompt_canvas_delete(self, name: str) -> None:
+        if name == self._state.desktop_profile:
+            self._status.set_text("The desktop profile cannot be deleted.")
+            return
+        dialog = Adw.MessageDialog(
+            transient_for=self,
+            heading=f"Delete {name}?",
+            body="Its bindings, DPI and lighting settings are lost, "
+                 "along with its games.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("delete", "Delete")
+        dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.connect(
+            "response",
+            lambda _d, response: (
+                run_and_report(self._do_delete_profile(name), self._on_async_error)
+                if response == "delete"
+                else None
+            ),
+        )
+        dialog.present()
+
+    def _confirm_switch_for_canvas(self) -> None:
+        """Ask what to do with unsaved changes before opening the canvas."""
+        dialog = Adw.MessageDialog(
+            transient_for=self,
+            heading="Unsaved changes",
+            body=(
+                f"Save your changes to {self._editing} before managing "
+                "profiles?"
+            ),
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("discard", "Discard")
+        dialog.add_response("save", "Save")
+        dialog.set_response_appearance("discard", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("save")
+        dialog.set_close_response("cancel")
+
+        def on_response(_dialog, response):
+            dialog.close()
+            if response == "cancel":
+                return
+            if response == "discard":
+                self._pending.clear()
+                self._sync_save_buttons()
+                self._show_canvas()
+                return
+            if response == "save":
+                run_and_report(
+                    self._save_then_open_canvas(), self._on_async_error
+                )
+
+        dialog.connect("response", on_response)
+        dialog.present()
+
+    async def _save_then_open_canvas(self) -> None:
+        """Save the pending edits, then open the canvas only on success."""
+        profile = self._editing_profile()
+        if profile is None:
+            return
+        await self._do_save(profile)
+        if self._pending.dirty:
+            # The save was refused; the edits stay where they are.
+            return
+        self._show_canvas()
+
+    def _show_canvas(self) -> None:
+        self._fill_canvas(self._view)
+        self._stack.set_visible_child_name("manage")
+        self._back_button.set_visible(True)
+
+    def _back_clicked(self) -> None:
+        """Return from wherever we are, without changing the selection."""
+        if self._stack.get_visible_child_name() == "manage":
+            # Leaving the canvas does not touch the editing profile: the
+            # canvas is a place you navigate to, so its way back is not
+            # "pick something" (spec §2.7).
+            self._stack.set_visible_child_name("editor")
+            self._back_button.set_visible(True)
+            return
+        self._show_view("home")
 
     def _apply_selection(self, name: str) -> None:
         """Show `name` in the panels and put it on the mouse.
@@ -904,12 +1176,23 @@ class MainWindow(Adw.ApplicationWindow):
         # own loop, and the GTK bridge would never run there.
         self._schedule(self._load_profile(name), self._on_async_error)
 
-    def _confirm_switch(self, name: str) -> None:
-        """Ask what to do with unsaved changes before switching profiles."""
+    def _confirm_switch(self, name: str, *, load: bool = True) -> None:
+        """Ask what to do with unsaved changes before switching profiles.
+
+        `load=False` is the canvas's DETAILS action: the destination is
+        "editing the profile", not "editing and loading it", so accept paths
+        that would put it on the mouse are not offered.
+        """
         dialog = Adw.MessageDialog(
             transient_for=self,
             heading="Unsaved changes",
-            body=f"Save your changes to {self._editing} before switching to {name}?",
+            body=(
+                f"Save your changes to {self._editing} before "
+                f"switching to {name}?"
+                if load
+                else f"Save your changes to {self._editing} before "
+                f"editing {name}?"
+            ),
         )
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("discard", "Discard")
@@ -926,17 +1209,21 @@ class MainWindow(Adw.ApplicationWindow):
                 self._reselect_current()
                 return
             if response == "discard":
-                self._apply_selection(name)
+                if load:
+                    self._apply_selection(name)
+                else:
+                    self._edit_without_loading(name)
                 return
             if response == "save":
                 run_and_report(
-                    self._save_then_select(name), self._on_async_error
+                    self._save_then_select(name, load=load),
+                    self._on_async_error,
                 )
 
         dialog.connect("response", on_response)
         dialog.present()
 
-    async def _save_then_select(self, name: str) -> None:
+    async def _save_then_select(self, name: str, *, load: bool = True) -> None:
         """Save the pending edits, then switch only if the save succeeded."""
         profile = self._editing_profile()
         if profile is None:
@@ -946,7 +1233,10 @@ class MainWindow(Adw.ApplicationWindow):
             # The save was refused; stay where the edits are.
             self._reselect_current()
             return
-        self._apply_selection(name)
+        if load:
+            self._apply_selection(name)
+        else:
+            self._edit_without_loading(name)
 
     def _reselect_current(self) -> None:
         """Put the selector back on the profile still being edited.

@@ -73,7 +73,7 @@ class ManagerInterface(ServiceInterface):
     @method()
     def GetView(
         self, profile: "s"
-    ) -> "(sssasa(iss)a(us(uuu)uu)a(uuuu)auu)a(ssu(ss)s)":
+    ) -> "(sssasa(iss)a(us(uuu)uu)a(uuuu)auu)a(suua(ss))":
         """Everything a client shows, in one read.
 
         Returns (active profile, detected game, desktop profile, profile
@@ -91,22 +91,28 @@ class ManagerInterface(ServiceInterface):
         """
         view = self._get_view(profile)
         state, sections = view.state, view.profile
+        # Two top-level arguments: the state+sections struct, then the
+        # summaries struct. D-Bus counts a return's top level, so the ten
+        # fields are two structs, not ten flat values.
         return (
-            state.loaded_profile or "",
-            state.detected_game or "",
-            state.desktop_profile,
-            list(state.profile_names),
-            [
-                (int(index), str(kind), "" if value is None else str(value))
-                for index, kind, value in sections.bindings
-            ],
-            [_marshal_led(settings) for settings in sections.leds],
-            [
-                (index, int(dpi), 1 if default else 0, 1 if disabled else 0)
-                for index, (dpi, default, disabled) in enumerate(sections.resolutions)
-            ],
-            [int(rate) for rate in sections.report_rates],
-            int(sections.report_rate),
+            (
+                state.loaded_profile or "",
+                state.detected_game or "",
+                state.desktop_profile,
+                list(state.profile_names),
+                [
+                    (int(index), str(kind), "" if value is None else str(value))
+                    for index, kind, value in sections.bindings
+                ],
+                [_marshal_led(settings) for settings in sections.leds],
+                [
+                    (index, int(dpi), 1 if default else 0, 1 if disabled else 0)
+                    for index, (dpi, default, disabled)
+                    in enumerate(sections.resolutions)
+                ],
+                [int(rate) for rate in sections.report_rates],
+                int(sections.report_rate),
+            ),
             [
                 (
                     summary.name,

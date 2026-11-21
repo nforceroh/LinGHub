@@ -76,12 +76,14 @@ class GetViewDecodeTests(unittest.TestCase):
 
     def _raw(self):
         return (
-            "wot", "x.exe", "desktop", ["desktop", "wot"],
-            [(0, "key", "KEY_F"), (3, "button", "4")],
-            [(0, "breathing", (255, 0, 0), 128, 3000)],
-            [(0, 800, 1, 0), (1, 1600, 0, 1)],
-            [125, 250, 500, 1000],
-            500,
+            (
+                "wot", "x.exe", "desktop", ["desktop", "wot"],
+                [(0, "key", "KEY_F"), (3, "button", "4")],
+                [(0, "breathing", (255, 0, 0), 128, 3000)],
+                [(0, 800, 1, 0), (1, 1600, 0, 1)],
+                [125, 250, 500, 1000],
+                500,
+            ),
             [("wot", 1600, 500, [("x.exe", "World of Tanks")])],
         )
 
@@ -141,7 +143,7 @@ class GetViewDecodeTests(unittest.TestCase):
         client = DaemonClient()
 
         async def fake_invoke(_member, *args):
-            return ("", "", "desktop", [], [], [], [], [], 0, [])
+            return (("", "", "desktop", [], [], [], [], [], 0), [])
 
         client._invoke = fake_invoke
         view = asyncio.run(client.get_view("gone"))

@@ -56,7 +56,7 @@ GET_VIEW = Member(
     "GetView", "s",
     # state, profile sections, then every profile's canvas summary:
     # (name, default DPI, report rate, and its games as (executable, name)).
-    "(sssasa(iss)a(us(uuu)uu)a(uuuu)auu)a(ssu(ss)s)",
+    "(sssasa(iss)a(us(uuu)uu)a(uuuu)auu)a(suua(ss))",
 )
 SET_BINDING = Member("SetBinding", "siss", "b")
 CLEAR_BINDING = Member("ClearBinding", "si", "b")

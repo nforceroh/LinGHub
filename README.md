@@ -333,7 +333,7 @@ editing the config file.
 | `ListProfiles` | method → `as` | Every profile name in the config |
 | `LoadProfile(s)` | method → `b` | Load a profile now; false if it does not exist |
 | `Reload` | method → `b` | Re-read the config file |
-| `GetView(s)` | method → `(sssasa(iss)a(us(uuu)uu)a(uuuu)auu)a(ssu(ss)s)` | Everything a client shows, in one read: active profile, detected game, desktop profile, profile names; then the named profile's bindings (index, type, value), LED zones (index, mode, colour, brightness, duration), DPI slots (index, dpi, is_default, is_disabled), accepted report rates, and its current report rate; then every profile's canvas summary (name, default DPI, report rate, games as executable + display name). Unknown profile: empty sections |
+| `GetView(s)` | method → `(sssasa(iss)a(us(uuu)uu)a(uuuu)auu)a(suua(ss))` | Everything a client shows, in one read: active profile, detected game, desktop profile, profile names; then the named profile's bindings (index, type, value), LED zones (index, mode, colour, brightness, duration), DPI slots (index, dpi, is_default, is_disabled), accepted report rates, and its current report rate; then every profile's canvas summary (name, default DPI, report rate, games as executable + display name). Unknown profile: empty sections |
 | `SetBinding(s,i,s,s)` → `siss` | method → `b` | Assign one button's binding |
 | `ClearBinding(s,i)` → `si` | method → `b` | Record a button as doing nothing |
 | `SetLeds(s,s,u,u,u,u,u)` → `ssuuuuu` | method → `b` | Set every LED zone to one effect |

@@ -118,6 +118,10 @@ class DaemonClient:
             timeout=5,
         )
         _raise_for_error(reply, member)
+        # GetView now returns two structs, and a decoder that kept only the
+        # first would silently drop the other. The tuple is the whole body.
+        if reply.body and len(reply.body) > 1:
+            return tuple(reply.body)
         return reply.body[0] if reply.body else None
 
     async def get_view(self, profile: str) -> DaemonView:
@@ -128,10 +132,19 @@ class DaemonClient:
         "nothing there" is the answer it needs.
         """
         raw = await self._invoke(contract.GET_VIEW, profile)
+        # Two shapes reach this decoder. A daemon from before the canvas
+        # answers with one flat struct of nine fields and no summaries; the
+        # current one answers with the state+sections struct and a second
+        # summaries struct. Accepting both means an old daemon costs the
+        # canvas its tiles rather than the window its state.
+        if len(raw) == 2 and not isinstance(raw[0], str):
+            main, summaries = raw
+        else:
+            main, summaries = raw, ()
         (
             active, detected, desktop, names,
-            bindings, leds, resolutions, rates, rate, summaries,
-        ) = raw
+            bindings, leds, resolutions, rates, rate,
+        ) = main
         return DaemonView(
             state=ViewState(
                 active_profile=active,
