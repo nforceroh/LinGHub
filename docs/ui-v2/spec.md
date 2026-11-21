@@ -245,7 +245,16 @@ the same question.
 settings live in the config file. A tab bar with three dead tabs is worse than
 no tab bar; it can arrive with the features that need it.
 
-### 2.8 Vocabulary
+### 2.8 The device card
+
+*Settled in the 2026-11-21 grilling, questions Q40 and Q43.*
+
+- The card's two icon buttons are **LIGHTSYNC** (the lighting) and **onboard
+  memory** (the mouse's flash slots).
+- **The card carries no hotspots.** The diagram on the card is a product image,
+  not a button selector. Hotspots move to the **bindings screen**.
+
+### 2.9 Vocabulary
 
 - The five DPI values are **DPI presets**, never "DPI slots". The bare word
   **Slot** always means a flash position a whole profile is loaded into.
