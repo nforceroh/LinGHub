@@ -8,7 +8,7 @@ This document is the record of the design conversation, not a plan of record.
 When a section settles, it moves up and stops changing. When the whole document
 settles, it becomes the input to an ADR if any decision in it is hard to reverse.
 
-Vocabulary follows [GLOSSARY.md](../GLOSSARY.md). Where this document and the
+Vocabulary follows [GLOSSARY.md](../../GLOSSARY.md). Where this document and the
 glossary disagree, the glossary wins and this document is wrong.
 
 ---
@@ -144,7 +144,7 @@ draggable marker on a shared scale.
 
 - The five DPI values are **DPI presets**, never "DPI slots". The bare word
   **Slot** always means a flash position a whole profile is loaded into.
-  Recorded in [GLOSSARY.md](../GLOSSARY.md).
+  Recorded in [GLOSSARY.md](../../GLOSSARY.md).
 - The rename reaches every **user-visible string and docstring**: the popover
   heading, the rejection message, the panel docstrings, the README.
 - The config key `resolutions` and the D-Bus method `SetResolution` are **not**
@@ -153,11 +153,48 @@ draggable marker on a shared scale.
 
 ---
 
-## 3. Open
+## 3. Reference screenshots
+
+Screenshots of the UI being aimed at live in [reference/](reference/). They are
+reference, not specification: the goal is something similar, not a copy. Each
+one is named for the screen it shows.
+
+| File | Screen |
+| --- | --- |
+| [01-home-greeting.png](reference/01-home-greeting.png) | The home / greeting screen: a single device card centred on an empty canvas |
+
+### 3.1 What the home screen shows
+
+*Observed from the reference, not yet decided.*
+
+- A **device card** centred on an otherwise empty canvas. The card carries the
+  device name, a battery indicator, the device image, and two icon buttons.
+- A **profile selector** in the top right, showing the active profile as
+  `Desktop: Desktop Main`.
+- A **hamburger menu** in the top left.
+- A **view toggle** in the top right of the canvas: a list icon and a grid icon.
+- An **account icon** in the top right of the window.
+
+### 3.2 Facts verified for this screen
+
+- **Battery is readable.** `/sys/class/power_supply/hidpp_battery_0/` reports
+  `capacity` (95), `status` (Discharging) and `model_name`
+  (`G502 LIGHTSPEED Wireless Gaming Mouse`). It is a kernel `hidpp_battery`
+  device, so no HID++ work is needed. ratbagd does **not** expose battery, so
+  this is a new read path.
+- **The device is wireless.** It is a G502 LIGHTSPEED behind a PowerPlay
+  receiver (`046d:c53a`), so a battery indicator is meaningful rather than
+  decorative.
+- **The reference device is not ours.** The screenshot shows a "G502 X PLUS",
+  which is a different mouse. Our diagram is a G502 LIGHTSPEED.
+
+---
+
+## 4. Open
 
 Nothing here is decided. Each item names the question, not an answer.
 
-### 3.1 The bindings table
+### 4.1 The bindings table
 
 - The table has four columns (`Manual`, `Function`, `Does`, `Ratbag`). `Manual`
   exists only to help someone holding the printed manual, and `Ratbag` is the
@@ -169,14 +206,14 @@ Nothing here is decided. Each item names the question, not an answer.
 - The table is not sortable and not filterable. With eleven rows that is fine.
   Does it stay fine?
 
-### 3.2 The diagram
+### 4.2 The diagram
 
 - The diagram is a static image with eleven hotspots. Should a hotspot show its
   current binding on hover, or is the table the only place bindings are read?
 - The image is cropped to the mouse. Is there a use for the space beside it, or
   does it stay empty?
 
-### 3.3 The profile list
+### 4.3 The profile list
 
 - Profiles are rows in a `ListBox` with a check for the one on the mouse and a
   `desktop` suffix for the desktop profile. Is a list the right shape, or should
@@ -185,14 +222,14 @@ Nothing here is decided. Each item names the question, not an answer.
   actions on one list is a distinction users may not expect. Is it the right
   one?
 
-### 3.4 The lighting panel
+### 4.4 The lighting panel
 
 - The G502 has two LED zones that read as one strip, so the panel drives them
   together. Should the zones be separately addressable?
 - Effects are `off`, `fixed colour`, `cycle` and `breathing`. Is a dropdown the
   right control, or should the effect be a row of buttons?
 
-### 3.5 The window as a whole
+### 4.5 The window as a whole
 
 - Is there a compact mode, or a minimum size below which the layout reflows?
 - Does the window need a keyboard-navigation story? Nothing is currently
@@ -200,7 +237,7 @@ Nothing here is decided. Each item names the question, not an answer.
 - Should the window remember its own size and pane positions, given the desktop
   already remembers the size and that caused the too-tall-window bug?
 
-### 3.6 Process
+### 4.6 Process
 
 - Does version 2 ship as one change or as a sequence of independently shippable
   steps? The layout work already landed; the DPI track landed; the colour work
@@ -212,7 +249,7 @@ Nothing here is decided. Each item names the question, not an answer.
 
 ---
 
-## 4. What is already built
+## 5. What is already built
 
 For orientation, so this document is not read as a plan for work already done.
 

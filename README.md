@@ -394,8 +394,8 @@ settings. The packaged file is used until you place your own.
 - [Glossary](GLOSSARY.md) — the vocabulary this project uses
 - [Architecture decisions](docs/adr/) — why the design is the way it is
 - [Architecture reviews](docs/reviews/) — deepening opportunities, dated
-- [UI version 2 spec](docs/ui-v2-spec.md) — the redesign, what is settled and
-  what is still open
+- [UI version 2](docs/ui-v2/) — the redesign: the spec, what is settled and
+  what is still open, and the reference screenshots
 
 ## Where the code lives
 
