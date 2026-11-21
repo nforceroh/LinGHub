@@ -308,7 +308,28 @@ shows and what keeps the icon rail to three icons.
   which layer the diagram edits. `VIEW 1` / `VIEW 2` is dropped: it is a
   Logitech concept with no counterpart, and there is one diagram.
 
-### 2.10 The device card
+### 2.10 The LIGHTSYNC view
+
+*Settled in the 2026-11-21 grilling, questions Q59–Q64.*
+
+- **The two LED zones stay driven together.** They are physically adjacent and
+  read as one light; separate control would double every control for a
+  distinction nobody can see. The config already stores them as a list, so
+  separating them stays possible.
+- **The effect is a row of four buttons**, not a dropdown. Four options is where
+  a segmented control beats a dropdown: every option visible, one click instead
+  of two. The reference needs a dropdown because it has more effects.
+- **No `PRESETS` / `FREESTYLE` / `ANIMATIONS` tabs.** One taxonomy needs no tabs
+  to switch between taxonomies.
+- **No `SYNC LIGHTING OPTIONS`.** We control one device; a button that syncs to
+  nothing is worse than no button.
+- **The mouse image is shown, with the current colour applied to its zones.**
+  This is the one view where the image shows the effect of a change, and it
+  fills the space the settings panel leaves.
+- **The preview updates live** as a control moves, while the mouse stays
+  unchanged until Apply. The preview is a drawing, not a write.
+
+### 2.11 The device card
 
 *Settled in the 2026-11-21 grilling, questions Q40 and Q43.*
 
@@ -317,7 +338,7 @@ shows and what keeps the icon rail to three icons.
 - **The card carries no hotspots.** The diagram on the card is a product image,
   not a button selector. Hotspots move to the **bindings screen**.
 
-### 2.11 Vocabulary
+### 2.12 Vocabulary
 
 - The five DPI values are **DPI presets**, never "DPI slots". The bare word
   **Slot** always means a flash position a whole profile is loaded into.
@@ -451,14 +472,7 @@ All three views share a frame:
 
 Nothing here is decided. Each item names the question, not an answer.
 
-### 4.1 The lighting panel
-
-- The G502 has two LED zones that read as one strip, so the panel drives them
-  together. Should the zones be separately addressable?
-- Effects are `off`, `fixed colour`, `cycle` and `breathing`. Is a dropdown the
-  right control, or should the effect be a row of buttons?
-
-### 4.2 The window as a whole
+### 4.1 The window as a whole
 
 - Is there a compact mode, or a minimum size below which the layout reflows?
 - Does the window need a keyboard-navigation story? Nothing is currently
@@ -466,7 +480,7 @@ Nothing here is decided. Each item names the question, not an answer.
 - Should the window remember its own size and pane positions, given the desktop
   already remembers the size and that caused the too-tall-window bug?
 
-### 4.3 Process
+### 4.2 Process
 
 - Does version 2 ship as one change or as a sequence of independently shippable
   steps? The layout work already landed; the DPI track landed; the colour work
