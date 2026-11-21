@@ -528,7 +528,16 @@ All three views share a frame:
 
 ## 4. Open
 
-Nothing. Every question asked so far is settled in §2.
+- **The add-game dialog's file browser partially supersedes Q31.** The
+  grilling rejected a file chooser because a Wine executable cannot be
+  browsed; the user then asked for one, so the dialog takes both — an
+  editable path field (typed Wine paths) with Browse beside it (real files).
+  §2.7's two-field dialog is now three fields: executable, display name, and
+  the profile the game belongs to.
+- **The onboard-memory screen has no spec section.** Named in Q40 (a home
+  card button), never grilled.
+- **The DPI track's 800/750 label collision** (seen on the user's machine)
+  was noticed and not fixed.
 
 ---
 
@@ -549,10 +558,12 @@ For orientation, so this document is not read as a plan for work already done.
 | Colliding markers fanned out | built |
 | One label per distinct DPI | built |
 | `DPI preset` in the glossary | built |
-| Two-level navigation, home and three views | **not built** |
-| Profile selector dropdown | **not built** |
-| Manage-profiles canvas | **not built** |
-| Game display name and config shape | **not built** |
+| Home screen with the device card | built |
+| Profile selector dropdown | built |
+| Two-level navigation, home and editor | built (the three-view icon rail is not) |
+| Manage-profiles canvas | built |
+| Game display name and config shape | built |
+| Duplicate profile, rename a game | built |
 | LIGHTSYNC view | **not built** |
 | Colour palette indexed by preset | **not built** |
 | Superscript preset number on labels | **not built** |
