@@ -26,7 +26,7 @@ from .client import DaemonClient
 from .daemon_write import DaemonWrite
 from .pending_edits import PendingEditsFor
 from .profile_selector import ProfileSelector
-from .device_card import DeviceCard
+from .home_card import HomeCard
 from ..hardware.battery import battery, model_name
 from ..daemon_view import DaemonView, ViewState
 from .diagram import MouseDiagram
@@ -175,7 +175,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _build_home(self) -> Gtk.Widget:
         """The home screen: the device card, centred on an empty canvas."""
-        self._card = DeviceCard()
+        self._card = HomeCard()
         self._card.connect("configure", lambda _c: self._show_view("editor"))
         self._card.connect("lightsync", lambda _c: self._open_manage_profiles())
         self._card.connect("onboard", lambda _c: self._open_manage_profiles())

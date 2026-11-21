@@ -330,14 +330,15 @@ shows and what keeps the icon rail to three icons.
 - **The preview updates live** as a control moves, while the mouse stays
   unchanged until Apply. The preview is a drawing, not a write.
 
-### 2.11 The device card
+### 2.11 The home card
 
 *Settled in the 2026-11-21 grilling, questions Q40 and Q43.*
 
-- The card's two icon buttons are **LIGHTSYNC** (the lighting) and **onboard
+- The **device card** is the picture of the mouse itself; the card that holds it, its charge and its buttons is the **home card**.
+- The home card's two icon buttons are **LIGHTSYNC** (the lighting) and **onboard
   memory** (the mouse's flash slots).
-- **The card carries no hotspots.** The diagram on the card is a product image,
-  not a button selector. Hotspots move to the **bindings screen**.
+- **The device card carries no hotspots.** It is a picture, not a button
+  selector. Hotspots live on the Assignments view.
 
 ### 2.12 The window
 

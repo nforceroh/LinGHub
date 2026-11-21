@@ -1,4 +1,4 @@
-"""The home screen: one device card on an otherwise empty canvas.
+"""The home screen: one card on an otherwise empty canvas.
 
 The card is what the window opens on. It answers "what is plugged in, and what
 is it doing" — the device name, its charge, and two buttons into the two things
@@ -34,8 +34,8 @@ CARD_WIDTH = 340
 IMAGE_HEIGHT = 300
 
 
-class DeviceCard(Gtk.Frame):
-    """A card naming the mouse, its charge, and two ways into it.
+class HomeCard(Gtk.Frame):
+    """The home screen's card: the device card, its charge, and two ways into it.
 
     Emits `configure` when the mouse is clicked, and `lightsync` or
     `onboard` for the two buttons.

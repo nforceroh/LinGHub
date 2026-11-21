@@ -102,9 +102,9 @@ def make_window(
     window._selector = ProfileSelector(
         on_chosen=lambda name: None, on_manage=lambda: None
     )
-    from linghub.ui.device_card import DeviceCard
+    from linghub.ui.home_card import HomeCard
 
-    window._card = DeviceCard()
+    window._card = HomeCard()
     # The stack needs both children and a visible one, or get_visible_child_name
     # returns None and the home-screen tests cannot tell which view is showing.
     window._stack = Gtk.Stack()
