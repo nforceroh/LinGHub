@@ -223,13 +223,14 @@ class MainWindow(Adw.ApplicationWindow):
         if IMAGE.exists():
             self._diagram = MouseDiagram(str(IMAGE))
             self._diagram.connect("button-selected", self._on_button_selected)
-            frame = Gtk.Frame()
-            frame.set_child(self._diagram)
+            # No Frame: it drew a border and a filled background around the
+            # image, which has a transparent background of its own. The image
+            # sits directly in the pane, so the UI's background shows through.
             # Top-aligned: the image cannot grow to fill a tall pane without
             # distorting, so the space it leaves belongs at the bottom rather
             # than split above and below it.
-            frame.set_valign(Gtk.Align.START)
-            box.append(frame)
+            self._diagram.set_valign(Gtk.Align.START)
+            box.append(self._diagram)
         else:
             self._diagram = None
             box.append(Gtk.Label(label=f"Diagram not found: {IMAGE}"))
@@ -357,7 +358,10 @@ class MainWindow(Adw.ApplicationWindow):
             manual = Gtk.Label(label=manual_number(spot.index), xalign=0)
             manual.add_css_class("dim-label")
             function = Gtk.Label(label=describe(spot.index), xalign=0)
-            function.set_hexpand(True)
+            # No hexpand: it stretched the Function column across the pane and
+            # pushed Does and Ratbag to the far edge, leaving a wide gap
+            # between Function and Does. The columns now sit at their natural
+            # widths, close together.
             does = Gtk.Label(label="—", xalign=0)
             ratbag = Gtk.Label(label=str(spot.index), xalign=1)
             ratbag.add_css_class("dim-label")
