@@ -634,3 +634,57 @@ class SaveAndDiscardTests(unittest.TestCase):
 
         asyncio.run(run())
         self.assertEqual(window._editing, "world-of-tanks")
+
+
+@unittest.skipUnless(has_cairo(), "needs pycairo and Gtk 4")
+class HomeScreenTests(unittest.TestCase):
+    """The window opens on the device card, and the mouse opens the editor."""
+
+    def _window(self):
+        return make_window(profiles=("desktop",))
+
+    def test_the_window_opens_on_the_home_screen(self):
+        window = self._window()
+        self.assertEqual(window._stack.get_visible_child_name(), "home")
+
+    def test_the_back_button_is_hidden_at_home(self):
+        window = self._window()
+        self.assertFalse(window._back_button.get_visible())
+
+    def test_clicking_the_mouse_opens_the_editor(self):
+        window = self._window()
+        window._show_view("editor")
+        self.assertEqual(window._stack.get_visible_child_name(), "editor")
+        self.assertTrue(window._back_button.get_visible())
+
+    def test_the_back_button_returns_home(self):
+        window = self._window()
+        window._show_view("editor")
+        window._show_view("home")
+        self.assertEqual(window._stack.get_visible_child_name(), "home")
+        self.assertFalse(window._back_button.get_visible())
+
+    def test_the_card_names_the_mouse(self):
+        window = self._window()
+        window._card.show_device("G502 LIGHTSPEED", None)
+        self.assertEqual(window._card._name.get_text(), "G502 LIGHTSPEED")
+
+    def test_a_wired_mouse_shows_no_battery_line(self):
+        window = self._window()
+        window._card.show_device("G502", None)
+        self.assertFalse(window._card._battery.get_visible())
+
+    def test_a_wireless_mouse_shows_its_charge(self):
+        from linghub.hardware.battery import Battery
+
+        window = self._window()
+        window._card.show_device("G502", Battery(capacity=85, charging=False))
+        self.assertTrue(window._card._battery.get_visible())
+        self.assertEqual(window._card._battery.get_text(), "85%")
+
+    def test_a_charging_mouse_says_so(self):
+        from linghub.hardware.battery import Battery
+
+        window = self._window()
+        window._card.show_device("G502", Battery(capacity=40, charging=True))
+        self.assertEqual(window._card._battery.get_text(), "40% · charging")

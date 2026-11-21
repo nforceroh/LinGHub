@@ -26,6 +26,8 @@ from .client import DaemonClient
 from .daemon_write import DaemonWrite
 from .pending_edits import PendingEditsFor
 from .profile_selector import ProfileSelector
+from .device_card import DeviceCard
+from ..hardware.battery import battery, model_name
 from ..daemon_view import DaemonView, ViewState
 from .diagram import MouseDiagram
 from . import presentation
@@ -84,6 +86,13 @@ class MainWindow(Adw.ApplicationWindow):
         )
         header.pack_start(self._selector)
 
+        self._back_button = Gtk.Button(icon_name="go-previous-symbolic")
+        self._back_button.set_tooltip_text("Back to the device")
+        self._back_button.add_css_class("flat")
+        self._back_button.connect("clicked", lambda _b: self._show_view("home"))
+        self._back_button.set_visible(False)
+        header.pack_start(self._back_button)
+
         toolbar.add_top_bar(header)
 
         self._status = Gtk.Label(label="Connecting…")
@@ -96,7 +105,15 @@ class MainWindow(Adw.ApplicationWindow):
         self._banner = Adw.Banner()
         toolbar.add_top_bar(self._banner)
 
-        toolbar.set_content(self._build_content())
+        # Two views in one window: the home screen the window opens on, and the
+        # editor reached by clicking the mouse. A stack rather than two windows,
+        # so there is one place to refresh and one thing to manage.
+        self._stack = Gtk.Stack()
+        self._stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self._stack.add_named(self._build_home(), "home")
+        self._stack.add_named(self._build_editor(), "editor")
+
+        toolbar.set_content(self._stack)
         self.set_content(toolbar)
 
         # No poll: the daemon announces every change the window shows, and
@@ -156,7 +173,20 @@ class MainWindow(Adw.ApplicationWindow):
             min(height, int(geometry.height * 0.88)),
         )
 
-    def _build_content(self) -> Gtk.Widget:
+    def _build_home(self) -> Gtk.Widget:
+        """The home screen: the device card, centred on an empty canvas."""
+        self._card = DeviceCard()
+        self._card.connect("configure", lambda _c: self._show_view("editor"))
+        self._card.connect("lightsync", lambda _c: self._open_manage_profiles())
+        self._card.connect("onboard", lambda _c: self._open_manage_profiles())
+
+        centre = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        centre.set_halign(Gtk.Align.CENTER)
+        centre.set_valign(Gtk.Align.CENTER)
+        centre.append(self._card)
+        return centre
+
+    def _build_editor(self) -> Gtk.Widget:
         """Diagram and bindings on top, the device panels across the bottom.
 
         DPI and lighting sit under *both* columns rather than inside the right
@@ -476,6 +506,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         self._rebuild_profiles()
         self._rebuild_bindings()
+        self._card.show_device(self._device_name(), battery())
         if self._led_panel is not None:
             # Never reload the panel over unsaved edits: any change signal
             # refreshes the view, and would silently discard whatever the user
@@ -594,6 +625,16 @@ class MainWindow(Adw.ApplicationWindow):
         self._pending.for_profile(profile).set_leds(mode, brightness, duration, color)
         self._sync_save_buttons()
         self._status.set_text("Lighting changes pending — press Save to apply.")
+
+    def _device_name(self) -> str:
+        """The mouse's name, as the card shows it.
+
+        The daemon does not publish a device name, so this reads the kernel's
+        power-supply entry when there is one and falls back to the model ratbagd
+        reports. A wired mouse has no battery entry, so the fallback is the
+        common case for it.
+        """
+        return model_name() or "Logitech G502"
 
     def _rebuild_profiles(self) -> None:
         """Make the selector match the daemon's state.
@@ -826,6 +867,11 @@ class MainWindow(Adw.ApplicationWindow):
             self._confirm_switch(name)
             return
         self._apply_selection(name)
+
+    def _show_view(self, name: str) -> None:
+        """Swap between the home screen and the editor."""
+        self._stack.set_visible_child_name(name)
+        self._back_button.set_visible(name != "home")
 
     def _open_manage_profiles(self) -> None:
         """Open the manage-profiles canvas.
