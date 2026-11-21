@@ -374,6 +374,74 @@ if __name__ == "__main__":
 
 
 @unittest.skipUnless(has_cairo(), "needs pycairo and Gtk 4")
+class FirstReadTests(unittest.TestCase):
+    """The first read cannot name a profile, so it must be followed by another.
+
+    With no state yet the window asks the daemon for "", which answers with the
+    profile list but no profile's sections. The panels then sat empty until
+    something unrelated triggered a read, which is how the DPI slots went
+    missing on a freshly opened window.
+    """
+
+    def test_an_unnamed_first_read_asks_again_once_the_state_is_known(self):
+        import asyncio
+
+        window = make_window(profiles=("desktop", "world-of-tanks"))
+        # A freshly opened window: no state yet, so no profile to name.
+        from linghub.daemon_view import ViewState
+
+        window._state = ViewState()
+        window._editing = None
+        asked = []
+
+        class FakeClient:
+            async def get_view(self, profile):
+                asked.append(profile)
+                return view(profiles=("desktop", "world-of-tanks"))
+
+            async def daemon_version(self):
+                from linghub import version
+
+                return version.DaemonVersion.not_running()
+
+        window._client = FakeClient()
+
+        async def run():
+            await window._read_and_apply()
+
+        asyncio.run(run())
+        self.assertEqual(asked, [""])
+        self.assertTrue(
+            window._refresh_pending,
+            "the window must ask again now that it knows which profile to edit",
+        )
+
+    def test_a_named_read_does_not_ask_again(self):
+        import asyncio
+
+        window = make_window(profiles=("desktop",), editing="desktop")
+        asked = []
+
+        class FakeClient:
+            async def get_view(self, profile):
+                asked.append(profile)
+                return view(profiles=("desktop",))
+
+            async def daemon_version(self):
+                from linghub import version
+
+                return version.DaemonVersion.not_running()
+
+        window._client = FakeClient()
+
+        async def run():
+            await window._read_and_apply()
+
+        asyncio.run(run())
+        self.assertEqual(asked, ["desktop"])
+        self.assertFalse(window._refresh_pending)
+
+
 class SaveAndDiscardTests(unittest.TestCase):
     """One Save and one Discard for every section, in the header.
 

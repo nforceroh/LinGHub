@@ -14,9 +14,10 @@ from pathlib import Path
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gio, GLib, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 from .asyncbridge import run_and_report
 from .binding_editor import BindingEditor
@@ -66,31 +67,14 @@ class MainWindow(Adw.ApplicationWindow):
         self._refresh_pending = False
         self._daemon_version = version.DaemonVersion.not_running()
 
-        self.set_default_size(980, 620)
+        self.set_default_size(*self._preferred_size())
+        self.connect("map", lambda _w: self._fit_to_screen())
 
         toolbar = Adw.ToolbarView()
         header = Adw.HeaderBar()
         header.set_title_widget(Adw.WindowTitle(title="LinGHub", subtitle=""))
         self._title = header.get_title_widget()
         header.pack_end(self._build_main_menu())
-
-        # Save and Discard act on every section at once, so they live in the
-        # header rather than on each panel. Both are disabled until something
-        # is pending.
-        self._discard_button = Gtk.Button(icon_name="edit-undo-symbolic")
-        self._discard_button.set_tooltip_text("Discard all unsaved changes")
-        self._discard_button.add_css_class("flat")
-        self._discard_button.connect("clicked", lambda _b: self._discard_changes())
-        self._discard_button.set_sensitive(False)
-        header.pack_start(self._discard_button)
-
-        self._save_button = Gtk.Button(icon_name="document-save-symbolic")
-        self._save_button.set_tooltip_text("Save all changes to the profile")
-        self._save_button.add_css_class("suggested-action")
-        self._save_button.connect("clicked", lambda _b: self._save_changes())
-        self._save_button.set_sensitive(False)
-        header.pack_start(self._save_button)
-
         toolbar.add_top_bar(header)
 
         self._status = Gtk.Label(label="Connecting…")
@@ -111,14 +95,83 @@ class MainWindow(Adw.ApplicationWindow):
         client.set_change_handler(self._on_daemon_change)
         self._refresh()
 
-    def _build_content(self) -> Gtk.Widget:
-        split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
-        split.set_position(600)
-        split.set_wide_handle(True)
+    # The size the layout is designed for. Anything smaller and the bottom row
+    # starts to scroll; anything larger is wasted space.
+    WANTED_SIZE = (1140, 840)
 
-        split.set_start_child(self._build_diagram_pane())
-        split.set_end_child(self._build_side_pane())
-        return split
+    @classmethod
+    def _preferred_size(cls) -> tuple[int, int]:
+        """The window size to open at, clamped to the screen it opens on.
+
+        The layout wants 1140x840, but a 1366x768 laptop has about 745 usable
+        pixels of height, and a window taller than the screen hides its own
+        bottom row. Asking for the layout's size and letting the monitor cap it
+        keeps the window fully visible on any screen.
+        """
+        wanted_width, wanted_height = cls.WANTED_SIZE
+        display = Gdk.Display.get_default()
+        if display is None:
+            return wanted_width, wanted_height
+        monitors = display.get_monitors()
+        if monitors.get_n_items() == 0:
+            return wanted_width, wanted_height
+        geometry = monitors.get_item(0).get_geometry()
+        # Leave room for the desktop's own panels and the window's shadow.
+        return (
+            min(wanted_width, int(geometry.width * 0.92)),
+            min(wanted_height, int(geometry.height * 0.88)),
+        )
+
+    def _fit_to_screen(self) -> None:
+        """Shrink a window that is larger than the screen it opened on.
+
+        The desktop remembers a window's size per application id, so a size
+        that was correct for an older, taller layout is restored over the
+        default and can leave the window taller than the screen, hiding its own
+        bottom row. The remembered size is only a starting point: if it does
+        not fit, the screen wins.
+        """
+        surface = self.get_surface()
+        display = Gdk.Display.get_default()
+        if surface is None or display is None:
+            return
+        monitor = display.get_monitor_at_surface(surface)
+        if monitor is None:
+            return
+        geometry = monitor.get_geometry()
+        width, height = self.get_width(), self.get_height()
+        if width <= geometry.width and height <= geometry.height:
+            return
+        self.set_default_size(
+            min(width, int(geometry.width * 0.92)),
+            min(height, int(geometry.height * 0.88)),
+        )
+
+    def _build_content(self) -> Gtk.Widget:
+        """Diagram and bindings on top, the device panels across the bottom.
+
+        DPI and lighting sit under *both* columns rather than inside the right
+        one. They are wide controls (five slot rows, a colour, two sliders) and
+        the right column alone squeezed them, while the diagram left a tall
+        empty area beside them. Spanning the full width gives each panel the
+        room it needs and shortens the right column at the same time.
+        """
+        top = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        # The diagram needs 584px and the side pane 538px, so the split sits
+        # where both get their natural width at the default window size.
+        top.set_position(600)
+        top.set_wide_handle(True)
+        top.set_start_child(self._build_diagram_pane())
+        top.set_end_child(self._build_side_pane())
+        # The top row takes whatever height is left after the panels below
+        # have their natural height.
+        top.set_vexpand(True)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        content.append(top)
+        content.append(Gtk.Separator())
+        content.append(self._build_device_panels())
+        return content
 
     def _build_diagram_pane(self) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -132,55 +185,88 @@ class MainWindow(Adw.ApplicationWindow):
             self._diagram.connect("button-selected", self._on_button_selected)
             frame = Gtk.Frame()
             frame.set_child(self._diagram)
+            # Top-aligned: the image cannot grow to fill a tall pane without
+            # distorting, so the space it leaves belongs at the bottom rather
+            # than split above and below it.
+            frame.set_valign(Gtk.Align.START)
             box.append(frame)
         else:
             self._diagram = None
             box.append(Gtk.Label(label=f"Diagram not found: {IMAGE}"))
 
-        self._button_detail = Gtk.Label(label="Select a button on the diagram")
-        self._button_detail.add_css_class("dim-label")
-        self._button_detail.set_margin_top(12)
-        box.append(self._button_detail)
         return box
 
     def _build_side_pane(self) -> Gtk.Widget:
-        """Profiles, buttons and lighting, sharing the height between them.
+        """Profiles, bindings, then DPI and lighting side by side.
 
-        A plain box would let the last child take whatever it needs and squash
-        the rest, which left the button table showing a single row. A Paned
-        gives each section a share the user can adjust.
+        A plain vertical box, not a Paned: the sections have natural heights
+        and nothing needs to stretch, so a draggable divider would only let
+        the user drag one into a useless position. DPI and lighting share a
+        row because together they are taller than the window.
         """
-        paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
-        paned.set_wide_handle(True)
+        pane = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        pane.set_margin_top(12)
+        pane.set_margin_start(12)
+        pane.set_margin_end(12)
+        pane.set_margin_bottom(12)
 
-        # --- profiles + buttons share the top ---
-        top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        top.set_margin_top(12)
-        top.set_margin_start(12)
-        top.set_margin_end(12)
+        pane.append(self._build_profile_header())
 
-        profile_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self._profile_list = Gtk.ListBox()
+        self._profile_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self._profile_list.connect("row-selected", self._on_profile_row_selected)
+        profile_scroller = Gtk.ScrolledWindow()
+        profile_scroller.set_child(self._profile_list)
+        profile_scroller.set_min_content_height(96)
+        profile_scroller.set_max_content_height(160)
+        profile_scroller.set_propagate_natural_height(True)
+        pane.append(profile_scroller)
+
+        pane.append(self._section_label("Bindings"))
+        # The table is not in its own scroller: the whole pane scrolls as one,
+        # so there is a single scrollbar and no section can be clipped to a
+        # sliver while the pane still has room below it.
+        pane.append(self._build_button_table())
+
+        # One scrollbar for the pane. At the default window height everything
+        # fits; on a shorter screen the pane scrolls rather than squeezing the
+        # table into a two-row window.
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_child(pane)
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_propagate_natural_height(True)
+        return scroller
+
+    def _build_profile_header(self) -> Gtk.Widget:
+        """The Profiles heading, its management buttons, and the commit pair.
+
+        Apply and Discard live here rather than in the header bar because this
+        is where the eye is while editing. They are separated from the profile
+        buttons by a gap: those choose *which* profile, these commit what you
+        changed in it.
+        """
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         heading = self._section_label("Profiles")
         heading.set_hexpand(True)
-        profile_header.append(heading)
+        header.append(heading)
 
         self._new_profile_button = Gtk.Button(icon_name="list-add-symbolic")
         self._new_profile_button.set_tooltip_text("Add a profile")
         self._new_profile_button.add_css_class("flat")
         self._new_profile_button.connect("clicked", lambda _b: self._prompt_new_profile())
-        profile_header.append(self._new_profile_button)
+        header.append(self._new_profile_button)
 
         self._rename_profile_button = Gtk.Button(icon_name="document-edit-symbolic")
         self._rename_profile_button.set_tooltip_text("Rename the selected profile")
         self._rename_profile_button.add_css_class("flat")
         self._rename_profile_button.connect("clicked", lambda _b: self._prompt_rename_profile())
-        profile_header.append(self._rename_profile_button)
+        header.append(self._rename_profile_button)
 
         self._delete_profile_button = Gtk.Button(icon_name="user-trash-symbolic")
         self._delete_profile_button.set_tooltip_text("Delete the selected profile")
         self._delete_profile_button.add_css_class("flat")
         self._delete_profile_button.connect("clicked", lambda _b: self._prompt_delete_profile())
-        profile_header.append(self._delete_profile_button)
+        header.append(self._delete_profile_button)
 
         # Loading is its own action: selecting a profile only chooses what to
         # edit, so this is how you put one on the mouse.
@@ -188,49 +274,59 @@ class MainWindow(Adw.ApplicationWindow):
         self._load_profile_button.set_tooltip_text("Load the selected profile onto the mouse")
         self._load_profile_button.add_css_class("flat")
         self._load_profile_button.connect("clicked", lambda _b: self._load_selected())
-        profile_header.append(self._load_profile_button)
+        header.append(self._load_profile_button)
 
-        top.append(profile_header)
+        header.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
 
-        self._profile_list = Gtk.ListBox()
-        self._profile_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        self._profile_list.connect("row-selected", self._on_profile_row_selected)
-        profile_scroller = Gtk.ScrolledWindow()
-        profile_scroller.set_child(self._profile_list)
-        profile_scroller.set_min_content_height(120)
-        profile_scroller.set_propagate_natural_height(True)
-        top.append(profile_scroller)
+        self._discard_button = Gtk.Button(icon_name="edit-undo-symbolic")
+        self._discard_button.set_tooltip_text("Discard all unsaved changes")
+        self._discard_button.add_css_class("flat")
+        self._discard_button.connect("clicked", lambda _b: self._discard_changes())
+        self._discard_button.set_sensitive(False)
+        header.append(self._discard_button)
 
-        top.append(self._section_label("Buttons"))
-        table_scroller = Gtk.ScrolledWindow()
-        table_scroller.set_child(self._build_button_table())
-        table_scroller.set_vexpand(True)
-        top.append(table_scroller)
+        self._save_button = Gtk.Button(icon_name="document-save-symbolic")
+        self._save_button.set_tooltip_text("Save all changes to the profile")
+        self._save_button.add_css_class("suggested-action")
+        self._save_button.connect("clicked", lambda _b: self._save_changes())
+        self._save_button.set_sensitive(False)
+        header.append(self._save_button)
 
-        paned.set_start_child(top)
+        return header
 
-        # --- lighting below, scrollable so it never squeezes the table ---
-        lighting = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        lighting.set_margin_start(12)
-        lighting.set_margin_end(12)
-        lighting.set_margin_top(8)
-        lighting.set_margin_bottom(12)
-        lighting.append(self._section_label("DPI and report rate"))
+    def _build_device_panels(self) -> Gtk.Widget:
+        """DPI and lighting side by side, across the full window width.
+
+        DPI carries five slot rows plus a rate dropdown; lighting carries four
+        controls. DPI gets the larger share because its rows are the widest
+        thing here, and lighting is left-aligned in what remains.
+        """
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=24)
+        row.set_margin_top(12)
+        row.set_margin_bottom(12)
+        row.set_margin_start(12)
+        row.set_margin_end(12)
+
+        dpi_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        dpi_box.set_hexpand(True)
+        dpi_box.append(self._section_label("DPI and report rate"))
         self._dpi_panel = DpiPanel(on_save=self._on_dpi_saved)
-        lighting.append(self._dpi_panel)
-        lighting.append(Gtk.Separator())
+        dpi_box.append(self._dpi_panel)
+        row.append(dpi_box)
 
-        lighting.append(self._section_label("Lighting"))
+        led_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        led_box.set_hexpand(True)
+        led_box.append(self._section_label("Lighting"))
         self._led_panel = LedPanel(on_save=self._on_led_saved)
-        lighting.append(self._led_panel)
+        led_box.append(self._led_panel)
+        row.append(led_box)
 
-        lighting_scroller = Gtk.ScrolledWindow()
-        lighting_scroller.set_child(lighting)
-        lighting_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        paned.set_end_child(lighting_scroller)
-
-        paned.set_position(380)
-        return paned
+        # Not homogeneous: that would force 1:1 and squeeze the five DPI slot
+        # rows. DPI expands into the slack and lighting keeps its natural
+        # width, which is what the two panels actually need.
+        dpi_box.set_hexpand(True)
+        led_box.set_hexpand(False)
+        return row
 
     def _build_button_table(self) -> Gtk.Widget:
         """Every button: manual number, function and ratbag index.
@@ -241,8 +337,10 @@ class MainWindow(Adw.ApplicationWindow):
         """
         grid = Gtk.Grid()
         grid.set_column_spacing(18)
-        grid.set_row_spacing(6)
-        grid.set_margin_top(6)
+        # 2px between rows: eleven rows at 6px cost 66px of pure gap, and the
+        # table is the tallest thing in the pane.
+        grid.set_row_spacing(2)
+        grid.set_margin_top(4)
 
         titles = ("Manual", "Function", "Does", "Ratbag")
         for column, title in enumerate(titles):
@@ -338,13 +436,21 @@ class MainWindow(Adw.ApplicationWindow):
             self._refresh_pending = False
 
     async def _read_and_apply(self) -> None:
+        wanted = self._editing_profile() or ""
         try:
-            view = await self._client.get_view(self._editing_profile() or "")
+            view = await self._client.get_view(wanted)
         except (RuntimeError, OSError) as exc:
             self._status.set_text(f"Daemon unavailable: {exc}")
             self._apply_daemon_version(version.DaemonVersion.not_running())
             return
         self._apply_view(view)
+        # The first read has no state yet, so it cannot name a profile and asks
+        # for "". That answer carries the profile list but no profile's
+        # sections, so the panels would stay empty until something else
+        # happened to trigger a read. Now that the state is known, read again
+        # for the profile we should actually be editing.
+        if not wanted and self._editing_profile():
+            self._refresh_pending = True
         # Read after the view, and on its own: a failure here must not cost
         # the user the state they came to see.
         try:
@@ -754,7 +860,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._selected_button = index
         if self._diagram is not None:
             self._diagram.set_selected(index)
-        self._button_detail.set_text(f"Selected: {describe(index)}")
+        self._status.set_text(f"Selected: {describe(index)}")
         self._rebuild_bindings()
 
     def _on_profile_row_selected(self, _list, row) -> None:

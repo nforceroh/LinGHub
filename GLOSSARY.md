@@ -166,6 +166,14 @@ staged-edit module owns the baseline, whether the panel is dirty, and the
 save/revert rule.
 _Avoid_: draft, pending change, form state
 
+**DPI track**:
+The one-line scale in the DPI panel on which every slot is a draggable marker.
+It shows all five slots at once, which a row per slot cannot, and it is the
+only place a slot's position on the scale is visible. A slot's exact value,
+whether it is the default, and whether it is disabled are properties of the
+slot rather than of the scale, so they live in the marker's popover.
+_Avoid_: slider, DPI bar, range widget
+
 **Clone install**:
 LinGHub run from a git clone through an editable install, where the app
 version is read from git at startup (ADR-0009). Its service is

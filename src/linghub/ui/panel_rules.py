@@ -109,3 +109,18 @@ def default_mask(
     mask[toggled] = False
     return tuple(mask)
 
+
+
+# The DPI values the track labels, so the scale can be read without hovering.
+# Chosen to cover the useful range: a G502 is rarely set above 6400.
+TICK_DPI: tuple[int, ...] = (100, 400, 800, 1600, 3200, 6400, 25600)
+
+# The step a dragged marker lands on. Fine enough to reach any value a user
+# would type, coarse enough that a drag does not produce 1237.
+DPI_STEP = 50
+
+
+def snap_dpi(dpi: float) -> int:
+    """Round a DPI to the nearest step, inside the range the mouse accepts."""
+    stepped = round(dpi / DPI_STEP) * DPI_STEP
+    return int(max(100, min(25600, stepped)))

@@ -106,37 +106,49 @@ settings back, which needs a decode path LinGHub does not have.
 
 ## Graphical interface
 
-`linghub ui` opens a GTK4 window showing the mouse diagram, the profile list and
-a table of every button with what it currently does. Clicking a hotspot on the
-diagram selects that button; activating a profile in the list loads it onto the
-mouse.
+`linghub ui` opens a GTK4 window laid out so the whole profile is visible at
+once. The mouse diagram and the profile list with its bindings share the top
+row; the DPI track and the lighting panel span the full width beneath them.
 
-Clicking a row in the button table opens a dialog for changing that button's
+Clicking a hotspot on the diagram selects that button, and the status line names
+it. Activating a profile in the list loads it onto the mouse.
+
+Clicking a row in the bindings table opens a dialog for changing that button's
 binding: a single key, a modifier chord, a mouse function such as DPI up,
 another mouse button, or nothing. The change is held until you press Save.
 
 Every edit — bindings, DPI, report rate and lighting — is held in the window
-until Save, which lives in the header and covers the whole profile. Discard,
-beside it, throws all of it away and shows the config as it is on disk. Both
-are disabled until something is pending. Saving writes the config; the daemon
-pushes it to the mouse on its next check, within a couple of seconds.
+until Save, which sits at the end of the Profiles header and covers the whole
+profile. Discard, beside it, throws all of it away and shows the config as it is
+on disk. Both are disabled until something is pending. Saving writes the config;
+the daemon pushes it to the mouse on its next check, within a couple of seconds.
 
 Switching profiles with unsaved changes asks first, because the pending edits
 belong to the profile you are leaving. Holding them for several profiles at
 once would mean two places remembering what the config says, and the config is
 the single source of truth (ADR-0004).
 
-Below the button table is a lighting panel: colour, effect, brightness and
-speed, applied to the whole profile. Lighting is staged rather than written as
-you go, because sliders fire a change per pixel — dragging one used to mean a
-config write and two hardware commits for every step. The G502 has two LED
-zones, but they read as one strip, so the panel drives them together; the
-daemon writes the same values to each. Effects are `off`, `fixed colour`,
-`cycle` and `breathing`, and only the looping ones have a speed.
+The DPI panel is one track rather than a row per slot. Each of the five slots is
+a marker on a shared logarithmic scale, so the whole DPI setup reads at a glance
+and a slot is moved by dragging it. The scale is logarithmic because DPI is
+perceived proportionally: 400 to 800 is the same step as 1600 to 3200, and a
+linear scale would spend most of its width above 10000, where nobody sets a DPI.
+Clicking a marker opens a popover with an exact value, a Default tick and a
+Disabled tick. The default slot is underlined, the same signal G HUB uses, and a
+disabled slot is drawn hollow. Several slots may share a DPI — pinning every slot
+to 800 is a legitimate setup — so markers that collide are fanned out rather than
+drawn on top of each other, and each stays grabbable.
 
-The DPI and lighting panels each keep a Revert button, which throws away that
-section's unsaved edits alone. A refresh never overwrites unsaved edits, so a
-change made elsewhere cannot discard what you are in the middle of choosing.
+Beside it is the lighting panel: colour, effect, brightness and speed, applied to
+the whole profile. Lighting is staged rather than written as you go, because
+sliders fire a change per pixel — dragging one used to mean a config write and
+two hardware commits for every step. The G502 has two LED zones, but they read as
+one strip, so the panel drives them together; the daemon writes the same values
+to each. Effects are `off`, `fixed colour`, `cycle` and `breathing`, and only the
+looping ones have a speed.
+
+A refresh never overwrites unsaved edits, so a change made elsewhere cannot
+discard what you are in the middle of choosing.
 
 Profiles can be created, renamed and deleted from the buttons above the profile
 list. The desktop profile cannot be deleted, and neither can the last remaining

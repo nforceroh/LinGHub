@@ -30,7 +30,7 @@ class LedPanel(Gtk.Box):
     """Colour, effect, brightness and speed for one profile's lighting."""
 
     def __init__(self, on_save, on_revert=None):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self._on_revert = on_revert
         self._clean_hint = ""
         self._staged = StagedEdit(
@@ -40,38 +40,40 @@ class LedPanel(Gtk.Box):
             on_changed=self._on_changed,
         )
 
+        # Two columns rather than four stacked rows: the panel sits beside the
+        # DPI track, and four rows made it the tallest thing in the window.
+        grid = Gtk.Grid()
+        grid.set_column_spacing(12)
+        grid.set_row_spacing(6)
+
         self._color_button = Gtk.ColorButton()
         self._color_button.set_title("LED colour")
         self._color_button.connect("notify::rgba", self._on_edited)
-        self.append(self._labelled("Colour", self._color_button))
+        grid.attach(self._labelled("Colour", self._color_button), 0, 0, 1, 1)
 
         self._mode = Gtk.DropDown.new_from_strings([label for _m, label in MODES])
         self._mode.connect("notify::selected", self._on_mode_changed)
-        self.append(self._labelled("Effect", self._mode))
+        grid.attach(self._labelled("Effect", self._mode), 1, 0, 1, 1)
 
         self._brightness = Gtk.Scale.new_with_range(
             Gtk.Orientation.HORIZONTAL, 0, 255, 1
         )
         self._brightness.set_draw_value(True)
         self._brightness.set_value_pos(Gtk.PositionType.RIGHT)
+        self._brightness.set_hexpand(True)
         self._brightness.connect("value-changed", self._on_edited)
-        self.append(self._labelled("Brightness", self._brightness))
+        grid.attach(self._labelled("Brightness", self._brightness), 0, 1, 1, 1)
 
         # Speed is expressed as a duration, but "fast/slow" is what a user
         # actually thinks in, so the slider is inverted: left is fastest.
         self._speed = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 1, 20, 1)
         self._speed.set_draw_value(False)
+        self._speed.set_hexpand(True)
         self._speed.connect("value-changed", self._on_edited)
         self._speed_row = self._labelled("Speed", self._speed)
-        self.append(self._speed_row)
+        grid.attach(self._speed_row, 1, 1, 1, 1)
 
-        # Save lives in the window's header and covers every section at once,
-        # so this panel offers only Revert, which is useful on its own.
-        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self._revert_button = Gtk.Button(label="Revert")
-        self._revert_button.connect("clicked", lambda _b: self.revert())
-        actions.append(self._revert_button)
-        self.append(actions)
+        self.append(grid)
 
         self._hint = Gtk.Label(xalign=0, wrap=True)
         self._hint.add_css_class("dim-label")
@@ -88,7 +90,7 @@ class LedPanel(Gtk.Box):
     # --- construction ----------------------------------------------------
 
     def _labelled(self, text: str, widget: Gtk.Widget) -> Gtk.Widget:
-        row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         label = Gtk.Label(label=text, xalign=0)
         label.add_css_class("caption")
         label.add_css_class("dim-label")
@@ -184,7 +186,6 @@ class LedPanel(Gtk.Box):
 
     def _on_changed(self, changed: bool) -> None:
         """The staged edit says whether the panel is dirty; show it."""
-        self._revert_button.set_sensitive(changed)
         if changed:
             self._hint.set_text("Unsaved changes — the mouse is unchanged.")
         else:

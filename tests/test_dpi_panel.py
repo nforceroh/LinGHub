@@ -24,13 +24,30 @@ def _panel(saved=None):
     return panel
 
 
+def _move(panel, index, dpi):
+    """Move one marker, the way a drag does."""
+    slots = panel._track.slots()
+    slots[index]["dpi"] = dpi
+    panel._track.set_slots(slots)
+    panel._track._edited()
+
+
+def _make_default(panel, index):
+    """Make one slot the default, the way the popover does."""
+    slots = panel._track.slots()
+    for position, slot in enumerate(slots):
+        slot["default"] = position == index
+    panel._track.set_slots(slots)
+    panel._track._edited()
+
+
 class StagingTests(unittest.TestCase):
     def test_a_freshly_loaded_panel_is_clean(self):
         self.assertFalse(_panel().dirty)
 
     def test_changing_a_dpi_value_makes_it_dirty(self):
         panel = _panel()
-        panel._rows[0]["spin"].set_value(1200)
+        _move(panel, 0, 1200)
         self.assertTrue(panel.dirty)
 
     def test_changing_the_report_rate_makes_it_dirty(self):
@@ -40,12 +57,12 @@ class StagingTests(unittest.TestCase):
 
     def test_edits_are_not_published_before_save(self):
         panel = _panel()
-        panel._rows[0]["spin"].set_value(1200)
+        _move(panel, 0, 1200)
         self.assertEqual(panel._calls, [])
 
     def test_save_publishes_the_values(self):
         panel = _panel()
-        panel._rows[0]["spin"].set_value(1200)
+        _move(panel, 0, 1200)
         panel._save()
         slots, rate = panel._calls[0]
         self.assertEqual(slots[0][0], 1200)
@@ -53,14 +70,14 @@ class StagingTests(unittest.TestCase):
 
     def test_revert_restores_the_saved_values(self):
         panel = _panel()
-        panel._rows[0]["spin"].set_value(1200)
+        _move(panel, 0, 1200)
         panel.revert()
-        self.assertEqual(panel._rows[0]["spin"].get_value(), 400)
+        self.assertEqual(panel._track.slots()[0]["dpi"], 400)
         self.assertFalse(panel.dirty)
 
     def test_mark_saved_clears_dirty(self):
         panel = _panel()
-        panel._rows[0]["spin"].set_value(1200)
+        _move(panel, 0, 1200)
         panel.mark_saved()
         self.assertFalse(panel.dirty)
 
@@ -69,19 +86,19 @@ class DefaultSlotTests(unittest.TestCase):
     def test_only_one_slot_can_be_the_default(self):
         """Two defaults would be ambiguous; the hardware honours one."""
         panel = _panel()
-        panel._rows[0]["default"].set_active(True)
-        actives = [row["default"].get_active() for row in panel._rows]
+        _make_default(panel, 0)
+        actives = [slot["default"] for slot in panel._track.slots()]
         self.assertEqual(actives, [True, False, False])
 
     def test_ticking_the_default_marks_the_panel_dirty(self):
         panel = _panel()
-        panel._rows[2]["default"].set_active(True)
+        _make_default(panel, 2)
         self.assertTrue(panel.dirty)
 
 
 class LoadTests(unittest.TestCase):
-    def test_slots_are_created_for_every_resolution(self):
-        self.assertEqual(len(_panel()._rows), 3)
+    def test_a_marker_is_created_for_every_resolution(self):
+        self.assertEqual(len(_panel()._track.slots()), 3)
 
     def test_report_rate_is_preselected(self):
         panel = _panel()
