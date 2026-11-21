@@ -27,7 +27,11 @@ from .buttonmap import DIAGRAM_IMAGE
 
 # The card is compact, like the reference: wide enough for the name and the
 # image, narrow enough that it reads as one object rather than a panel.
-CARD_WIDTH = 300
+CARD_WIDTH = 340
+
+# The mouse's drawn height. The image is 705x400, so this also sets the width:
+# 300px tall is 529px wide, which is why the card is wider than the reference's.
+IMAGE_HEIGHT = 300
 
 
 class DeviceCard(Gtk.Frame):
@@ -77,15 +81,14 @@ class DeviceCard(Gtk.Frame):
         header.append(self._battery)
         box.append(header)
 
-        # A Picture, not an Image: an Image draws at its natural size and
-        # ignores the space it is given. A Picture scales to fill, keeps the
-        # aspect, and can be capped so it does not grow without limit on a
-        # large screen.
-        self._image = Gtk.Picture.new_for_filename(image_path)
-        self._image.set_can_shrink(True)
-        self._image.set_content_fit(Gtk.ContentFit.CONTAIN)
-        self._image.set_size_request(CARD_WIDTH - 32, 240)
-        self._image.set_hexpand(True)
+        # An Image with an explicit pixel size, not a Picture. A Picture's
+        # natural size is the image's own, and a size_request is a minimum
+        # rather than a cap, so the card grew to 513px with the mouse
+        # letterboxed in dead space above and below. set_pixel_size scales to
+        # exactly that height with the aspect preserved, which is what the
+        # card actually wants.
+        self._image = Gtk.Image.new_from_file(image_path)
+        self._image.set_pixel_size(IMAGE_HEIGHT)
         self._image.set_can_target(True)
         self._image.set_cursor_from_name("pointer")
         click = Gtk.GestureClick()
