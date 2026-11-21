@@ -49,7 +49,14 @@ class DeviceCard(Gtk.Box):
         self._name.add_css_class("title-1")
         self.append(self._name)
 
-        self._image = Gtk.Image.new_from_file(image_path)
+        # A Picture, not an Image: an Image draws at its natural size and
+        # ignores the space it is given, so the mouse sat small in the middle of
+        # a wide window. A Picture scales to fill, keeps the aspect, and can be
+        # capped so it does not grow without limit on a large screen.
+        self._image = Gtk.Picture.new_for_filename(image_path)
+        self._image.set_can_shrink(True)
+        self._image.set_content_fit(Gtk.ContentFit.CONTAIN)
+        self._image.set_size_request(760, 430)
         self._image.set_can_target(True)
         self._image.set_cursor_from_name("pointer")
         click = Gtk.GestureClick()
