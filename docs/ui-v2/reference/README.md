@@ -10,6 +10,7 @@ the screen they show rather than for the app they came from.
 | File | Screen |
 | --- | --- |
 | `01-home-greeting.png` | Home / greeting: one device card centred on an empty canvas |
+| `02-profile-selector.png` | The profile selector dropdown, open |
 
 ## Adding one
 

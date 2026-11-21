@@ -162,6 +162,7 @@ one is named for the screen it shows.
 | File | Screen |
 | --- | --- |
 | [01-home-greeting.png](reference/01-home-greeting.png) | The home / greeting screen: a single device card centred on an empty canvas |
+| [02-profile-selector.png](reference/02-profile-selector.png) | The profile selector dropdown, open |
 
 ### 3.1 What the home screen shows
 
@@ -175,7 +176,22 @@ one is named for the screen it shows.
 - A **view toggle** in the top right of the canvas: a list icon and a grid icon.
 - An **account icon** in the top right of the window.
 
-### 3.2 Facts verified for this screen
+### 3.2 What the profile selector shows
+
+*Observed from the reference, not yet decided.*
+
+- A **dropdown** in the top right, showing the active profile in the closed
+  state as `Desktop: Desktop Main`.
+- Open, it shows a **search field** ("Search profiles…"), then a **scrolling
+  list** of profiles, then a **`MANAGE PROFILES`** action pinned at the bottom.
+- Each row is a **document icon plus a `Category: Name` label**. The reference
+  shows `Assetto Corsa: Default`, `Counter-Strike 2: Default`,
+  `Desktop: Copy Paster`, `Desktop: Default`, `Desktop: Desktop Main`,
+  `Valorant: Default`.
+- The **active profile's label is blue**; the rest are white.
+- The list **scrolls** — a scrollbar is visible on the right.
+
+### 3.3 Facts verified for this screen
 
 - **Battery is readable.** `/sys/class/power_supply/hidpp_battery_0/` reports
   `capacity` (95), `status` (Discharging) and `model_name`
