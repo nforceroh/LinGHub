@@ -171,7 +171,26 @@ live away from the dropdown.
 
 **A game carries a display name the user fills in.** The config stores an
 executable (`WorldOfTanks.exe`); the canvas shows a name the user chose. This is
-a new field on `Game` and a config format change.
+a new field on `Game` and a config format change:
+
+```json
+"games": [{"executable": "WorldOfTanks.exe", "name": "World of Tanks"}]
+```
+
+**Games only, no applications.** The reference's `Games & Applications` becomes
+`Games`. LinGHub matches a running process against a configured executable; it
+has no concept of a non-game application, and inventing one would be a second
+kind of thing to detect.
+
+**Nothing is scanned or discovered.** Every game and every profile is added by
+hand. There is no game library, no install detection and no artwork, so the
+reference's `NOT INSTALLED` tiles and cover art have no counterpart. A game tile
+shows its display name and nothing else.
+
+**`PROFILES` is the only tab.** The reference's `MACROS`, `INTEGRATIONS` and
+`SETTINGS` tabs have no counterpart: there are no macros, no integrations, and
+settings live in the config file. A tab bar with three dead tabs is worse than
+no tab bar; it can arrive with the features that need it.
 
 ### 2.8 Vocabulary
 
