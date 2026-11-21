@@ -14,7 +14,13 @@ from dbus_fast.aio import MessageBus
 
 
 from .. import dbus_contract as contract
-from ..daemon_view import DaemonUnavailable, DaemonView, ProfileView, ViewState
+from ..daemon_view import (
+    DaemonUnavailable,
+    DaemonView,
+    ProfileSummary,
+    ProfileView,
+    ViewState,
+)
 
 
 SERVICE = contract.SERVICE
@@ -124,7 +130,7 @@ class DaemonClient:
         raw = await self._invoke(contract.GET_VIEW, profile)
         (
             active, detected, desktop, names,
-            bindings, leds, resolutions, rates, rate,
+            bindings, leds, resolutions, rates, rate, summaries,
         ) = raw
         return DaemonView(
             state=ViewState(
@@ -158,6 +164,18 @@ class DaemonClient:
                 ],
                 report_rates=tuple(int(r) for r in rates),
                 report_rate=int(rate),
+            ),
+            summaries=tuple(
+                ProfileSummary(
+                    name=str(name),
+                    dpi=int(dpi),
+                    report_rate=int(rate_value),
+                    games=tuple(
+                        (str(executable), str(game_name))
+                        for executable, game_name in games
+                    ),
+                )
+                for name, dpi, rate_value, games in summaries
             ),
         )
 
@@ -218,6 +236,12 @@ class DaemonClient:
 
     async def delete_profile(self, name: str) -> bool:
         return bool(await self._invoke(contract.DELETE_PROFILE, name))
+
+    async def duplicate_profile(self, name: str, new: str) -> bool:
+        return bool(await self._invoke(contract.DUPLICATE_PROFILE, name, new))
+
+    async def rename_game(self, profile: str, executable: str, name: str) -> bool:
+        return bool(await self._invoke(contract.RENAME_GAME, profile, executable, name))
 
     async def set_resolution(
         self, profile: str, index: int, dpi: int, *,

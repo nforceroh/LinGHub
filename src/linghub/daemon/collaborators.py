@@ -42,6 +42,12 @@ class ProfileLifecycle(Protocol):
     def delete(self, name: str) -> bool:
         """Remove a profile. Refused for the desktop one."""
 
+    def duplicate(self, name: str, new: str) -> bool:
+        """Add `new` as a full copy of `name`, including its games."""
+
+    def rename_game(self, profile: str, executable: str, name: str) -> bool:
+        """Set one game's display name."""
+
 
 class Bindings(Protocol):
     """What each button does in a profile."""

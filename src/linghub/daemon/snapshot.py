@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .state import DaemonState
+    from ..domain.profile import Profile
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,24 @@ class StateSnapshot:
     loaded_profile: str | None = None
     detected_game: str | None = None
     desktop_profile: str = "desktop"
+
+
+@dataclass(frozen=True)
+class ProfileSummary:
+    """What the manage-profiles canvas shows for one profile's tile.
+
+    Separate from ProfileSnapshot because the canvas does not open a
+    profile's sections: it lists them. Carrying every profile's full sections
+    in the state view would make GetView pay for data nobody edits there.
+    """
+
+    name: str = ""
+    # The default preset's DPI, or 0 when the profile has no default.
+    dpi: int = 0
+    # The profile's report rate in Hz, or 0 when unset.
+    report_rate: int = 0
+    # The games the profile carries, as (executable, display name).
+    games: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -45,6 +64,8 @@ class ProfileSnapshot:
 class View:
     state: StateSnapshot
     profile: ProfileSnapshot = field(default_factory=ProfileSnapshot)
+    # Every profile's tile data, for the manage-profiles canvas.
+    summaries: tuple[ProfileSummary, ...] = ()
 
 
 def read_view(
@@ -63,9 +84,10 @@ def read_view(
         detected_game=state.current_game,
         desktop_profile=state.config.desktop_profile,
     )
+    summaries = tuple(_summary(p) for p in state.config.profiles)
     found = state.config.profile_named(profile)
     if found is None:
-        return View(snapshot, ProfileSnapshot(report_rates=tuple(report_rates)))
+        return View(snapshot, ProfileSnapshot(report_rates=tuple(report_rates)), summaries)
     return View(snapshot, ProfileSnapshot(
         bindings=tuple(
             (index, binding.type, binding.value)
@@ -80,4 +102,25 @@ def read_view(
         ),
         report_rates=tuple(report_rates),
         report_rate=int(found.report_rate or 0),
-    ))
+    ), summaries)
+
+
+def _summary(profile: Profile) -> ProfileSummary:
+    """The tile data for one profile.
+
+    The DPI shown is the default preset's: it is the value the mouse is at
+    while the profile is loaded, and the one a user compares across profiles.
+    A profile with no default preset — a hand-edited file can hold one —
+    reports 0, which the canvas shows as no DPI line rather than "0 DPI".
+    """
+    default = next(
+        (slot for slot in profile.resolutions if slot.get("default")), None
+    )
+    return ProfileSummary(
+        name=profile.name,
+        dpi=int(default.get("dpi", 0)) if default is not None else 0,
+        report_rate=int(profile.report_rate or 0),
+        games=tuple(
+            (game.executable, game.display_name) for game in profile.games
+        ),
+    )

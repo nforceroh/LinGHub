@@ -36,6 +36,17 @@ class ViewState:
 
 
 @dataclass(frozen=True)
+class ProfileSummary:
+    """What the manage-profiles canvas shows for one profile's tile."""
+
+    name: str = ""
+    dpi: int = 0
+    report_rate: int = 0
+    # The games the profile carries, as (executable, display name).
+    games: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
 class ProfileView:
     """One profile's editable sections, as the window's panels consume them."""
 
@@ -57,3 +68,5 @@ class DaemonView:
 
     state: ViewState
     profile: ProfileView
+    # Every profile's tile data, for the manage-profiles canvas.
+    summaries: tuple[ProfileSummary, ...] = ()

@@ -71,15 +71,19 @@ class ManagerInterface(ServiceInterface):
         return list(self._state().profile_names)
 
     @method()
-    def GetView(self, profile: "s") -> "(sssasa(iss)a(us(uuu)uu)a(uuuu)auu)":
+    def GetView(
+        self, profile: "s"
+    ) -> "(sssasa(iss)a(us(uuu)uu)a(uuuu)auu)a(ssu(ss)s)":
         """Everything a client shows, in one read.
 
         Returns (active profile, detected game, desktop profile, profile
         names; then the named profile's bindings, LEDs, DPI slots, accepted
-        report rates, and its current report rate). An unknown profile yields
-        empty sections rather than an error: the UI may ask about a profile
-        that has just been deleted, and "nothing there yet" is the answer it
-        wants, not a failure.
+        report rates, and its current report rate); then every profile's
+        canvas summary — name, default DPI, report rate, and its games as
+        (executable, display name). An unknown profile yields empty sections
+        rather than an error: the UI may ask about a profile that has just
+        been deleted, and "nothing there yet" is the answer it wants, not a
+        failure.
 
         One read replaces the five per-section members the client used to
         call in sequence, so a refresh costs one round trip and a partial read
@@ -103,6 +107,15 @@ class ManagerInterface(ServiceInterface):
             ],
             [int(rate) for rate in sections.report_rates],
             int(sections.report_rate),
+            [
+                (
+                    summary.name,
+                    summary.dpi,
+                    summary.report_rate,
+                    [(executable, name) for executable, name in summary.games],
+                )
+                for summary in view.summaries
+            ],
         )
 
     @method()
@@ -148,6 +161,29 @@ class ManagerInterface(ServiceInterface):
         """Remove a profile. Refused for the desktop profile."""
         logger.info("DeleteProfile(%r) requested over D-Bus", name)
         return bool(self._profiles.delete(name))
+
+    @method()
+    def DuplicateProfile(self, name: "s", new: "s") -> "b":
+        """Add `new` as a full copy of `name`, including its games.
+
+        The copy is not loaded onto the mouse: duplicating is an edit-side
+        action, and taking over the hardware is a separate decision the user
+        makes from the selector.
+        """
+        logger.info("DuplicateProfile(%r, %r) requested over D-Bus", name, new)
+        return bool(self._profiles.duplicate(name, new))
+
+    @method()
+    def RenameGame(self, profile: "s", executable: "s", name: "s") -> "b":
+        """Set one game's display name.
+
+        The executable identifies the game within its profile; the name is
+        what the manage-profiles canvas shows for it.
+        """
+        logger.info(
+            "RenameGame(%r, %r, %r) requested over D-Bus", profile, executable, name
+        )
+        return bool(self._profiles.rename_game(profile, executable, name))
 
     @method()
     def SetResolution(

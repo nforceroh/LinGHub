@@ -89,6 +89,8 @@ def _paths(h: _Harness) -> dict:
         "create": lambda: h.profiles.create("new", ""),
         "rename": lambda: h.profiles.rename("wot", "wot2"),
         "delete": lambda: h.profiles.delete("wot"),
+        "duplicate": lambda: h.profiles.duplicate("wot", "wot2"),
+        "rename_game": lambda: h.profiles.rename_game("wot", "x.exe", "X"),
     }
 
 

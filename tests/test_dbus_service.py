@@ -13,7 +13,9 @@ import unittest
 
 from linghub.config import Config
 from linghub.daemon.dbus_service import INTERFACE, ManagerInterface
-from linghub.daemon.snapshot import ProfileSnapshot, StateSnapshot, View
+from linghub.daemon.snapshot import (
+    ProfileSnapshot, ProfileSummary, StateSnapshot, View,
+)
 from linghub.daemon.state import DaemonState
 from linghub.daemon.writes import build_collaborators
 from linghub.domain.profile import Binding, Game, Profile
@@ -49,7 +51,16 @@ class FakeDaemon:
     def __init__(self, snapshot=None, accept=True, bindings=None, profile=None):
         # What GetView and the properties report: one view, so the state and
         # profile halves come from the same place, as they do in the daemon.
-        self.view = View(snapshot or StateSnapshot(), profile or ProfileSnapshot())
+        self.view = View(
+            snapshot or StateSnapshot(), profile or ProfileSnapshot(),
+            summaries=(
+                ProfileSummary(name="desktop"),
+                ProfileSummary(
+                    name="wot", dpi=1600, report_rate=500,
+                    games=(("x.exe", "x"),),
+                ),
+            ),
+        )
         self.accept = accept
         self.loaded: list[str] = []
         self.reloads = 0
@@ -207,7 +218,11 @@ class GetViewTests(unittest.TestCase):
         )
         view = call(make_interface(daemon), "GetView", "wot")
         self.assertEqual(daemon.viewed, "wot")
-        active, detected, desktop, names, bindings, leds, res, rates, rate = view
+        active, detected, desktop, names, bindings, leds, res, rates, rate, summaries = view
+        self.assertEqual(
+            [(s[0], s[1], s[2], list(s[3])) for s in summaries],
+            [("desktop", 0, 0, []), ("wot", 1600, 500, [("x.exe", "x")])],
+        )
         self.assertEqual((active, detected, desktop), ("wot", "x.exe", "desktop"))
         self.assertEqual(list(names), ["desktop", "wot"])
         self.assertEqual(bindings, [(0, "key", "KEY_F"), (3, "button", "4"), (5, "disabled", "")])
@@ -258,6 +273,33 @@ class ProfileManagementMethodTests(unittest.TestCase):
         daemon = FakeDaemon()
         self.assertTrue(call(make_interface(daemon), "RenameProfile", "wot", "wot2"))
         self.assertIsNotNone(daemon.state.config.profile_named("wot2"))
+
+    def test_duplicate_copies_the_profile(self):
+        daemon = FakeDaemon()
+        self.assertTrue(
+            call(make_interface(daemon), "DuplicateProfile", "wot", "wot2")
+        )
+        copy = daemon.state.config.profile_named("wot2")
+        self.assertIsNotNone(copy)
+        self.assertEqual(copy.games, daemon.state.config.profile_named("wot").games)
+
+    def test_duplicate_reports_rejection(self):
+        self.assertFalse(
+            call(make_interface(FakeDaemon(accept=False)), "DuplicateProfile", "wot", "wot2")
+        )
+
+    def test_rename_game_routes_to_the_daemon(self):
+        daemon = FakeDaemon()
+        self.assertTrue(
+            call(make_interface(daemon), "RenameGame", "wot", "x.exe", "X")
+        )
+        game = daemon.state.config.profile_named("wot").games[0]
+        self.assertEqual(game.name, "X")
+
+    def test_rename_game_reports_rejection(self):
+        self.assertFalse(
+            call(make_interface(FakeDaemon(accept=False)), "RenameGame", "wot", "x.exe", "X")
+        )
 
     def test_delete_routes_to_the_daemon(self):
         daemon = FakeDaemon()
