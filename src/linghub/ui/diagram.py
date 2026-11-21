@@ -41,8 +41,10 @@ class MouseDiagram(Gtk.DrawingArea):
         self._selected: int | None = None
         self._hovered: int | None = None
 
+        # Matches the shipped image's aspect (705x400), so the diagram fills
+        # its widget instead of letterboxing inside it.
         self.set_content_width(560)
-        self.set_content_height(304)
+        self.set_content_height(318)
         self.set_hexpand(True)
         self.set_vexpand(True)
 

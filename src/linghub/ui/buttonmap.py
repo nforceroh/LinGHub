@@ -76,21 +76,22 @@ MANUAL: dict[int, int] = {
     index: manual for manual, index in enumerate(_MANUAL_ORDER, start=1)
 }
 
-# Used only when hotspots.json is absent. These were measured against
-# images/g502.png, which has a different crop from g502_trans.png, so they are
-# approximate on the base image. Run `linghub hotspots` to place them exactly.
+# Used only when hotspots.json is absent, so the diagram still works before
+# anyone has placed a marker. These match the packaged hotspots.json, which is
+# measured against g502_trans.png as it ships. Replacing that image means
+# re-placing them: run `linghub hotspots`.
 FALLBACK_POSITIONS: dict[int, tuple[float, float]] = {
-    0: (0.1925, 0.6573),
-    1: (0.1316, 0.5626),
-    2: (0.2197, 0.4327),
-    3: (0.5698, 0.4415),
-    4: (0.5676, 0.5012),
-    5: (0.5290, 0.7082),
-    6: (0.3636, 0.5327),
-    7: (0.3027, 0.6345),
-    8: (0.3321, 0.1503),
-    9: (0.2046, 0.4152),
-    10: (0.2505, 0.4661),
+    0: (0.2364, 0.7331),
+    1: (0.0781, 0.6400),
+    2: (0.3067, 0.3416),
+    3: (0.8173, 0.4305),
+    4: (0.6957, 0.5651),
+    5: (0.6306, 0.7935),
+    6: (0.5658, 0.5042),
+    7: (0.4268, 0.6881),
+    8: (0.4912, 0.1439),
+    9: (0.1841, 0.4269),
+    10: (0.3025, 0.5156),
 }
 
 
