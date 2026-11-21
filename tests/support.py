@@ -107,6 +107,9 @@ def make_window(
     window._view = None
     window._refresh_task = None
     window._refresh_pending = False
+    from linghub.ui.daemon_write import DaemonWrite
+
+    window._writes = DaemonWrite(window._refresh_now)
     window._selected_button = None
     window._editing = editing
 

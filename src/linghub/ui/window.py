@@ -22,6 +22,7 @@ from .asyncbridge import run_and_report
 from .binding_editor import BindingEditor
 from .buttonmap import BUTTONS, DIAGRAM_IMAGE, describe, manual_number
 from .client import DaemonClient
+from .daemon_write import DaemonWrite
 from ..daemon_view import DaemonView, ViewState
 from .diagram import MouseDiagram
 from . import presentation
@@ -40,6 +41,10 @@ class MainWindow(Adw.ApplicationWindow):
     def __init__(self, application, client: DaemonClient, schedule=run_and_report):
         super().__init__(application=application, title="LinGHub")
         self._client = client
+        # One rule for every write: run, report, refresh. The reporter is
+        # supplied per call because most writes report on the status line
+        # and the profile prompts report in their own dialog.
+        self._writes = DaemonWrite(self._refresh_now)
         # How a coroutine is put on the loop. Injected so a test can drive the
         # window on its own loop instead of patching this module's global.
         self._schedule = schedule
@@ -409,10 +414,13 @@ class MainWindow(Adw.ApplicationWindow):
                 return False
             return True
 
-        if await self._daemon_write("Could not change the DPI", change):
-            if self._dpi_panel is not None:
-                self._dpi_panel.mark_saved()
-            self._status.set_text(f"Updated the DPI of {profile}.")
+        await self._writes.run(
+            change,
+            report=self._status.set_text,
+            failure="Could not change the DPI",
+            success=f"Updated the DPI of {profile}.",
+            on_success=self._dpi_panel.mark_saved if self._dpi_panel else None,
+        )
 
     def _on_led_saved(self, mode: str, brightness: int, duration: int, color) -> None:
         """Persist the panel's staged values when Save is pressed."""
@@ -432,50 +440,15 @@ class MainWindow(Adw.ApplicationWindow):
                 profile, mode, brightness, duration, color
             )
 
-        if await self._daemon_write("Could not change the lighting", change):
-            # Only now do the panel's values become the saved baseline, so a
-            # failed write leaves the edits intact and still worth retrying.
-            if self._led_panel is not None:
-                self._led_panel.mark_saved()
-            self._status.set_text(f"Updated the lighting of {profile}.")
-
-    async def _daemon_write(self, failure: str, change) -> bool:
-        """Run one daemon write and report the outcome on the status line.
-
-        Run the change, turn a transport error or a `False` return into a
-        status message, and only report success (and refresh) when the daemon
-        accepted it. `change` reports its own rejection reason when it has a
-        more specific one.
-        """
-        try:
-            ok = await change()
-        except (RuntimeError, OSError) as exc:
-            self._status.set_text(f"{failure}: {exc}")
-            return False
-        if not ok:
-            return False
-        await self._refresh_now()
-        return True
-
-    async def _dialog_write(self, dialog, rejected: str, change) -> bool:
-        """The same rule for writes whose failures belong in a dialog.
-
-        Create and rename run from a prompt, so a rejection has to appear
-        where the user typed, not on a status line behind the window.
-        `rejected` is the message for a `False` return; a transport error is
-        shown as its own text.
-        """
-        try:
-            ok = await change()
-        except (RuntimeError, OSError) as exc:
-            dialog.show_error(str(exc))
-            return False
-        if not ok:
-            dialog.show_error(rejected)
-            return False
-        dialog.close()
-        await self._refresh_now()
-        return True
+        # The panel's values become the saved baseline only on success, so a
+        # failed write leaves the edits intact and still worth retrying.
+        await self._writes.run(
+            change,
+            report=self._status.set_text,
+            failure="Could not change the lighting",
+            success=f"Updated the lighting of {profile}.",
+            on_success=self._led_panel.mark_saved if self._led_panel else None,
+        )
 
     def _rebuild_profiles(self) -> None:
         """Make the profile list match the daemon's state, reusing rows.
@@ -549,10 +522,14 @@ class MainWindow(Adw.ApplicationWindow):
         async def change() -> bool:
             return await self._client.create_profile(name, executable)
 
-        if await self._dialog_write(
-            dialog, f"Cannot create {name!r}. The name may already be in use.", change
-        ):
-            self._status.set_text(f"Created profile {name}.")
+        await self._writes.run(
+            change,
+            report=dialog.show_error,
+            failure="Could not create the profile",
+            rejected=f"Cannot create {name!r}. The name may already be in use.",
+            success=f"Created profile {name}.",
+            on_success=dialog.close,
+        )
 
     async def _do_rename_profile(self, old: str, new: str, dialog) -> None:
         if not new or new == old:
@@ -562,10 +539,14 @@ class MainWindow(Adw.ApplicationWindow):
         async def change() -> bool:
             return await self._client.rename_profile(old, new)
 
-        if await self._dialog_write(
-            dialog, f"Cannot rename to {new!r}. The name may be in use.", change
-        ):
-            self._status.set_text(f"Renamed {old} to {new}.")
+        await self._writes.run(
+            change,
+            report=dialog.show_error,
+            failure="Could not rename the profile",
+            rejected=f"Cannot rename to {new!r}. The name may be in use.",
+            success=f"Renamed {old} to {new}.",
+            on_success=dialog.close,
+        )
 
     def _prompt_rename_profile(self) -> None:
         old = self._selected_profile()
@@ -615,8 +596,12 @@ class MainWindow(Adw.ApplicationWindow):
         async def change() -> bool:
             return await self._client.delete_profile(name)
 
-        if await self._daemon_write(f"Could not delete {name}", change):
-            self._status.set_text(f"Deleted profile {name}.")
+        await self._writes.run(
+            change,
+            report=self._status.set_text,
+            failure=f"Could not delete {name}",
+            success=f"Deleted profile {name}.",
+        )
 
     def _ask_for_text(
         self, *, title: str, label: str, on_accept, initial: str = "",
@@ -699,8 +684,12 @@ class MainWindow(Adw.ApplicationWindow):
                 return await self._client.clear_binding(profile, index)
             return await self._client.set_binding(profile, index, kind, str(value))
 
-        if await self._daemon_write("Could not change the binding", change):
-            self._status.set_text(f"Updated {describe(index)} in {profile}.")
+        await self._writes.run(
+            change,
+            report=self._status.set_text,
+            failure="Could not change the binding",
+            success=f"Updated {describe(index)} in {profile}.",
+        )
 
     # --- interaction -----------------------------------------------------
 
@@ -737,5 +726,9 @@ class MainWindow(Adw.ApplicationWindow):
         async def change() -> bool:
             return await self._client.load_profile(name)
 
-        if await self._daemon_write(f"Could not load {name}", change):
-            self._status.set_text(f"Loaded {name}.")
+        await self._writes.run(
+            change,
+            report=self._status.set_text,
+            failure=f"Could not load {name}",
+            success=f"Loaded {name}.",
+        )
