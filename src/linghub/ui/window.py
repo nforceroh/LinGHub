@@ -23,6 +23,7 @@ from .binding_editor import BindingEditor
 from .buttonmap import BUTTONS, DIAGRAM_IMAGE, describe, manual_number
 from .client import DaemonClient
 from .daemon_write import DaemonWrite
+from .pending_edits import PendingEditsFor
 from ..daemon_view import DaemonView, ViewState
 from .diagram import MouseDiagram
 from . import presentation
@@ -45,6 +46,9 @@ class MainWindow(Adw.ApplicationWindow):
         # supplied per call because most writes report on the status line
         # and the profile prompts report in their own dialog.
         self._writes = DaemonWrite(self._refresh_now)
+        # Every edit is held here until Save, so Discard can put the
+        # window back to what the config says.
+        self._pending = PendingEditsFor()
         # How a coroutine is put on the loop. Injected so a test can drive the
         # window on its own loop instead of patching this module's global.
         self._schedule = schedule
@@ -69,6 +73,24 @@ class MainWindow(Adw.ApplicationWindow):
         header.set_title_widget(Adw.WindowTitle(title="LinGHub", subtitle=""))
         self._title = header.get_title_widget()
         header.pack_end(self._build_main_menu())
+
+        # Save and Discard act on every section at once, so they live in the
+        # header rather than on each panel. Both are disabled until something
+        # is pending.
+        self._discard_button = Gtk.Button(icon_name="edit-undo-symbolic")
+        self._discard_button.set_tooltip_text("Discard all unsaved changes")
+        self._discard_button.add_css_class("flat")
+        self._discard_button.connect("clicked", lambda _b: self._discard_changes())
+        self._discard_button.set_sensitive(False)
+        header.pack_start(self._discard_button)
+
+        self._save_button = Gtk.Button(icon_name="document-save-symbolic")
+        self._save_button.set_tooltip_text("Save all changes to the profile")
+        self._save_button.add_css_class("suggested-action")
+        self._save_button.connect("clicked", lambda _b: self._save_changes())
+        self._save_button.set_sensitive(False)
+        header.pack_start(self._save_button)
+
         toolbar.add_top_bar(header)
 
         self._status = Gtk.Label(label="Connecting…")
@@ -390,65 +412,112 @@ class MainWindow(Adw.ApplicationWindow):
                 view.profile.report_rates,
                 view.profile.report_rate,
             )
+        self._sync_save_buttons()
 
     def _on_dpi_saved(self, slots: list, rate: int) -> None:
-        """Persist the DPI panel's staged values when Save is pressed."""
+        """Hold the DPI panel's values until the window's Save is pressed."""
         profile = self._editing_profile()
         if profile is None:
             return
-        run_and_report(
-            self._write_dpi(profile, slots, rate), self._on_async_error
-        )
+        self._pending.for_profile(profile).set_resolutions(slots, rate)
+        self._sync_save_buttons()
+        self._status.set_text("DPI changes pending — press Save to apply.")
 
-    async def _write_dpi(self, profile: str, slots: list, rate: int) -> None:
+    def _sync_save_buttons(self) -> None:
+        """Enable Save and Discard only when something is pending."""
+        dirty = self._pending.dirty
+        self._save_button.set_sensitive(dirty)
+        self._discard_button.set_sensitive(dirty)
+
+    def _save_changes(self) -> None:
+        """Write every pending edit for the profile being edited."""
+        profile = self._editing_profile()
+        if profile is None:
+            return
+        run_and_report(self._do_save(profile), self._on_async_error)
+
+    async def _do_save(self, profile: str) -> None:
+        """Flush the pending edits in one write, then settle the panels.
+
+        The daemon writes the config and pushes it to the mouse on its next
+        tick, so there is no second step here: saving the config is saving the
+        profile.
+        """
+        edits = self._pending.for_profile(profile)
+
         async def change() -> bool:
-            for index, (dpi, is_default, disabled) in enumerate(slots):
-                if not await self._client.set_resolution(
-                    profile, index, dpi,
-                    make_default=is_default, disabled=disabled,
-                ):
-                    self._status.set_text(f"The daemon rejected DPI slot {index + 1}.")
+            for index, edit in sorted(edits.bindings.items()):
+                if edit.kind == "disabled":
+                    ok = await self._client.clear_binding(profile, index)
+                else:
+                    ok = await self._client.set_binding(
+                        profile, index, edit.kind, str(edit.value)
+                    )
+                if not ok:
+                    self._status.set_text(f"The daemon rejected button {index}.")
                     return False
-            if rate and not await self._client.set_report_rate(profile, rate):
-                self._status.set_text("The daemon rejected that report rate.")
-                return False
+
+            if edits.resolutions is not None:
+                for index, (dpi, is_default, disabled) in enumerate(edits.resolutions):
+                    if not await self._client.set_resolution(
+                        profile, index, dpi,
+                        make_default=is_default, disabled=disabled,
+                    ):
+                        self._status.set_text(
+                            f"The daemon rejected DPI slot {index + 1}."
+                        )
+                        return False
+
+            if edits.report_rate is not None:
+                if not await self._client.set_report_rate(profile, edits.report_rate):
+                    self._status.set_text("The daemon rejected that report rate.")
+                    return False
+
+            if edits.leds is not None:
+                leds = edits.leds
+                if not await self._client.set_leds(
+                    profile, leds["mode"], leds["brightness"],
+                    leds["duration"], leds["color"],
+                ):
+                    self._status.set_text("The daemon rejected that lighting.")
+                    return False
             return True
 
+        def settle() -> None:
+            # Only now do the panels accept their values as the baseline, so a
+            # failed save leaves the edits intact and still worth retrying.
+            if self._dpi_panel is not None and edits.resolutions is not None:
+                self._dpi_panel.mark_saved()
+            if self._led_panel is not None and edits.leds is not None:
+                self._led_panel.mark_saved()
+            self._pending.clear()
+            self._sync_save_buttons()
+
         await self._writes.run(
             change,
             report=self._status.set_text,
-            failure="Could not change the DPI",
-            success=f"Updated the DPI of {profile}.",
-            on_success=self._dpi_panel.mark_saved if self._dpi_panel else None,
+            failure=f"Could not save {profile}",
+            success=f"Saved {profile}. The mouse updates within a couple of seconds.",
+            on_success=settle,
         )
 
+    def _discard_changes(self) -> None:
+        """Throw away every pending edit and show the config as it is."""
+        self._pending.clear()
+        self._sync_save_buttons()
+        self._status.set_text("Discarded unsaved changes.")
+        # Reload from the daemon rather than from a remembered snapshot: the
+        # config may have changed elsewhere while these edits were pending.
+        self._refresh()
+
     def _on_led_saved(self, mode: str, brightness: int, duration: int, color) -> None:
-        """Persist the panel's staged values when Save is pressed."""
+        """Hold the lighting panel's values until the window's Save is pressed."""
         profile = self._editing_profile()
         if profile is None:
             return
-        run_and_report(
-            self._write_leds(profile, mode, brightness, duration, color),
-            self._on_async_error,
-        )
-
-    async def _write_leds(
-        self, profile: str, mode: str, brightness: int, duration: int, color
-    ) -> None:
-        async def change() -> bool:
-            return await self._client.set_leds(
-                profile, mode, brightness, duration, color
-            )
-
-        # The panel's values become the saved baseline only on success, so a
-        # failed write leaves the edits intact and still worth retrying.
-        await self._writes.run(
-            change,
-            report=self._status.set_text,
-            failure="Could not change the lighting",
-            success=f"Updated the lighting of {profile}.",
-            on_success=self._led_panel.mark_saved if self._led_panel else None,
-        )
+        self._pending.for_profile(profile).set_leds(mode, brightness, duration, color)
+        self._sync_save_buttons()
+        self._status.set_text("Lighting changes pending — press Save to apply.")
 
     def _rebuild_profiles(self) -> None:
         """Make the profile list match the daemon's state, reusing rows.
@@ -666,30 +735,18 @@ class MainWindow(Adw.ApplicationWindow):
         return presentation.editing_profile(self._state, self._editing)
 
     def _start_binding_write(self, profile: str, index: int, kind: str, value) -> bool:
-        """Kick off the write and report whether it was accepted.
+        """Hold the binding until the window's Save is pressed.
 
-        The editor needs an immediate answer so it can stay open on failure,
-        so this reports optimistically and corrects the status line once the
-        daemon replies.
+        The editor closes on True, so this answers immediately: the edit is
+        recorded, not written. Nothing reaches the daemon until Save, which is
+        what makes Discard able to undo a binding change.
         """
-        run_and_report(
-            self._write_binding(profile, index, kind, value),
-            self._on_async_error,
+        self._pending.for_profile(profile).set_binding(index, kind, value)
+        self._sync_save_buttons()
+        self._status.set_text(
+            f"{describe(index)} pending — press Save to apply."
         )
         return True
-
-    async def _write_binding(self, profile: str, index: int, kind: str, value) -> None:
-        async def change() -> bool:
-            if kind == "disabled":
-                return await self._client.clear_binding(profile, index)
-            return await self._client.set_binding(profile, index, kind, str(value))
-
-        await self._writes.run(
-            change,
-            report=self._status.set_text,
-            failure="Could not change the binding",
-            success=f"Updated {describe(index)} in {profile}.",
-        )
 
     # --- interaction -----------------------------------------------------
 
@@ -707,12 +764,80 @@ class MainWindow(Adw.ApplicationWindow):
         self._select_profile(row.get_title())
 
     def _select_profile(self, name: str) -> None:
-        """Make `name` the profile the panels show and edit."""
+        """Make `name` the profile the panels show and edit.
+
+        Switching with unsaved changes asks first: the pending edits belong to
+        the profile being left, and holding them for several profiles at once
+        would mean two places remembering what the config says.
+        """
         if name == self._editing:
             return
+        if self._pending.dirty:
+            self._confirm_switch(name)
+            return
+        self._apply_selection(name)
+
+    def _apply_selection(self, name: str) -> None:
         self._editing = name
+        self._pending.clear()
+        self._sync_save_buttons()
         self._status.set_text(f"Editing {name}.")
         self._refresh()
+
+    def _confirm_switch(self, name: str) -> None:
+        """Ask what to do with unsaved changes before switching profiles."""
+        dialog = Adw.MessageDialog(
+            transient_for=self,
+            heading="Unsaved changes",
+            body=f"Save your changes to {self._editing} before switching to {name}?",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("discard", "Discard")
+        dialog.add_response("save", "Save")
+        dialog.set_response_appearance("discard", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("save")
+        dialog.set_close_response("cancel")
+
+        def on_response(_dialog, response):
+            dialog.close()
+            if response == "cancel":
+                # Put the list back on the profile still being edited.
+                self._reselect_current()
+                return
+            if response == "discard":
+                self._apply_selection(name)
+                return
+            if response == "save":
+                run_and_report(
+                    self._save_then_select(name), self._on_async_error
+                )
+
+        dialog.connect("response", on_response)
+        dialog.present()
+
+    async def _save_then_select(self, name: str) -> None:
+        """Save the pending edits, then switch only if the save succeeded."""
+        profile = self._editing_profile()
+        if profile is None:
+            return
+        await self._do_save(profile)
+        if self._pending.dirty:
+            # The save was refused; stay where the edits are.
+            self._reselect_current()
+            return
+        self._apply_selection(name)
+
+    def _reselect_current(self) -> None:
+        """Point the profile list back at the profile still being edited."""
+        current = self._editing_profile()
+        if current is None:
+            return
+        for position in range(len(self._state.profiles)):
+            row = self._profile_list.get_row_at_index(position)
+            if row is not None and row.get_title() == current:
+                self._profile_list.select_row(row)
+                return
 
     def _load_selected(self) -> None:
         """Load the selected profile onto the mouse. A deliberate action."""

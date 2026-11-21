@@ -113,23 +113,30 @@ mouse.
 
 Clicking a row in the button table opens a dialog for changing that button's
 binding: a single key, a modifier chord, a mouse function such as DPI up,
-another mouse button, or nothing. The change goes to the daemon, which writes the
-config and pushes it to the mouse. The daemon recognises its own write and does
-not mistake it for a hand edit.
+another mouse button, or nothing. The change is held until you press Save.
+
+Every edit — bindings, DPI, report rate and lighting — is held in the window
+until Save, which lives in the header and covers the whole profile. Discard,
+beside it, throws all of it away and shows the config as it is on disk. Both
+are disabled until something is pending. Saving writes the config; the daemon
+pushes it to the mouse on its next check, within a couple of seconds.
+
+Switching profiles with unsaved changes asks first, because the pending edits
+belong to the profile you are leaving. Holding them for several profiles at
+once would mean two places remembering what the config says, and the config is
+the single source of truth (ADR-0004).
 
 Below the button table is a lighting panel: colour, effect, brightness and
-speed, applied to the whole profile. Lighting is edited and then saved rather
-than written as you go, because sliders fire a change per pixel — dragging one
-used to mean a config write and two hardware commits for every step. Nothing
-reaches the mouse until Save; Revert throws away unsaved edits. The G502 has two LED zones, but they read
-as one strip, so the panel drives them together; the daemon writes the same
-values to each. Effects are `off`, `fixed colour`, `cycle` and `breathing`, and
-only the looping ones have a speed.
+speed, applied to the whole profile. Lighting is staged rather than written as
+you go, because sliders fire a change per pixel — dragging one used to mean a
+config write and two hardware commits for every step. The G502 has two LED
+zones, but they read as one strip, so the panel drives them together; the
+daemon writes the same values to each. Effects are `off`, `fixed colour`,
+`cycle` and `breathing`, and only the looping ones have a speed.
 
-Between them, the DPI and lighting panels cover the whole profile. Both are
-staged rather than live: nothing reaches the mouse until Save, and Revert throws
-away unsaved edits. A refresh never overwrites unsaved edits, so a change made
-elsewhere cannot discard what you are in the middle of choosing.
+The DPI and lighting panels each keep a Revert button, which throws away that
+section's unsaved edits alone. A refresh never overwrites unsaved edits, so a
+change made elsewhere cannot discard what you are in the middle of choosing.
 
 Profiles can be created, renamed and deleted from the buttons above the profile
 list. The desktop profile cannot be deleted, and neither can the last remaining

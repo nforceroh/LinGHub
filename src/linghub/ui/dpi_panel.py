@@ -58,14 +58,12 @@ class DpiPanel(Gtk.Box):
         row.append(self._rate)
         self.append(row)
 
+        # Save lives in the window's header and covers every section at once,
+        # so this panel offers only Revert, which is useful on its own.
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self._revert_button = Gtk.Button(label="Revert")
         self._revert_button.connect("clicked", lambda _b: self.revert())
-        self._save_button = Gtk.Button(label="Save DPI")
-        self._save_button.add_css_class("suggested-action")
-        self._save_button.connect("clicked", lambda _b: self._save())
         actions.append(self._revert_button)
-        actions.append(self._save_button)
         self.append(actions)
 
         self._status = Gtk.Label(xalign=0, wrap=True)
@@ -159,7 +157,6 @@ class DpiPanel(Gtk.Box):
         self._staged.edited()
 
     def _on_changed(self, changed: bool) -> None:
-        self._save_button.set_sensitive(changed)
         self._revert_button.set_sensitive(changed)
         self._status.set_text(
             "Unsaved changes — the mouse is unchanged." if changed else ""

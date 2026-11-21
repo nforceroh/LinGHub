@@ -65,14 +65,12 @@ class LedPanel(Gtk.Box):
         self._speed_row = self._labelled("Speed", self._speed)
         self.append(self._speed_row)
 
+        # Save lives in the window's header and covers every section at once,
+        # so this panel offers only Revert, which is useful on its own.
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self._revert_button = Gtk.Button(label="Revert")
         self._revert_button.connect("clicked", lambda _b: self.revert())
-        self._save_button = Gtk.Button(label="Save lighting")
-        self._save_button.add_css_class("suggested-action")
-        self._save_button.connect("clicked", lambda _b: self._save())
         actions.append(self._revert_button)
-        actions.append(self._save_button)
         self.append(actions)
 
         self._hint = Gtk.Label(xalign=0, wrap=True)
@@ -186,7 +184,6 @@ class LedPanel(Gtk.Box):
 
     def _on_changed(self, changed: bool) -> None:
         """The staged edit says whether the panel is dirty; show it."""
-        self._save_button.set_sensitive(changed)
         self._revert_button.set_sensitive(changed)
         if changed:
             self._hint.set_text("Unsaved changes — the mouse is unchanged.")

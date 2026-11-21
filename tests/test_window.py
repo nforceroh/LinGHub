@@ -371,3 +371,195 @@ class VersionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(has_cairo(), "needs pycairo and Gtk 4")
+class SaveAndDiscardTests(unittest.TestCase):
+    """One Save and one Discard for every section, in the header.
+
+    Bindings used to be written the moment the editor's Apply was pressed, so
+    "discard my changes" could not be offered honestly. Now every edit is held
+    until Save.
+    """
+
+    def _window(self):
+        return make_window(profiles=("desktop", "world-of-tanks"), editing="desktop")
+
+    def test_the_buttons_start_disabled(self):
+        window = self._window()
+        self.assertFalse(window._save_button.get_sensitive())
+        self.assertFalse(window._discard_button.get_sensitive())
+
+    def test_a_pending_binding_enables_both(self):
+        window = self._window()
+        window._start_binding_write("desktop", 2, "key", "KEY_X")
+        self.assertTrue(window._save_button.get_sensitive())
+        self.assertTrue(window._discard_button.get_sensitive())
+
+    def test_a_pending_binding_is_not_written_immediately(self):
+        """The whole point: nothing reaches the daemon until Save."""
+        window = self._window()
+        calls = []
+
+        class FakeClient:
+            async def set_binding(self, *args):
+                calls.append(args)
+                return True
+
+        window._client = FakeClient()
+        window._start_binding_write("desktop", 2, "key", "KEY_X")
+        self.assertEqual(calls, [])
+
+    def test_discard_forgets_the_pending_edits(self):
+        import asyncio
+
+        window = self._window()
+        window._start_binding_write("desktop", 2, "key", "KEY_X")
+
+        async def run():
+            window._discard_changes()
+            # The refresh it kicks off needs a loop to run on.
+            await asyncio.sleep(0)
+
+        asyncio.run(run())
+        self.assertFalse(window._pending.dirty)
+        self.assertFalse(window._save_button.get_sensitive())
+
+    def test_discard_does_not_write_anything(self):
+        import asyncio
+
+        window = self._window()
+        calls = []
+
+        class FakeClient:
+            async def set_binding(self, *args):
+                calls.append(args)
+                return True
+
+            async def get_view(self, _profile):
+                return view(profiles=("desktop", "world-of-tanks"))
+
+            async def daemon_version(self):
+                from linghub import version
+
+                return version.DaemonVersion.known(version.current())
+
+        window._client = FakeClient()
+        window._start_binding_write("desktop", 2, "key", "KEY_X")
+
+        async def run():
+            window._discard_changes()
+            await asyncio.sleep(0)
+
+        asyncio.run(run())
+        self.assertEqual(calls, [])
+
+    def test_save_writes_every_pending_section(self):
+        import asyncio
+
+        window = self._window()
+        calls = []
+
+        class FakeClient:
+            async def set_binding(self, profile, index, kind, value):
+                calls.append(("binding", index, kind, value))
+                return True
+
+            async def set_resolution(self, profile, index, dpi, **kw):
+                calls.append(("resolution", index, dpi))
+                return True
+
+            async def set_report_rate(self, profile, rate):
+                calls.append(("rate", rate))
+                return True
+
+            async def set_leds(self, profile, mode, brightness, duration, color):
+                calls.append(("leds", mode))
+                return True
+
+            async def get_view(self, _profile):
+                return view(profiles=("desktop", "world-of-tanks"))
+
+            async def daemon_version(self):
+                from linghub import version
+
+                return version.DaemonVersion.known(version.current())
+
+        window._client = FakeClient()
+        window._start_binding_write("desktop", 2, "key", "KEY_X")
+        window._pending.for_profile("desktop").set_resolutions([(800, True, False)], 1000)
+        window._pending.for_profile("desktop").set_leds("breathing", 255, 8000, (1, 2, 3))
+
+        asyncio.run(window._do_save("desktop"))
+
+        kinds = [call[0] for call in calls]
+        self.assertIn("binding", kinds)
+        self.assertIn("resolution", kinds)
+        self.assertIn("rate", kinds)
+        self.assertIn("leds", kinds)
+
+    def test_a_successful_save_clears_the_pending_edits(self):
+        import asyncio
+
+        window = self._window()
+
+        class FakeClient:
+            async def set_binding(self, *args):
+                return True
+
+            async def get_view(self, _profile):
+                return view(profiles=("desktop", "world-of-tanks"))
+
+            async def daemon_version(self):
+                from linghub import version
+
+                return version.DaemonVersion.known(version.current())
+
+        window._client = FakeClient()
+        window._start_binding_write("desktop", 2, "key", "KEY_X")
+        asyncio.run(window._do_save("desktop"))
+        self.assertFalse(window._pending.dirty)
+
+    def test_a_refused_save_keeps_the_pending_edits(self):
+        """So the user can fix the problem and press Save again."""
+        import asyncio
+
+        window = self._window()
+
+        class FakeClient:
+            async def set_binding(self, *args):
+                return False
+
+            async def get_view(self, _profile):
+                return view(profiles=("desktop", "world-of-tanks"))
+
+            async def daemon_version(self):
+                from linghub import version
+
+                return version.DaemonVersion.known(version.current())
+
+        window._client = FakeClient()
+        window._start_binding_write("desktop", 2, "key", "KEY_X")
+        asyncio.run(window._do_save("desktop"))
+        self.assertTrue(window._pending.dirty, "a refused save discarded the edits")
+
+    def test_switching_profiles_with_pending_edits_asks_first(self):
+        window = self._window()
+        window._start_binding_write("desktop", 2, "key", "KEY_X")
+        window._select_profile("world-of-tanks")
+        self.assertEqual(
+            window._editing, "desktop",
+            "the switch happened without asking",
+        )
+
+    def test_switching_with_nothing_pending_just_switches(self):
+        import asyncio
+
+        window = self._window()
+
+        async def run():
+            window._select_profile("world-of-tanks")
+            await asyncio.sleep(0)
+
+        asyncio.run(run())
+        self.assertEqual(window._editing, "world-of-tanks")

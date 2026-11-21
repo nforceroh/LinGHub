@@ -108,8 +108,12 @@ def make_window(
     window._refresh_task = None
     window._refresh_pending = False
     from linghub.ui.daemon_write import DaemonWrite
+    from linghub.ui.pending_edits import PendingEditsFor
 
     window._writes = DaemonWrite(window._refresh_now)
+    window._pending = PendingEditsFor()
+    window._save_button = Gtk.Button()
+    window._discard_button = Gtk.Button()
     window._selected_button = None
     window._editing = editing
 
