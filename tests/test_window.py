@@ -11,54 +11,70 @@ from .support import has_cairo, make_window, view
 
 
 @unittest.skipUnless(has_cairo(), "needs pycairo and Gtk 4")
-class ProfileListTests(unittest.TestCase):
-    """The profile list must survive the two-second poll.
+class ProfileSelectorTests(unittest.TestCase):
+    """The selector must survive a refresh without losing the user's place.
 
-    Rebuilding every row from scratch on each poll destroyed the user's
-    selection, so clicking a profile appeared to bounce back to whatever was
-    listed first.
+    Rebuilding every row from scratch on each refresh destroyed the selection,
+    so choosing a profile appeared to bounce back to whatever was listed first.
     """
 
     def _window(self, active="desktop"):
         return make_window(active=active)
 
-    def test_selecting_a_profile_sticks(self):
+    def test_every_profile_has_a_row(self):
         window = self._window()
-        window._profile_list.select_row(window._profile_list.get_row_at_index(2))
-        selected = window._profile_list.get_selected_row()
-        self.assertIsNotNone(selected)
-        self.assertEqual(selected.get_title(), "star-citizen")
+        self.assertEqual(
+            list(window._selector._rows), ["desktop", "world-of-tanks", "star-citizen"]
+        )
 
-    def test_a_refresh_does_not_clear_the_selection(self):
+    def test_the_label_shows_the_profile_being_edited(self):
         window = self._window()
-        window._profile_list.select_row(window._profile_list.get_row_at_index(2))
+        self.assertEqual(window._selector._label.get_text(), "desktop")
 
-        # Same state again, as a refresh would deliver.
-        window._apply_view(view())
-
-        selected = window._profile_list.get_selected_row()
-        self.assertIsNotNone(selected, "the refresh cleared the selection")
-        self.assertEqual(selected.get_title(), "star-citizen")
-
-    def test_rows_are_not_recreated_on_every_refresh(self):
+    def test_a_refresh_does_not_recreate_the_rows(self):
         """Recreating rows is what loses focus and selection."""
         window = self._window()
-        first = window._profile_list.get_row_at_index(1)
+        first = window._selector._rows["world-of-tanks"]
 
         window._apply_view(view())
-        self.assertIs(window._profile_list.get_row_at_index(1), first)
+        self.assertIs(window._selector._rows["world-of-tanks"], first)
 
-    def test_active_marker_moves_without_rebuilding(self):
+    def test_the_active_marker_moves_without_rebuilding(self):
         window = self._window(active="desktop")
-        self.assertIn(
-            "on the mouse",
-            window._profile_list.get_row_at_index(0).get_subtitle(),
-        )
+        self.assertTrue(window._selector._rows["desktop"]._check.get_visible())
+        self.assertFalse(window._selector._rows["world-of-tanks"]._check.get_visible())
+
         window._apply_view(view(active="world-of-tanks"))
-        self.assertIn(
-            "on the mouse",
-            window._profile_list.get_row_at_index(1).get_subtitle(),
-        )
+        self.assertFalse(window._selector._rows["desktop"]._check.get_visible())
+        self.assertTrue(window._selector._rows["world-of-tanks"]._check.get_visible())
+
+    def test_a_profile_that_goes_away_loses_its_row(self):
+        window = self._window()
+        window._apply_view(view(profiles=("desktop",)))
+        self.assertEqual(list(window._selector._rows), ["desktop"])
+
+    def test_the_search_field_is_hidden_for_a_short_list(self):
+        window = self._window()
+        self.assertFalse(window._selector._search.get_visible())
+
+    def test_the_search_field_appears_for_a_long_list(self):
+        from linghub.ui.profile_selector import SEARCH_THRESHOLD
+
+        names = tuple(f"p{n}" for n in range(SEARCH_THRESHOLD))
+        window = self._window()
+        window._apply_view(view(profiles=names))
+        self.assertTrue(window._selector._search.get_visible())
+
+    def test_searching_hides_the_rows_that_do_not_match(self):
+        window = self._window()
+        window._selector._search.set_text("star")
+        self.assertTrue(window._selector._rows["star-citizen"].get_visible())
+        self.assertFalse(window._selector._rows["desktop"].get_visible())
+
+    def test_searching_ignores_case(self):
+        window = self._window()
+        window._selector._search.set_text("STAR")
+        self.assertTrue(window._selector._rows["star-citizen"].get_visible())
 
 
 @unittest.skipUnless(has_cairo(), "needs pycairo and Gtk 4")
@@ -161,13 +177,11 @@ class ProfileManagementUiTests(unittest.TestCase):
     def _window(self):
         return make_window(profiles=("desktop", "wot"))
 
-    def test_selected_profile_is_read_from_the_list(self):
+    def test_the_profile_being_edited_is_the_one_acted_on(self):
+        """There is no list to select from; the selector's choice is the target."""
         window = self._window()
-        window._profile_list.select_row(window._profile_list.get_row_at_index(1))
-        self.assertEqual(window._selected_profile(), "wot")
-
-    def test_no_selection_returns_none(self):
-        self.assertIsNone(self._window()._selected_profile())
+        window._editing = "wot"
+        self.assertEqual(window._editing_profile(), "wot")
 
     def test_deleting_the_desktop_profile_is_refused_before_the_daemon(self):
         calls = []
@@ -179,13 +193,17 @@ class ProfileManagementUiTests(unittest.TestCase):
 
         window = self._window()
         window._client = FakeClient()
-        window._profile_list.select_row(window._profile_list.get_row_at_index(0))
+        window._editing = "desktop"
         window._prompt_delete_profile()
         self.assertEqual(calls, [], "the desktop profile was sent to the daemon")
         self.assertIn("cannot be deleted", window._status.get_text().lower())
 
-    def test_delete_without_a_selection_says_so(self):
+    def test_delete_with_no_profile_says_so(self):
+        from linghub.daemon_view import ViewState
+
         window = self._window()
+        window._state = ViewState()
+        window._editing = None
         window._prompt_delete_profile()
         self.assertIn("select a profile", window._status.get_text().lower())
 
@@ -205,48 +223,19 @@ def _in_loop(fn, *args):
 
 
 @unittest.skipUnless(has_cairo(), "needs pycairo and Gtk 4")
-class SelectionVersusLoadingTests(unittest.TestCase):
-    """Selecting a profile edits it; it must not load it onto the mouse.
+class ChoosingLoadsTests(unittest.TestCase):
+    """Choosing a profile from the selector loads it onto the mouse.
 
-    These were the same gesture, so editing a gaming profile meant writing it
-    to the mouse and making the mouse use it - and with no game running the
-    daemon then reverted it two seconds later.
+    This reverses what the window used to do. Selecting a profile used to only
+    choose what to edit, and a separate `Load` button put it on the mouse. Two
+    actions on one list is the thing users are least likely to expect, so the
+    selector does both.
     """
 
     def _window(self):
         return make_window(profiles=("desktop", "world-of-tanks"))
 
-    def test_selecting_a_profile_does_not_load_it(self):
-        calls = []
-
-        class FakeClient:
-            async def load_profile(self, name):
-                calls.append(name)
-                return True
-
-        window = self._window()
-        window._client = FakeClient()
-        _in_loop(window._select_profile, "world-of-tanks")
-        self.assertEqual(calls, [], "selecting a profile loaded it onto the mouse")
-
-    def test_selecting_a_gaming_profile_makes_it_the_edit_target(self):
-        window = self._window()
-        _in_loop(window._select_profile, "world-of-tanks")
-        self.assertEqual(window._editing_profile(), "world-of-tanks")
-
-    def test_a_gaming_profile_is_editable_with_no_game_running(self):
-        """The whole point: editing must not require loading."""
-        window = self._window()
-        _in_loop(window._select_profile, "world-of-tanks")
-        self.assertEqual(window._editing_profile(), "world-of-tanks")
-        self.assertEqual(window._state.active_profile, "desktop")
-
-    def test_the_edit_target_defaults_to_the_active_profile(self):
-        window = self._window()
-        self.assertEqual(window._editing_profile(), "desktop")
-
-    def test_loading_is_a_separate_action(self):
-        """Loading is its own gesture, driven by the selection."""
+    def test_choosing_a_profile_loads_it(self):
         import asyncio
 
         calls = []
@@ -266,17 +255,31 @@ class SelectionVersusLoadingTests(unittest.TestCase):
 
         window = self._window()
         window._client = FakeClient()
-        # _load_selected goes through the GLib bridge, which needs a main loop;
-        # drive the coroutine it would run instead. The factory's scheduler
-        # puts the refresh on this loop, so the await in _refresh_now works.
 
         async def run():
-            window._select_profile("world-of-tanks")
-            await window._load_profile(window._editing_profile())
+            window._choose_profile("world-of-tanks")
+            # The load is scheduled on the loop; let it finish.
+            for _ in range(5):
+                await asyncio.sleep(0)
 
         asyncio.run(run())
         self.assertEqual(calls, ["world-of-tanks"])
 
+    def test_choosing_makes_it_the_edit_target(self):
+        window = self._window()
+        _in_loop(window._choose_profile, "world-of-tanks")
+        self.assertEqual(window._editing_profile(), "world-of-tanks")
+
+    def test_choosing_the_profile_already_being_edited_does_nothing(self):
+        """Re-choosing the current profile must not reload it."""
+        window = self._window()
+        window._editing = "desktop"
+        _in_loop(window._choose_profile, "desktop")
+        self.assertEqual(window._editing, "desktop")
+
+    def test_the_edit_target_defaults_to_the_active_profile(self):
+        window = self._window()
+        self.assertEqual(window._editing_profile(), "desktop")
 
 
 @unittest.skipUnless(has_cairo(), "needs pycairo and Gtk 4")
@@ -614,7 +617,7 @@ class SaveAndDiscardTests(unittest.TestCase):
     def test_switching_profiles_with_pending_edits_asks_first(self):
         window = self._window()
         window._start_binding_write("desktop", 2, "key", "KEY_X")
-        window._select_profile("world-of-tanks")
+        window._choose_profile("world-of-tanks")
         self.assertEqual(
             window._editing, "desktop",
             "the switch happened without asking",
@@ -626,7 +629,7 @@ class SaveAndDiscardTests(unittest.TestCase):
         window = self._window()
 
         async def run():
-            window._select_profile("world-of-tanks")
+            window._choose_profile("world-of-tanks")
             await asyncio.sleep(0)
 
         asyncio.run(run())

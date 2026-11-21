@@ -97,10 +97,11 @@ def make_window(
     from linghub import version
 
     window._daemon_version = version.DaemonVersion.not_running()
-    window._profile_list = Gtk.ListBox()
-    window._profile_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+    from linghub.ui.profile_selector import ProfileSelector
 
-    window._profile_rows = {}
+    window._selector = ProfileSelector(
+        on_chosen=lambda name: None, on_manage=lambda: None
+    )
     window._table_rows = {}
     window._binding_rows = {}
     window._bindings = {}

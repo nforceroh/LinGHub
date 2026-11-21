@@ -25,6 +25,7 @@ from .buttonmap import BUTTONS, DIAGRAM_IMAGE, describe, manual_number
 from .client import DaemonClient
 from .daemon_write import DaemonWrite
 from .pending_edits import PendingEditsFor
+from .profile_selector import ProfileSelector
 from ..daemon_view import DaemonView, ViewState
 from .diagram import MouseDiagram
 from . import presentation
@@ -59,7 +60,6 @@ class MainWindow(Adw.ApplicationWindow):
         # profile is loaded on the mouse: editing must not reconfigure it.
         self._editing: str | None = None
         self._bindings: dict[int, tuple[str, str]] = {}
-        self._profile_rows: dict[str, Adw.ActionRow] = {}
         self._led_panel: LedPanel | None = None
         self._dpi_panel: DpiPanel | None = None
         self._view: DaemonView | None = None
@@ -75,6 +75,15 @@ class MainWindow(Adw.ApplicationWindow):
         header.set_title_widget(Adw.WindowTitle(title="LinGHub", subtitle=""))
         self._title = header.get_title_widget()
         header.pack_end(self._build_main_menu())
+
+        # The selector lives in the header so it is present on every view: which
+        # profile you are editing is context for all of them.
+        self._selector = ProfileSelector(
+            on_chosen=self._choose_profile,
+            on_manage=self._open_manage_profiles,
+        )
+        header.pack_start(self._selector)
+
         toolbar.add_top_bar(header)
 
         self._status = Gtk.Label(label="Connecting…")
@@ -212,17 +221,6 @@ class MainWindow(Adw.ApplicationWindow):
 
         pane.append(self._build_profile_header())
 
-        self._profile_list = Gtk.ListBox()
-        self._profile_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        self._profile_list.connect("row-selected", self._on_profile_row_selected)
-        profile_scroller = Gtk.ScrolledWindow()
-        profile_scroller.set_child(self._profile_list)
-        profile_scroller.set_min_content_height(96)
-        profile_scroller.set_max_content_height(160)
-        profile_scroller.set_propagate_natural_height(True)
-        pane.append(profile_scroller)
-
-        pane.append(self._section_label("Bindings"))
         # The table is not in its own scroller: the whole pane scrolls as one,
         # so there is a single scrollbar and no section can be clipped to a
         # sliver while the pane still has room below it.
@@ -238,45 +236,17 @@ class MainWindow(Adw.ApplicationWindow):
         return scroller
 
     def _build_profile_header(self) -> Gtk.Widget:
-        """The Profiles heading, its management buttons, and the commit pair.
+        """The Bindings heading and the commit pair.
 
-        Apply and Discard live here rather than in the header bar because this
-        is where the eye is while editing. They are separated from the profile
-        buttons by a gap: those choose *which* profile, these commit what you
-        changed in it.
+        The profile buttons that used to live here are gone: choosing a profile
+        is the selector's job, and adding, renaming and deleting moved to the
+        manage-profiles canvas. Apply and Discard stay, because they commit what
+        you changed in the profile the selector chose.
         """
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        heading = self._section_label("Profiles")
+        heading = self._section_label("Bindings")
         heading.set_hexpand(True)
         header.append(heading)
-
-        self._new_profile_button = Gtk.Button(icon_name="list-add-symbolic")
-        self._new_profile_button.set_tooltip_text("Add a profile")
-        self._new_profile_button.add_css_class("flat")
-        self._new_profile_button.connect("clicked", lambda _b: self._prompt_new_profile())
-        header.append(self._new_profile_button)
-
-        self._rename_profile_button = Gtk.Button(icon_name="document-edit-symbolic")
-        self._rename_profile_button.set_tooltip_text("Rename the selected profile")
-        self._rename_profile_button.add_css_class("flat")
-        self._rename_profile_button.connect("clicked", lambda _b: self._prompt_rename_profile())
-        header.append(self._rename_profile_button)
-
-        self._delete_profile_button = Gtk.Button(icon_name="user-trash-symbolic")
-        self._delete_profile_button.set_tooltip_text("Delete the selected profile")
-        self._delete_profile_button.add_css_class("flat")
-        self._delete_profile_button.connect("clicked", lambda _b: self._prompt_delete_profile())
-        header.append(self._delete_profile_button)
-
-        # Loading is its own action: selecting a profile only chooses what to
-        # edit, so this is how you put one on the mouse.
-        self._load_profile_button = Gtk.Button(label="Load")
-        self._load_profile_button.set_tooltip_text("Load the selected profile onto the mouse")
-        self._load_profile_button.add_css_class("flat")
-        self._load_profile_button.connect("clicked", lambda _b: self._load_selected())
-        header.append(self._load_profile_button)
-
-        header.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
 
         self._discard_button = Gtk.Button(icon_name="edit-undo-symbolic")
         self._discard_button.set_tooltip_text("Discard all unsaved changes")
@@ -626,36 +596,16 @@ class MainWindow(Adw.ApplicationWindow):
         self._status.set_text("Lighting changes pending — press Save to apply.")
 
     def _rebuild_profiles(self) -> None:
-        """Make the profile list match the daemon's state, reusing rows.
+        """Make the selector match the daemon's state.
 
-        Rows are updated in place rather than recreated. Rebuilding the list
-        on every refresh destroyed the user's selection, so clicking a
-        profile appeared to bounce back to the first row.
+        The selector updates its rows in place, so a refresh does not destroy
+        the user's place in the list.
         """
-        rows = presentation.profile_rows(self._state, self._editing)
-        names = [display.name for display in rows]
-
-        # Drop rows for profiles that went away.
-        existing = self._profile_rows
-        for name in [name for name in existing if name not in names]:
-            self._profile_list.remove(existing.pop(name))
-
-        for position, display in enumerate(rows):
-            name = display.name
-            row = existing.get(name)
-            if row is None:
-                row = Adw.ActionRow(title=name)
-                row.set_activatable(True)
-                row._check = Gtk.Image.new_from_icon_name("object-select-symbolic")
-                row.add_prefix(row._check)
-                row._desktop = Gtk.Label(label="desktop")
-                row.add_suffix(row._desktop)
-                existing[name] = row
-                self._profile_list.insert(row, position)
-
-            row._check.set_visible(display.on_the_mouse)
-            row.set_subtitle(display.subtitle)
-            row._desktop.set_visible(display.is_desktop)
+        self._selector.show_profiles(
+            self._state.profiles,
+            active=self._state.active_profile,
+            editing=self._editing_profile(),
+        )
 
     def _rebuild_bindings(self) -> None:
         """Fill in what each button does, and highlight the selected row."""
@@ -670,11 +620,6 @@ class MainWindow(Adw.ApplicationWindow):
                 label.set_text(presentation.binding_label(self._bindings, index))
 
     # --- profile management ----------------------------------------------
-
-    def _selected_profile(self) -> str | None:
-        """The profile the list currently highlights."""
-        row = self._profile_list.get_selected_row()
-        return row.get_title() if row is not None else None
 
     def _prompt_new_profile(self) -> None:
         self._ask_for_text(
@@ -724,7 +669,7 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def _prompt_rename_profile(self) -> None:
-        old = self._selected_profile()
+        old = self._editing_profile()
         if old is None:
             self._status.set_text("Select a profile to rename.")
             return
@@ -739,7 +684,7 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def _prompt_delete_profile(self) -> None:
-        name = self._selected_profile()
+        name = self._editing_profile()
         if name is None:
             self._status.set_text("Select a profile to delete.")
             return
@@ -863,14 +808,13 @@ class MainWindow(Adw.ApplicationWindow):
         self._status.set_text(f"Selected: {describe(index)}")
         self._rebuild_bindings()
 
-    def _on_profile_row_selected(self, _list, row) -> None:
-        """Selecting a row chooses what to edit. It does not load anything."""
-        if row is None:
-            return
-        self._select_profile(row.get_title())
+    def _choose_profile(self, name: str) -> None:
+        """Choose a profile from the selector, and load it onto the mouse.
 
-    def _select_profile(self, name: str) -> None:
-        """Make `name` the profile the panels show and edit.
+        Choosing and loading are one action now. The old window had two — a
+        list that chose what to edit and a `Load` button that put it on the
+        mouse — and that distinction is the thing users are least likely to
+        expect.
 
         Switching with unsaved changes asks first: the pending edits belong to
         the profile being left, and holding them for several profiles at once
@@ -883,12 +827,23 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._apply_selection(name)
 
+    def _open_manage_profiles(self) -> None:
+        """Open the manage-profiles canvas.
+
+        Not built yet: the canvas is step 5 of the build order. Until then the
+        selector's Manage action says so rather than doing nothing.
+        """
+        self._status.set_text("Managing profiles is not built yet.")
+
     def _apply_selection(self, name: str) -> None:
+        """Show `name` in the panels and put it on the mouse."""
         self._editing = name
         self._pending.clear()
         self._sync_save_buttons()
-        self._status.set_text(f"Editing {name}.")
-        self._refresh()
+        self._status.set_text(f"Loading {name}…")
+        # Through the injected scheduler, like the refresh: a test drives its
+        # own loop, and the GTK bridge would never run there.
+        self._schedule(self._load_profile(name), self._on_async_error)
 
     def _confirm_switch(self, name: str) -> None:
         """Ask what to do with unsaved changes before switching profiles."""
@@ -935,23 +890,13 @@ class MainWindow(Adw.ApplicationWindow):
         self._apply_selection(name)
 
     def _reselect_current(self) -> None:
-        """Point the profile list back at the profile still being edited."""
-        current = self._editing_profile()
-        if current is None:
-            return
-        for position in range(len(self._state.profiles)):
-            row = self._profile_list.get_row_at_index(position)
-            if row is not None and row.get_title() == current:
-                self._profile_list.select_row(row)
-                return
+        """Put the selector back on the profile still being edited.
 
-    def _load_selected(self) -> None:
-        """Load the selected profile onto the mouse. A deliberate action."""
-        name = self._editing_profile()
-        if name is None:
-            self._status.set_text("Select a profile to load.")
-            return
-        run_and_report(self._load_profile(name), self._on_async_error)
+        The selector is a dropdown, so there is no row to re-highlight: its
+        label is derived from `_editing`, and re-showing the profiles is what
+        puts it back.
+        """
+        self._rebuild_profiles()
 
     async def _load_profile(self, name: str) -> None:
         async def change() -> bool:
