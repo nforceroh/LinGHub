@@ -245,7 +245,28 @@ the same question.
 settings live in the config file. A tab bar with three dead tabs is worse than
 no tab bar; it can arrive with the features that need it.
 
-### 2.8 The device card
+### 2.8 Navigation
+
+*Settled in the 2026-11-21 grilling.*
+
+Two levels, not five sibling screens:
+
+- **Home** shows the device card. Clicking the mouse on the card opens the
+  **configuration screen**.
+- The **configuration screen** has three views, chosen by a narrow icon rail on
+  the left:
+  - **DPI** — the DPI track and the report rate.
+  - **Assignments** — the bindings, and the diagram with its hotspots.
+  - **LIGHTSYNC** — the lighting.
+- A **back arrow** in the header returns to home.
+- The **profile selector** and **Apply/Discard** live in the window header, so
+  they are present on every view.
+
+This supersedes the earlier idea of a sidebar of five sibling screens. The
+configuration screen is one place with three views, which is what the reference
+shows and what keeps the icon rail to three icons.
+
+### 2.9 The device card
 
 *Settled in the 2026-11-21 grilling, questions Q40 and Q43.*
 
@@ -254,7 +275,7 @@ no tab bar; it can arrive with the features that need it.
 - **The card carries no hotspots.** The diagram on the card is a product image,
   not a button selector. Hotspots move to the **bindings screen**.
 
-### 2.9 Vocabulary
+### 2.10 Vocabulary
 
 - The five DPI values are **DPI presets**, never "DPI slots". The bare word
   **Slot** always means a flash position a whole profile is loaded into.
@@ -278,6 +299,9 @@ one is named for the screen it shows.
 | [01-home-greeting.png](reference/01-home-greeting.png) | The home / greeting screen: a single device card centred on an empty canvas |
 | [02-profile-selector.png](reference/02-profile-selector.png) | The profile selector dropdown, open |
 | [03-manage-profiles.png](reference/03-manage-profiles.png) | The manage-profiles canvas: games across the top, profiles below |
+| [04-config-assignments.png](reference/04-config-assignments.png) | Configuration, Assignments view: command list left, labelled diagram right |
+| [05-config-dpi.png](reference/05-config-dpi.png) | Configuration, DPI view: settings panel left, DPI track right |
+| [06-config-lightsync.png](reference/06-config-lightsync.png) | Configuration, LIGHTSYNC view: effect panel left, mouse right |
 
 ### 3.1 What the home screen shows
 
@@ -324,7 +348,48 @@ one is named for the screen it shows.
 - Each profile tile has **`DETAILS`** plus three icon actions: a lighting icon,
   a share icon and a duplicate icon.
 
-### 3.4 Facts verified for this screen
+### 3.4 What the configuration screen shows
+
+*Observed from the reference, not yet decided.*
+
+All three views share a frame:
+
+- A **back arrow** and the **device name** (`G502 X PLUS`) in the header.
+- The **profile selector** in the top right.
+- A **narrow icon rail** on the left with three icons — a DPI crosshair, a
+  plus-in-a-box, and a sun — plus a gear at the bottom. The active view's icon
+  is a filled blue rounded square.
+- A **settings panel** on the left of the content area, with a lock icon in its
+  top right.
+- The **mouse image** on the right, large.
+
+**Assignments** adds:
+
+- Tabs `COMMANDS`, `KEYS`, `ACTIONS`, `MACROS`, `SYSTEM`.
+- A search field and a scrolling command list, grouped by heading (`Editing`),
+  each row a shortcut and its action.
+- **Labels with leader lines** pointing at each button on the mouse —
+  `Primary Click`, `Next Track`, `Scroll Left`, `Previous Track`,
+  `Scroll Down`, `Scroll Up`, `Middle Click`, `Secondary Click`,
+  `Scroll Right`, `Battery Level`.
+- `VIEW 1` / `VIEW 2` buttons and a `DEFAULT` / `G-SHIFT` toggle at the bottom.
+
+**DPI** adds:
+
+- The five DPI speeds as a coloured row, the current one underlined.
+- `ASSIGN THESE TO YOUR MOUSE`, and a `RESTORE DEFAULT SETTINGS` button.
+- Report rate as four radio buttons: `1000`, `500`, `250`, `125`.
+- The track on the right with the same five colours, a white diamond for the
+  DPI-shift speed, and the scale beneath.
+
+**LIGHTSYNC** adds:
+
+- Tabs `PRESETS`, `FREESTYLE`, `ANIMATIONS`.
+- `EFFECT` (a dropdown, `COLOR WAVE`), `CYCLE` (`HORIZONTAL`), `RATE`
+  (`5000ms`) and `BRIGHTNESS` (`100%`).
+- A `SYNC LIGHTING OPTIONS` button at the bottom right.
+
+### 3.5 Facts verified for this screen
 
 - **Battery is readable.** `/sys/class/power_supply/hidpp_battery_0/` reports
   `capacity` (95), `status` (Discharging) and `model_name`
