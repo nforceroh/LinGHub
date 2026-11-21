@@ -201,6 +201,22 @@ class WhatGetsWrittenTests(unittest.TestCase):
         self.assertEqual(snapshot.detected_game, "world-of-tanks")
         self.assertEqual(snapshot.loaded_profile, "world-of-tanks")
 
+    def test_the_desktop_profile_is_reported_before_the_first_tick(self):
+        """The tray showed "unknown" after a reboot until the daemon wrote.
+
+        Clients read the view as soon as the daemon publishes it, which is
+        before the first tick, so the desktop profile has to be named then.
+        """
+        h = DaemonHarness(self)
+        self.assertEqual(h.daemon.view().state.loaded_profile, "desktop")
+
+    def test_the_first_tick_still_writes_despite_the_assumption(self):
+        """Naming the desktop profile must not skip the startup write, which
+        is what picks up config edits made while the daemon was stopped."""
+        h = DaemonHarness(self)
+        h.tick()
+        self.assertEqual(h.written, [("desktop", 0)])
+
 
 class DriftTests(unittest.TestCase):
     """Something outside the daemon moved the mouse to another slot."""

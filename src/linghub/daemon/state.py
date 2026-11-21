@@ -74,6 +74,24 @@ class DaemonState:
         """The profile loaded by hand, or None when detection decides."""
         return self._manual_override
 
+    def assume_desktop_loaded(self) -> None:
+        """Start out believing the desktop profile is on the mouse.
+
+        Before the first write the daemon has loaded nothing, so `loaded_profile`
+        is None and every client shows "unknown" — the tray, the window and
+        `linghub status` all read it. That is honest but useless: the mouse
+        keeps whatever was last written to slot 0, which is the desktop profile
+        unless something outside LinGHub moved it, and the drift check corrects
+        that within one tick anyway.
+
+        Only the name is seeded, not the fingerprint, so `needs_write` stays
+        true and the first tick still writes. That write is what picks up edits
+        made to the config while the daemon was stopped, so seeding the
+        fingerprint too would silently skip them.
+        """
+        if self.loaded_profile is None:
+            self.loaded_profile = self.config.desktop_profile
+
     def request(self, name: str) -> bool:
         """Load a profile by hand, overriding detection until the game changes.
 

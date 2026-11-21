@@ -52,7 +52,10 @@ the profile, the config or the connection changes.
 _Avoid_: failed write, rejected profile
 
 **Desktop profile**:
-The profile loaded into slot 0, active whenever no game is running.
+The profile loaded into slot 0, active whenever no game is running. The daemon
+assumes it is loaded before its first write, so clients show it rather than
+"unknown" from the moment the daemon starts; the drift check corrects the
+assumption if the mouse is elsewhere.
 _Avoid_: default profile, base profile, normal profile
 
 **Gaming profile**:

@@ -109,6 +109,49 @@ class NeedsWriteTests(unittest.TestCase):
         self.assertFalse(state.needs_write)
 
 
+class AssumeDesktopLoadedTests(unittest.TestCase):
+    """Before the first write, say the desktop profile is loaded.
+
+    Otherwise every client shows "unknown" until the daemon has written once,
+    which is what the tray showed after a reboot.
+    """
+
+    def test_the_desktop_profile_is_named_before_any_write(self):
+        state = DaemonState(config=make_config(DESKTOP, WOT))
+        self.assertIsNone(state.loaded_profile)
+        state.assume_desktop_loaded()
+        self.assertEqual(state.loaded_profile, "desktop")
+
+    def test_the_first_write_still_happens(self):
+        """Only the name is seeded, so config edits made while the daemon was
+        stopped are still written on the first tick."""
+        state = DaemonState(config=make_config(DESKTOP, WOT))
+        state.assume_desktop_loaded()
+        self.assertTrue(state.needs_write)
+
+    def test_a_profile_already_loaded_is_left_alone(self):
+        state = DaemonState(config=make_config(DESKTOP, WOT))
+        state.mark_loaded("world-of-tanks")
+        state.assume_desktop_loaded()
+        self.assertEqual(state.loaded_profile, "world-of-tanks")
+
+    def test_drift_is_still_corrected(self):
+        """The assumption is not a claim about the hardware: a mouse on the
+        wrong slot must still be reloaded."""
+        state = DaemonState(config=make_config(DESKTOP, WOT))
+        state.assume_desktop_loaded()
+        state.observe_active_slot(1)
+        self.assertTrue(state.needs_write)
+
+    def test_a_renamed_desktop_profile_is_followed(self):
+        """The name comes from the config pointer, not a literal."""
+        state = DaemonState(config=make_config(
+            Profile(name="everyday"), desktop="everyday"
+        ))
+        state.assume_desktop_loaded()
+        self.assertEqual(state.loaded_profile, "everyday")
+
+
 if __name__ == "__main__":
     unittest.main()
 

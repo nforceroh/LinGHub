@@ -239,6 +239,10 @@ class Daemon:
             return False
         if self._state is None:
             self._state = DaemonState(config=config)
+            # Before the first write, say the desktop profile is loaded rather
+            # than "unknown": that is what slot 0 holds, and the drift check
+            # corrects it if something else moved the mouse.
+            self._state.assume_desktop_loaded()
         else:
             self._state.config = config
         return True
