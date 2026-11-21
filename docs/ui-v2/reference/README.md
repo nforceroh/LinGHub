@@ -11,6 +11,7 @@ the screen they show rather than for the app they came from.
 | --- | --- |
 | `01-home-greeting.png` | Home / greeting: one device card centred on an empty canvas |
 | `02-profile-selector.png` | The profile selector dropdown, open |
+| `03-manage-profiles.png` | The manage-profiles canvas: games across the top, profiles below |
 
 ## Adding one
 

@@ -140,7 +140,40 @@ draggable marker on a shared scale.
 - Ticking `Default` clears every other preset's default: ratbagd honours exactly
   one.
 
-### 2.6 Vocabulary
+### 2.6 The profile selector
+
+*Settled in the 2026-11-21 grilling, questions Q18–Q25.*
+
+- The profile list in the main pane is **replaced** by a dropdown in the top
+  right. Two places to choose a profile is the ambiguity the DPI panel grilling
+  removed; the selector owns which profile the panels show.
+- **Selecting from the dropdown loads that profile onto the mouse.** The
+  select-versus-load distinction is gone: it was two actions on one list, which
+  is the thing users are least likely to expect.
+- **No categories.** A row shows the profile name alone, not `Category: Name`.
+  Our model has no category, and inventing one would be a second place to keep
+  a fact the config already holds.
+- The active profile's row is **blue and carries a check**. Colour alone fails
+  for colourblind users, and the check is already built.
+- A **search field** filters the list, hidden below eight profiles. The dropdown
+  is the only way to switch, so a long list would be painful without it.
+- **`Manage profiles`** is pinned at the bottom and opens a **separate canvas**,
+  not a dialog. See §2.7.
+
+### 2.7 The manage-profiles canvas
+
+*Settled in the 2026-11-21 grilling, question Q22.*
+
+`Manage profiles` opens a canvas of its own, laid out like the reference: games
+across the top, the selected game's profiles below. It is where profiles are
+added, renamed and deleted, so the destructive actions and their confirmations
+live away from the dropdown.
+
+**A game carries a display name the user fills in.** The config stores an
+executable (`WorldOfTanks.exe`); the canvas shows a name the user chose. This is
+a new field on `Game` and a config format change.
+
+### 2.8 Vocabulary
 
 - The five DPI values are **DPI presets**, never "DPI slots". The bare word
   **Slot** always means a flash position a whole profile is loaded into.
@@ -163,6 +196,7 @@ one is named for the screen it shows.
 | --- | --- |
 | [01-home-greeting.png](reference/01-home-greeting.png) | The home / greeting screen: a single device card centred on an empty canvas |
 | [02-profile-selector.png](reference/02-profile-selector.png) | The profile selector dropdown, open |
+| [03-manage-profiles.png](reference/03-manage-profiles.png) | The manage-profiles canvas: games across the top, profiles below |
 
 ### 3.1 What the home screen shows
 
@@ -191,7 +225,25 @@ one is named for the screen it shows.
 - The **active profile's label is blue**; the rest are white.
 - The list **scrolls** — a scrollbar is visible on the right.
 
-### 3.3 Facts verified for this screen
+### 3.3 What the manage-profiles canvas shows
+
+*Observed from the reference, not yet decided.*
+
+- A **back arrow** in the top left, so the canvas is a place you navigate to
+  and return from.
+- A **`Games & Applications`** row of portrait tiles across the top, with an
+  **`+ ADD GAME OR APPLICATION`** tile first. Tiles carry artwork; some read
+  `NOT INSTALLED`. The selected tile is larger and labelled beneath
+  (`DESKTOP`).
+- A **tab bar** below: `PROFILES`, `MACROS`, `INTEGRATIONS`, `SETTINGS`, with
+  the active tab underlined.
+- A **profiles row** for the selected game, with an
+  **`+ ADD PROFILE FOR THE SELECTED APP`** tile first, then one tile per
+  profile showing its name and a blurred preview.
+- Each profile tile has **`DETAILS`** plus three icon actions: a lighting icon,
+  a share icon and a duplicate icon.
+
+### 3.4 Facts verified for this screen
 
 - **Battery is readable.** `/sys/class/power_supply/hidpp_battery_0/` reports
   `capacity` (95), `status` (Discharging) and `model_name`
@@ -228,15 +280,6 @@ Nothing here is decided. Each item names the question, not an answer.
   current binding on hover, or is the table the only place bindings are read?
 - The image is cropped to the mouse. Is there a use for the space beside it, or
   does it stay empty?
-
-### 4.3 The profile list
-
-- Profiles are rows in a `ListBox` with a check for the one on the mouse and a
-  `desktop` suffix for the desktop profile. Is a list the right shape, or should
-  profiles be tabs or a dropdown?
-- Selecting a profile chooses what to edit; `Load` puts it on the mouse. Two
-  actions on one list is a distinction users may not expect. Is it the right
-  one?
 
 ### 4.4 The lighting panel
 
