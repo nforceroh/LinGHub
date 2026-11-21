@@ -629,10 +629,9 @@ class MainWindow(Adw.ApplicationWindow):
     def _device_name(self) -> str:
         """The mouse's name, as the card shows it.
 
-        The daemon does not publish a device name, so this reads the kernel's
-        power-supply entry when there is one and falls back to the model ratbagd
-        reports. A wired mouse has no battery entry, so the fallback is the
-        common case for it.
+        The kernel's hidpp power-supply entry carries the full model name, and
+        the daemon publishes none of its own. A wired mouse has no such entry,
+        so the fallback is the generic name rather than nothing.
         """
         return model_name() or "Logitech G502"
 
@@ -882,11 +881,20 @@ class MainWindow(Adw.ApplicationWindow):
         self._status.set_text("Managing profiles is not built yet.")
 
     def _apply_selection(self, name: str) -> None:
-        """Show `name` in the panels and put it on the mouse."""
+        """Show `name` in the panels and put it on the mouse.
+
+        The refresh happens regardless of the load's outcome. Editing a profile
+        that is not on the mouse is a legitimate state — the whole point of
+        separating edit from load — so the panels must follow `_editing` even
+        when the daemon refuses the write. Refreshing only on success would
+        leave them showing the previous profile's bindings under the new one's
+        name.
+        """
         self._editing = name
         self._pending.clear()
         self._sync_save_buttons()
         self._status.set_text(f"Loading {name}…")
+        self._refresh()
         # Through the injected scheduler, like the refresh: a test drives its
         # own loop, and the GTK bridge would never run there.
         self._schedule(self._load_profile(name), self._on_async_error)
@@ -952,5 +960,6 @@ class MainWindow(Adw.ApplicationWindow):
             change,
             report=self._status.set_text,
             failure=f"Could not load {name}",
+            rejected=f"The daemon refused to load {name}.",
             success=f"Loaded {name}.",
         )

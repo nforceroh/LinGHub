@@ -281,6 +281,71 @@ class ChoosingLoadsTests(unittest.TestCase):
         window = self._window()
         self.assertEqual(window._editing_profile(), "desktop")
 
+    def test_a_refused_load_still_shows_the_chosen_profile(self):
+        """The panels follow the choice, not the load's outcome.
+
+        Editing a profile that is not on the mouse is a legitimate state, so a
+        refused load must not leave the panels showing the previous profile's
+        bindings under the new one's name.
+        """
+        import asyncio
+
+        window = self._window()
+
+        class RefusingClient:
+            async def load_profile(self, name):
+                return False
+
+            async def get_view(self, _profile):
+                return view(profiles=("desktop", "world-of-tanks"))
+
+            async def daemon_version(self):
+                from linghub import version
+
+                return version.DaemonVersion.not_running()
+
+        window._client = RefusingClient()
+
+        async def run():
+            window._choose_profile("world-of-tanks")
+            for _ in range(6):
+                await asyncio.sleep(0)
+
+        asyncio.run(run())
+        self.assertEqual(window._editing_profile(), "world-of-tanks")
+        self.assertEqual(
+            window._selector._label.get_text(), "world-of-tanks",
+            "the selector still showed the previous profile",
+        )
+
+    def test_a_refused_load_says_so(self):
+        """A refusal must not be silent: the user clicked and nothing happened."""
+        import asyncio
+
+        window = self._window()
+
+        class RefusingClient:
+            async def load_profile(self, name):
+                return False
+
+            async def get_view(self, _profile):
+                return view(profiles=("desktop", "world-of-tanks"))
+
+            async def daemon_version(self):
+                from linghub import version
+
+                return version.DaemonVersion.not_running()
+
+        window._client = RefusingClient()
+
+        async def run():
+            window._choose_profile("world-of-tanks")
+            for _ in range(6):
+                await asyncio.sleep(0)
+
+        asyncio.run(run())
+        self.assertIn("refused", window._status.get_text().lower())
+
 
 @unittest.skipUnless(has_cairo(), "needs pycairo and Gtk 4")
 class VersionTests(unittest.TestCase):

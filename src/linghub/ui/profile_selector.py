@@ -9,9 +9,9 @@ actions on one list — selecting chose what to edit, `Load` put it on the mouse
 and that distinction is the thing users are least likely to expect. Editing a
 profile you have not loaded stays possible through `Manage profiles`.
 
-The search field is hidden below a threshold. The dropdown is the only way to
-switch, so a long list would be painful without it, but a field above three
-profiles is furniture.
+The search field is hidden below eight profiles. The dropdown is the only way
+to switch, so a long list would be painful without it, but a field above a
+handful of profiles is furniture.
 """
 
 from __future__ import annotations
@@ -34,8 +34,7 @@ class ProfileSelector(Gtk.MenuButton):
         super().__init__()
         self._on_chosen = on_chosen
         self._on_manage = on_manage
-        self._rows: dict[str, Gtk.Button] = {}
-        self._names: tuple[str, ...] = ()
+        self._rows: dict[str, Gtk.ListBoxRow] = {}
         self._active: str | None = None
         self._editing: str | None = None
 
@@ -93,7 +92,6 @@ class ProfileSelector(Gtk.MenuButton):
         self, names: tuple[str, ...], *, active: str | None, editing: str | None
     ) -> None:
         """Fill the dropdown. `active` is on the mouse; `editing` is shown."""
-        self._names = tuple(names)
         self._active = active
         self._editing = editing
 
