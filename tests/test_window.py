@@ -745,11 +745,14 @@ class HomeScreenTests(unittest.TestCase):
         window = self._window()
         window._card.show_device("G502", Battery(capacity=85, charging=False))
         self.assertTrue(window._card._battery.get_visible())
-        self.assertEqual(window._card._battery.get_text(), "85%")
+        self.assertEqual(window._card._battery_label.get_text(), "85%")
 
-    def test_a_charging_mouse_says_so(self):
+    def test_a_charging_mouse_shows_the_charging_icon(self):
         from linghub.hardware.battery import Battery
 
         window = self._window()
         window._card.show_device("G502", Battery(capacity=40, charging=True))
-        self.assertEqual(window._card._battery.get_text(), "40% · charging")
+        self.assertEqual(
+            window._card._battery_icon.get_icon_name(),
+            "battery-full-charging-symbolic",
+        )
