@@ -213,6 +213,33 @@ way to navigate, not as a claim about ownership. Deleting a profile deletes its
 games with it; a game with no profile left matches nothing, and keeping it would
 mean a second list to maintain.
 
+**A profile tile shows its name and a one-line summary** — the default preset's
+DPI and the report rate, e.g. `800 DPI · 1000 Hz`. The reference's blurred
+screenshot preview is decoration we cannot produce; a summary is information a
+user can compare across profiles.
+
+**A tile offers `DETAILS` and duplicate.** `DETAILS` closes the canvas and
+selects that profile in the main window, because the main window is where
+bindings, DPI and lighting are edited and a second editor would be a second
+place for the same rules. Duplicate copies the profile under a new name: a new
+profile usually starts as a copy of an existing one. The reference's share and
+lighting actions have no counterpart — sharing does not exist, and lighting is a
+section of the profile you reach through `DETAILS`.
+
+**The canvas is a view inside the main window**, not a separate window and not a
+dialog. A separate window means two windows to manage and a second place the
+profile list can go stale; a dialog cannot hold a full-width canvas comfortably.
+Swapping one window's content keeps one source of truth and one place to
+refresh.
+
+**A back arrow in the header** returns to the main window without changing the
+selection. The canvas is a place you navigate to, so it needs a way back that is
+not "pick something".
+
+**Opening the canvas with edits pending prompts first**, reusing the existing
+switch-profile prompt: it already offers Apply, Discard and Cancel, and it is
+the same question.
+
 **`PROFILES` is the only tab.** The reference's `MACROS`, `INTEGRATIONS` and
 `SETTINGS` tabs have no counterpart: there are no macros, no integrations, and
 settings live in the config file. A tab bar with three dead tabs is worse than
