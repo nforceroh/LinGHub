@@ -152,6 +152,20 @@ keeps the adapter's interface narrow and its implementations testable without
 a bus.
 _Avoid_: helper, handler, backend
 
+**View**:
+What the daemon publishes for a client to show, from one read: the state
+section (active profile, detected game, desktop profile, profile names) and
+one profile's editable sections. One read means a client cannot piece a view
+together from two ticks.
+_Avoid_: snapshot, DTO, payload
+
+**Staged edit**:
+An edit held in a panel until Save, so nothing reaches the mouse while the
+user is still adjusting. The panel owns the widgets and the values; the
+staged-edit module owns the baseline, whether the panel is dirty, and the
+save/revert rule.
+_Avoid_: draft, pending change, form state
+
 **Clone install**:
 LinGHub run from a git clone through an editable install, where the app
 version is read from git at startup (ADR-0009). Its service is

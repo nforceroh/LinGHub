@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
 
 from dbus_fast import BusType, Message, MessageType
 from dbus_fast.aio import MessageBus
 
 
 from .. import dbus_contract as contract
+from ..daemon_view import DaemonUnavailable, DaemonView, ProfileView, ViewState
 
 
 SERVICE = contract.SERVICE
@@ -36,42 +36,6 @@ _NO_DAEMON = frozenset({
     "org.freedesktop.DBus.Error.ServiceUnknown",
     "org.freedesktop.DBus.Error.NameHasNoOwner",
 })
-
-
-class DaemonUnavailable(RuntimeError):
-    """The daemon is not running, or is not answering on the session bus."""
-
-
-@dataclass(frozen=True)
-class DaemonState:
-    active_profile: str = ""
-    detected_game: str = ""
-    desktop_profile: str = "desktop"
-    profiles: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class ProfileView:
-    """One profile's editable sections, as the window's panels consume them."""
-
-    bindings: dict[int, tuple[str, str]] = field(default_factory=dict)
-    leds: dict[int, dict] = field(default_factory=dict)
-    resolutions: list[dict] = field(default_factory=list)
-    report_rates: tuple[int, ...] = ()
-    report_rate: int = 0
-
-
-@dataclass(frozen=True)
-class DaemonView:
-    """Everything a client shows, from one D-Bus read.
-
-    The state section is what the tray and the title bar show; the profile
-    section is what the panels edit. One read means a refresh cannot piece a
-    view together from two ticks.
-    """
-
-    state: DaemonState
-    profile: ProfileView
 
 
 class DaemonClient:
@@ -163,7 +127,7 @@ class DaemonClient:
             bindings, leds, resolutions, rates, rate,
         ) = raw
         return DaemonView(
-            state=DaemonState(
+            state=ViewState(
                 active_profile=active,
                 detected_game=detected,
                 desktop_profile=desktop,

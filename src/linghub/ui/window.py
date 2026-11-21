@@ -21,7 +21,8 @@ from gi.repository import Adw, Gio, GLib, Gtk
 from .asyncbridge import run_and_report
 from .binding_editor import BindingEditor
 from .buttonmap import BUTTONS, DIAGRAM_IMAGE, describe, manual_number
-from .client import DaemonClient, DaemonState, DaemonView
+from .client import DaemonClient
+from ..daemon_view import DaemonView, ViewState
 from .diagram import MouseDiagram
 from . import presentation
 from .. import version
@@ -42,7 +43,7 @@ class MainWindow(Adw.ApplicationWindow):
         # How a coroutine is put on the loop. Injected so a test can drive the
         # window on its own loop instead of patching this module's global.
         self._schedule = schedule
-        self._state = DaemonState()
+        self._state = ViewState()
         self._selected_button: int | None = None
         # Which profile the panels show. Deliberately separate from which
         # profile is loaded on the mouse: editing must not reconfigure it.

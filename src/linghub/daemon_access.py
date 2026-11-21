@@ -11,8 +11,11 @@ module handles connecting, running it on a fresh event loop, and disconnecting.
 Deliberately not a client wrapper: it takes a callable so it cannot grow an
 interface that mirrors DaemonClient's.
 
-The import of DaemonState at module level is safe for the tray: it pulls in
-dbus_fast but no GTK namespace, so GTK3 and GTK4 still never meet.
+The view types come from `daemon_view`, not from `ui/`: the tray is GTK3 and
+the window is GTK4, and PyGObject refuses to load two versions of the Gtk
+namespace in one process. Importing them from `ui.client` used to be safe only
+because that module happened to import no GTK. Now the tray's import chain
+never enters `ui/` at all, and `tests/test_daemon_view.py` checks it.
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ import logging
 import threading
 from typing import Any, Callable, TypeVar
 
-from .ui.client import DaemonState, DaemonUnavailable
+from .daemon_view import DaemonUnavailable, ViewState
 from .version import DaemonVersion
 
 
@@ -62,7 +65,7 @@ def call(action: Callable[[Any], T], timeout: float = 10.0) -> T:
     return asyncio.run(asyncio.wait_for(run_with_client(action), timeout))
 
 
-def state() -> DaemonState:
+def state() -> ViewState:
     """The daemon's current state. Convenience for the common case.
 
     Read through GetView, the same single call the window makes, so there is
@@ -74,7 +77,7 @@ def state() -> DaemonState:
     return call(read)
 
 
-def state_and_version() -> tuple[DaemonState, DaemonVersion]:
+def state_and_version() -> tuple[ViewState, DaemonVersion]:
     """The daemon's state and its app version, on one connection.
 
     The version is a value, not a sentinel: a daemon too old to report one,

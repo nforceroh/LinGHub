@@ -7,7 +7,7 @@ directly.
 
 import unittest
 
-from linghub.ui.client import DaemonState
+from linghub.daemon_view import ViewState
 from linghub.ui.presentation import (
     binding_label,
     binding_labels,
@@ -17,7 +17,7 @@ from linghub.ui.presentation import (
 
 
 def state(active="desktop", profiles=("desktop", "wot"), desktop="desktop"):
-    return DaemonState(
+    return ViewState(
         active_profile=active, profiles=profiles, desktop_profile=desktop
     )
 

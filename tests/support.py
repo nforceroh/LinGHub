@@ -57,10 +57,10 @@ def view(
     The poll delivers a view; a test that simulates a poll builds one of these
     rather than hand-rolling the two-level dataclass.
     """
-    from linghub.ui.client import DaemonState, DaemonView, ProfileView
+    from linghub.daemon_view import DaemonView, ProfileView, ViewState
 
     return DaemonView(
-        state=DaemonState(
+        state=ViewState(
             active_profile=active,
             profiles=profiles,
             desktop_profile="desktop",
@@ -83,14 +83,14 @@ def make_window(
     """
     from gi.repository import Adw, Gtk
 
-    from linghub.ui.client import DaemonState
+    from linghub.daemon_view import ViewState
     from linghub.ui.window import MainWindow
 
     window = MainWindow.__new__(MainWindow)
     Adw.ApplicationWindow.__init__(window)
     window._schedule = _default_schedule
 
-    window._state = DaemonState()
+    window._state = ViewState()
     window._title = Adw.WindowTitle(title="t")
     window._status = Gtk.Label()
     window._banner = Adw.Banner()

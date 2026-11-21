@@ -19,10 +19,10 @@ import gi
 gi.require_version("Gtk", "3.0")
 gi.require_version("AppIndicator3", "0.1")
 from linghub.tray import Tray
-from linghub.ui.client import DaemonState
+from linghub.daemon_view import ViewState
 
 tray = Tray()
-tray._apply(DaemonState(
+tray._apply(ViewState(
     active_profile="desktop",
     profiles=("desktop", "world-of-tanks", "star-citizen"),
     desktop_profile="desktop",
