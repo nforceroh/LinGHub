@@ -266,7 +266,34 @@ This supersedes the earlier idea of a sidebar of five sibling screens. The
 configuration screen is one place with three views, which is what the reference
 shows and what keeps the icon rail to three icons.
 
-### 2.9 The device card
+### 2.9 The configuration views
+
+*Settled in the 2026-11-21 grilling, questions Q50–Q53 and Q55.*
+
+**DPI view**
+
+- The coloured row of five numbers is a **legend**, not a control. It teaches the
+  colour-to-preset mapping without a click; the track remains the only control,
+  because two ways to select a preset is the ambiguity this redesign keeps
+  removing.
+
+**Assignments view**
+
+- The diagram's **labels and the buttons are both clickable**, with a leader
+  line from each label to its button. The reference's readability is kept — you
+  can read what each button does without hovering — and so is the
+  click-to-edit affordance.
+- A label shows the button's **function** (`Next Track`), not its physical name.
+  The physical name (`Back (G4)`) moves to the tooltip.
+- **No `COMMANDS` / `KEYS` / `ACTIONS` / `MACROS` / `SYSTEM` tabs.** The left
+  panel is a searchable list of what a button can be assigned to, which is what
+  those tabs are a taxonomy for; with one taxonomy there is nothing to switch
+  between.
+- **`DEFAULT` / `G-SHIFT` becomes a `Default` / `Second mode` toggle**, showing
+  which layer the diagram edits. `VIEW 1` / `VIEW 2` is dropped: it is a
+  Logitech concept with no counterpart, and there is one diagram.
+
+### 2.10 The device card
 
 *Settled in the 2026-11-21 grilling, questions Q40 and Q43.*
 
@@ -275,7 +302,7 @@ shows and what keeps the icon rail to three icons.
 - **The card carries no hotspots.** The diagram on the card is a product image,
   not a button selector. Hotspots move to the **bindings screen**.
 
-### 2.10 Vocabulary
+### 2.11 Vocabulary
 
 - The five DPI values are **DPI presets**, never "DPI slots". The bare word
   **Slot** always means a flash position a whole profile is loaded into.
