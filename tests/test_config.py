@@ -135,6 +135,87 @@ class LoadTests(unittest.TestCase):
         self.assertIsNotNone(config.profile_named("world-of-tanks"))
 
 
+class GameShapeTests(unittest.TestCase):
+    """A game entry is either a bare string or an object with a name.
+
+    Both shapes are accepted so a config written before names existed keeps
+    working with no migration step.
+    """
+
+    def _load(self, games):
+        body = {
+            "version": 1,
+            "settings": {"desktop_profile": "desktop"},
+            "profiles": {"desktop": {"games": []}, "wot": {"games": games}},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            return load(write_config(Path(tmp), body))
+
+    def test_a_bare_string_is_a_nameless_game(self):
+        config = self._load(["WorldOfTanks.exe"])
+        game = config.profile_named("wot").games[0]
+        self.assertEqual(game.executable, "WorldOfTanks.exe")
+        self.assertEqual(game.name, "")
+
+    def test_an_object_carries_the_name(self):
+        config = self._load(
+            [{"executable": "WorldOfTanks.exe", "name": "World of Tanks"}]
+        )
+        game = config.profile_named("wot").games[0]
+        self.assertEqual(game.executable, "WorldOfTanks.exe")
+        self.assertEqual(game.name, "World of Tanks")
+
+    def test_an_object_without_a_name_is_nameless(self):
+        config = self._load([{"executable": "WorldOfTanks.exe"}])
+        self.assertEqual(config.profile_named("wot").games[0].name, "")
+
+    def test_both_shapes_may_be_mixed(self):
+        config = self._load(
+            ["A.exe", {"executable": "B.exe", "name": "Bee"}]
+        )
+        games = config.profile_named("wot").games
+        self.assertEqual([g.name for g in games], ["", "Bee"])
+
+    def test_an_object_without_an_executable_is_refused(self):
+        with self.assertRaisesRegex(ConfigError, "needs an executable"):
+            self._load([{"name": "World of Tanks"}])
+
+    def test_a_non_string_name_is_refused(self):
+        with self.assertRaisesRegex(ConfigError, "name must be a string"):
+            self._load([{"executable": "A.exe", "name": 7}])
+
+    def test_a_number_is_not_a_game(self):
+        with self.assertRaisesRegex(ConfigError, "string or an object"):
+            self._load([7])
+
+    def test_the_writer_emits_the_object_form(self):
+        """One shape written is easier to reason about than two."""
+        from linghub.config import save
+
+        config = self._load(["WorldOfTanks.exe"])
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out.json"
+            save(out, config)
+            raw = json.loads(out.read_text())
+        self.assertEqual(
+            raw["profiles"]["wot"]["games"],
+            [{"executable": "WorldOfTanks.exe", "name": ""}],
+        )
+
+    def test_a_name_survives_a_round_trip(self):
+        from linghub.config import save
+
+        config = self._load(
+            [{"executable": "WorldOfTanks.exe", "name": "World of Tanks"}]
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out.json"
+            save(out, config)
+            again = load(out)
+        game = again.profile_named("wot").games[0]
+        self.assertEqual(game.name, "World of Tanks")
+
+
 class UnencodableBindingTests(unittest.TestCase):
     """A binding the hardware can't encode is refused on the way in (#8).
 
