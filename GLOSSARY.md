@@ -16,6 +16,13 @@ can be loaded into, 0 through 4. Slot 0 holds the desktop profile; slot 1 holds
 whichever gaming profile is active.
 _Avoid_: index, bank, channel
 
+**DPI preset**:
+One of the five DPI values a profile stores, each with a DPI, a flag for whether
+it is the default, and a flag for whether it is disabled. Unrelated to a
+**Slot**, which is a flash position a whole profile is loaded into: the bare
+word "slot" always means the flash position, never a DPI value.
+_Avoid_: DPI slot, resolution slot, DPI level
+
 **Active slot**:
 The slot the mouse is using right now, as the mouse itself reports it.
 ratbagd's answer is only its belief about the active slot.

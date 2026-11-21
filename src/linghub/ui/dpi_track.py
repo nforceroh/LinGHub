@@ -98,6 +98,7 @@ class DpiTrack(Gtk.DrawingArea):
         super().__init__()
         self._slots: list[dict] = []
         self._dragging: int | None = None
+        self._drag_origin: float | None = None
         self._on_edited = None
         self.set_content_height(LABEL_BAND + 2 * MARKER_RADIUS + TICK_BAND)
         self.set_hexpand(True)
@@ -162,36 +163,48 @@ class DpiTrack(Gtk.DrawingArea):
         self._draw_track(cr, width, track_y)
         self._draw_ticks(cr, width, track_y)
         positions = self._positions()
-        rows = self._label_rows(cr, positions)
         for index, x in enumerate(positions):
-            self._draw_marker(cr, index, x, track_y, rows[index])
+            self._draw_marker(cr, index, x, track_y)
+        self._draw_labels(cr, positions, track_y)
 
-    def _label_rows(self, cr, positions: list[float]) -> list[int]:
-        """Which row each value label goes on, so no two labels overlap.
+    def _draw_labels(self, cr, positions: list[float], track_y: float) -> None:
+        """One label per distinct DPI, not one per marker.
 
-        Markers cluster at the low end of a log scale (100, 400, 800, 1000 are
-        all in the first third), so their labels would print on top of each
-        other. A label that would collide with one already placed moves up a
-        row instead.
+        Several slots at the same DPI is a legitimate setup, and printing "100"
+        three times over three markers that sit 14px apart is unreadable. The
+        value is a property of the position, so it is labelled once, centred on
+        the group. Groups that would still collide move up a row.
         """
-        rows: list[int] = []
-        occupied: list[list[tuple[float, float]]] = [[], []]
+        groups: dict[int, list[float]] = {}
         for index, x in enumerate(positions):
-            half = self._text_width(cr, str(self._slots[index]["dpi"]), 11) / 2
-            span = (x - half - 3, x + half + 3)
+            groups.setdefault(self._slots[index]["dpi"], []).append(x)
+
+        occupied: list[list[tuple[float, float]]] = [[], []]
+        for dpi, xs in sorted(groups.items(), key=lambda item: item[1][0]):
+            centre = sum(xs) / len(xs)
+            is_default = any(
+                slot["default"] for slot in self._slots if slot["dpi"] == dpi
+            )
+            half = self._text_width(cr, str(dpi), 11, bold=is_default) / 2
+            span = (centre - half - 4, centre + half + 4)
             row = 0
             for candidate in (0, 1):
                 if all(span[1] < other[0] or span[0] > other[1]
                        for other in occupied[candidate]):
                     row = candidate
                     break
-            else:
-                # Both rows are full at this position; the third label shares
-                # the top row rather than being dropped.
-                row = 0
             occupied[row].append(span)
-            rows.append(row)
-        return rows
+
+            label_y = (track_y - MARKER_RADIUS - 10
+                       - row * LABEL_ROW_HEIGHT)
+            self._text(cr, str(dpi), centre, label_y, size=11,
+                       centre=True, bold=is_default)
+            if is_default:
+                cr.set_source_rgba(0.36, 0.62, 0.98, 1.0)
+                cr.set_line_width(2)
+                cr.move_to(centre - half, label_y + 9)
+                cr.line_to(centre + half, label_y + 9)
+                cr.stroke()
 
     def _draw_track(self, cr, width: int, y: float) -> None:
         cr.set_line_width(2)
@@ -214,8 +227,7 @@ class DpiTrack(Gtk.DrawingArea):
                 size=9, centre=True, alpha=0.55,
             )
 
-    def _draw_marker(self, cr, index: int, x: float, track_y: float,
-                     label_row: int = 0) -> None:
+    def _draw_marker(self, cr, index: int, x: float, track_y: float) -> None:
         slot = self._slots[index]
         disabled = bool(slot.get("disabled"))
         is_default = bool(slot.get("default"))
@@ -224,25 +236,16 @@ class DpiTrack(Gtk.DrawingArea):
         # so it can be re-enabled, but it is not part of the mouse's cycle.
         alpha = 0.35 if disabled else 1.0
         cr.set_source_rgba(0.36, 0.62, 0.98, alpha)
+        # new_sub_path, because cairo keeps the current path across stroke():
+        # without it each arc appends to the previous marker's path and the
+        # fill joins them into one shape spanning the whole track.
+        cr.new_sub_path()
         cr.arc(x, track_y, MARKER_RADIUS, 0, 2 * math.pi)
         if disabled:
             cr.set_line_width(2)
             cr.stroke()
         else:
             cr.fill()
-
-        # The default slot is underlined, the same signal G HUB uses.
-        label = str(slot["dpi"])
-        label_y = (track_y - MARKER_RADIUS - 10
-                   - label_row * LABEL_ROW_HEIGHT)
-        self._text(cr, label, x, label_y, size=11, centre=True, bold=is_default)
-        if is_default:
-            text_width = self._text_width(cr, label, 11, bold=True)
-            cr.set_source_rgba(0.36, 0.62, 0.98, 1.0)
-            cr.set_line_width(2)
-            cr.move_to(x - text_width / 2, label_y + 9)
-            cr.line_to(x + text_width / 2, label_y + 9)
-            cr.stroke()
 
     def _text(self, cr, text: str, x: float, y: float, *, size: int,
               centre: bool = False, bold: bool = False,
@@ -267,17 +270,26 @@ class DpiTrack(Gtk.DrawingArea):
 
     def _on_drag_begin(self, _gesture, start_x: float, start_y: float) -> None:
         self._dragging = self._marker_at(start_x, start_y)
+        # Remember where the marker was when the drag began. Recomputing it
+        # from _positions() on every update would read a layout that has
+        # already moved, so the marker would chase the pointer and the wrong
+        # slot would end up under it.
+        self._drag_origin = (
+            self._positions()[self._dragging] if self._dragging is not None else None
+        )
 
     def _on_drag_update(self, _gesture, offset_x: float, offset_y: float) -> None:
-        if self._dragging is None:
+        if self._dragging is None or self._drag_origin is None:
             return
-        start = self._positions()[self._dragging]
-        self._slots[self._dragging]["dpi"] = dpi_at(start + offset_x, self.get_width())
+        self._slots[self._dragging]["dpi"] = dpi_at(
+            self._drag_origin + offset_x, self.get_width()
+        )
         self.queue_draw()
         self._edited()
 
     def _on_drag_end(self, _gesture, offset_x: float, offset_y: float) -> None:
         self._dragging = None
+        self._drag_origin = None
 
     def _on_click(self, _gesture, presses: int, x: float, y: float) -> None:
         """A click without a drag opens the slot's popover."""

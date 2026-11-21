@@ -145,5 +145,76 @@ class HitTestTests(unittest.TestCase):
         self.assertIsNone(track._marker_at(5, track_y))
 
 
+class DragTests(unittest.TestCase):
+    """Dragging must move the marker the user grabbed, and only that one."""
+
+    def _track(self, slots):
+        from .support import has_cairo
+
+        if not has_cairo():
+            self.skipTest("needs pycairo and Gtk 4")
+        import gi
+
+        gi.require_version("Gtk", "4.0")
+        from gi.repository import Gtk
+
+        window = Gtk.Window()
+        track = DpiTrack()
+        track.set_slots(slots)
+        window.set_child(track)
+        window.set_default_size(900, 120)
+        window.present()
+        from gi.repository import GLib
+
+        context = GLib.MainContext.default()
+        for _ in range(80):
+            context.iteration(False)
+        return track
+
+    def test_a_drag_moves_the_grabbed_marker(self):
+        track = self._track([
+            {"dpi": 400, "default": False, "disabled": False},
+            {"dpi": 800, "default": True, "disabled": False},
+        ])
+        track_y = LABEL_BAND + MARKER_RADIUS
+        start = track._positions()[0]
+        track._on_drag_begin(None, start, track_y)
+        track._on_drag_update(None, 60.0, 0)
+        track._on_drag_end(None, 60.0, 0)
+        self.assertGreater(track.slots()[0]["dpi"], 400)
+        self.assertEqual(track.slots()[1]["dpi"], 800, "the other slot must not move")
+
+    def test_a_drag_does_not_drift_over_successive_updates(self):
+        """The origin must be fixed at drag-begin, not recomputed per update.
+
+        GTK reports the offset cumulatively from where the drag started. Adding
+        that to a position that has already moved double-counts it, so the
+        marker runs away from the pointer: a drag of 60px lands far past 60px.
+        """
+        track = self._track([
+            {"dpi": 400, "default": False, "disabled": False},
+            {"dpi": 800, "default": True, "disabled": False},
+        ])
+        track_y = LABEL_BAND + MARKER_RADIUS
+        start = track._positions()[0]
+        track._on_drag_begin(None, start, track_y)
+        # A real drag arrives as a series of updates with growing offsets.
+        for offset in (20.0, 40.0, 60.0):
+            track._on_drag_update(None, offset, 0)
+        track._on_drag_end(None, 60.0, 0)
+
+        expected = dpi_at(start + 60.0, track.get_width())
+        self.assertEqual(
+            track.slots()[0]["dpi"], expected,
+            "the marker must land where a 60px drag puts it",
+        )
+
+    def test_a_drag_that_grabs_nothing_changes_nothing(self):
+        track = self._track([{"dpi": 800, "default": False, "disabled": False}])
+        track._on_drag_begin(None, 5, 400)
+        track._on_drag_update(None, 100.0, 0)
+        self.assertEqual(track.slots()[0]["dpi"], 800)
+
+
 if __name__ == "__main__":
     unittest.main()
