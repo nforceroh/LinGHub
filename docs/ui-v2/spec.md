@@ -1,12 +1,13 @@
 # UI version 2 — specification
 
-Status: **draft, in grilling.** Sections marked *Settled* have been decided and
-can be built. Sections marked *Open* are questions not yet asked or not yet
-answered; nothing in them should be implemented.
+Status: **settled.** Every question asked so far is decided in §2. §3 records
+what the reference screenshots show, kept separate from what has been decided.
+§4 is empty, and §5 records what is already built.
 
 This document is the record of the design conversation, not a plan of record.
-When a section settles, it moves up and stops changing. When the whole document
-settles, it becomes the input to an ADR if any decision in it is hard to reverse.
+The build order is in §2.13. Two decisions are recorded as ADRs — the
+logarithmic DPI scale and the colour palette — and the config format change is
+an amendment to ADR-0004.
 
 Vocabulary follows [GLOSSARY.md](../../GLOSSARY.md). Where this document and the
 glossary disagree, the glossary wins and this document is wrong.
@@ -362,7 +363,39 @@ shows and what keeps the icon rail to three icons.
   place a write failure or a daemon error can appear regardless of which view you
   are on.
 
-### 2.13 Vocabulary
+### 2.13 Process
+
+*Settled in the 2026-11-21 grilling, questions Q70–Q74.*
+
+**v2 ships as a sequence**, each step independently shippable and leaving the app
+working:
+
+1. **The game display name and the config shape.** A data change everything else
+   reads, so it goes first.
+2. **The profile selector.** It replaces the profile list and unblocks the
+   header.
+3. **The navigation restructure.** Home plus the configuration screen with three
+   views; it moves everything else.
+4. **The colour palette and preset numbers.** Self-contained.
+5. **The manage-profiles canvas.** The largest, and it depends on 1 and 2.
+
+One branch that changed the data model, the navigation and the layout at once
+would mean nothing is testable until all of it is done.
+
+**ADRs**
+
+- **The logarithmic scale: yes.** Hard to reverse once users learn it,
+  surprising without the reason, and a real trade-off against linear. A future
+  reader would otherwise "fix" it to linear.
+- **Colour indexed by preset: yes.** The alternative — colour by sorted
+  position — is the more obvious design, and the reason it is wrong needs
+  recording.
+- **The two-level navigation: no.** A layout choice that is cheap to change and
+  needs no justification beyond the reference.
+- **The game display name: an amendment to ADR-0004**, not a new ADR. The format
+  change belongs with the decision that established the format.
+
+### 2.14 Vocabulary
 
 - The five DPI values are **DPI presets**, never "DPI slots". The bare word
   **Slot** always means a flash position a whole profile is loaded into.
@@ -494,17 +527,7 @@ All three views share a frame:
 
 ## 4. Open
 
-Nothing here is decided. Each item names the question, not an answer.
-
-### 4.1 Process
-
-- Does version 2 ship as one change or as a sequence of independently shippable
-  steps? The layout work already landed; the DPI track landed; the colour work
-  has not.
-- Does any decision here warrant an ADR? The candidates are the logarithmic
-  scale (hard to reverse once users learn it, surprising without the
-  proportional-perception reason) and the colour-indexed-by-preset rule (hard to
-  reverse once users learn the palette).
+Nothing. Every question asked so far is settled in §2.
 
 ---
 
@@ -525,6 +548,11 @@ For orientation, so this document is not read as a plan for work already done.
 | Colliding markers fanned out | built |
 | One label per distinct DPI | built |
 | `DPI preset` in the glossary | built |
+| Two-level navigation, home and three views | **not built** |
+| Profile selector dropdown | **not built** |
+| Manage-profiles canvas | **not built** |
+| Game display name and config shape | **not built** |
+| LIGHTSYNC view | **not built** |
 | Colour palette indexed by preset | **not built** |
 | Superscript preset number on labels | **not built** |
 | Neutral underline for the default | **not built** |

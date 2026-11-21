@@ -19,3 +19,29 @@ migration.
   state across files.
 - Concurrent edits by hand and by the UI can conflict; the daemon is the single
   writer and the UI edits through it.
+
+## Amendment: a game carries a display name
+
+A profile's `games` list used to hold bare executable strings:
+
+```json
+"games": ["WorldOfTanks.exe"]
+```
+
+The UI v2 manage-profiles canvas shows a game by a name the user chose, because
+`WorldOfTanks.exe` is not what a user calls the game. A game entry therefore
+gains an optional `name`:
+
+```json
+"games": [{"executable": "WorldOfTanks.exe", "name": "World of Tanks"}]
+```
+
+**The reader accepts both shapes.** A bare string is a game with no name, which
+is what every config written before this change holds. The writer emits the
+object form. This keeps the "no migration" property the original decision was
+chosen for: an old config keeps working, and a new one is readable by an old
+build only if it has no names — which is a narrower break than a version bump
+and a migration step for a field that is purely cosmetic.
+
+A nameless game is displayed as its executable with `.exe` stripped, so the
+empty state is honest rather than invented.
