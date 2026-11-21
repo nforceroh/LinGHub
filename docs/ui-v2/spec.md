@@ -187,6 +187,32 @@ hand. There is no game library, no install detection and no artwork, so the
 reference's `NOT INSTALLED` tiles and cover art have no counterpart. A game tile
 shows its display name and nothing else.
 
+**A game with no name shows its executable, minus `.exe`.** Every config written
+before this change has nameless games, so the empty state is the common case on
+first run. The stripped executable is honest — it is literally what the config
+says — and obvious enough that a user will fill the name in. Prettifying it
+would invent a name the user did not choose.
+
+**The reader accepts a bare string as a nameless game.** A config may hold
+`"games": ["WorldOfTanks.exe"]` or
+`"games": [{"executable": "WorldOfTanks.exe", "name": "World of Tanks"}]`. The
+writer emits the object form. This means no migration step, no version bump and
+no rollback story for a field that is purely cosmetic.
+
+**The display name is optional when adding a game**, defaulting to the stripped
+executable. Requiring it would block adding a game before you know what to call
+it.
+
+**`+ ADD GAME` asks for two fields in one dialog**: the executable to match, and
+an optional name. Picking from a list of running processes would only work while
+the game is running — exactly when the user is not configuring it — and a file
+chooser cannot reach a Wine executable's path.
+
+**A game belongs to its profile.** The canvas shows games above profiles as a
+way to navigate, not as a claim about ownership. Deleting a profile deletes its
+games with it; a game with no profile left matches nothing, and keeping it would
+mean a second list to maintain.
+
 **`PROFILES` is the only tab.** The reference's `MACROS`, `INTEGRATIONS` and
 `SETTINGS` tabs have no counterpart: there are no macros, no integrations, and
 settings live in the config file. A tab bar with three dead tabs is worse than
