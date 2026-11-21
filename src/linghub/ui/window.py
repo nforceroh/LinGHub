@@ -76,15 +76,6 @@ class MainWindow(Adw.ApplicationWindow):
         header = Adw.HeaderBar()
         header.set_title_widget(Adw.WindowTitle(title="LinGHub", subtitle=""))
         self._title = header.get_title_widget()
-        header.pack_end(self._build_main_menu())
-
-        # The selector lives in the header so it is present on every view: which
-        # profile you are editing is context for all of them.
-        self._selector = ProfileSelector(
-            on_chosen=self._choose_profile,
-            on_manage=self._open_manage_profiles,
-        )
-        header.pack_start(self._selector)
 
         self._back_button = Gtk.Button(icon_name="go-previous-symbolic")
         self._back_button.set_tooltip_text("Back to the device")
@@ -92,6 +83,16 @@ class MainWindow(Adw.ApplicationWindow):
         self._back_button.connect("clicked", lambda _b: self._show_view("home"))
         self._back_button.set_visible(False)
         header.pack_start(self._back_button)
+
+        # The selector lives in the header so it is present on every view: which
+        # profile you are editing is context for all of them. It sits at the
+        # right, before the menu, as the reference does.
+        self._selector = ProfileSelector(
+            on_chosen=self._choose_profile,
+            on_manage=self._open_manage_profiles,
+        )
+        header.pack_end(self._selector)
+        header.pack_end(self._build_main_menu())
 
         toolbar.add_top_bar(header)
 

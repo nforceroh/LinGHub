@@ -38,12 +38,20 @@ class ProfileSelector(Gtk.MenuButton):
         self._active: str | None = None
         self._editing: str | None = None
 
-        self.add_css_class("flat")
+        # Not flat: a MenuButton without the flat class gets the theme's
+        # bordered look, which is what the reference shows — a distinct control
+        # in the header's top right rather than a label that happens to open.
         self.set_tooltip_text("Choose the profile to edit and load")
 
+        content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        icon = Gtk.Image.new_from_icon_name("document-edit-symbolic")
+        content.append(icon)
         self._label = Gtk.Label(label="No profile")
         self._label.add_css_class("heading")
-        self.set_child(self._label)
+        content.append(self._label)
+        chevron = Gtk.Image.new_from_icon_name("pan-down-symbolic")
+        content.append(chevron)
+        self.set_child(content)
 
         # No set_parent: a MenuButton parents the popover it is given, and
         # doing it twice trips a GTK assertion.
