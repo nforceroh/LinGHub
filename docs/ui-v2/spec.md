@@ -285,6 +285,12 @@ shows and what keeps the icon rail to three icons.
   click-to-edit affordance.
 - A label shows the button's **function** (`Next Track`), not its physical name.
   The physical name (`Back (G4)`) moves to the tooltip.
+- **The bindings table stays, below the diagram.** The reference has no table,
+  but the diagram's labels only work when a binding has a short name. A macro or
+  a key chord has no label that fits on a leader line, and we do not yet have
+  logic to render those well. The table is the honest place for them, and it is
+  scannable in a way a diagram is not. Revisit when macros and key chords have a
+  readable short form.
 - **No `COMMANDS` / `KEYS` / `ACTIONS` / `MACROS` / `SYSTEM` tabs.** The left
   panel is a searchable list of what a button can be assigned to, which is what
   those tabs are a taxonomy for; with one taxonomy there is nothing to switch
@@ -329,6 +335,7 @@ one is named for the screen it shows.
 | [04-config-assignments.png](reference/04-config-assignments.png) | Configuration, Assignments view: command list left, labelled diagram right |
 | [05-config-dpi.png](reference/05-config-dpi.png) | Configuration, DPI view: settings panel left, DPI track right |
 | [06-config-lightsync.png](reference/06-config-lightsync.png) | Configuration, LIGHTSYNC view: effect panel left, mouse right |
+| [07-assignments-labels.png](reference/07-assignments-labels.png) | The Assignments diagram alone: leader lines from each label to its button |
 
 ### 3.1 What the home screen shows
 

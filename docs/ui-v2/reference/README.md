@@ -15,6 +15,7 @@ the screen they show rather than for the app they came from.
 | `04-config-assignments.png` | Configuration, Assignments view |
 | `05-config-dpi.png` | Configuration, DPI view |
 | `06-config-lightsync.png` | Configuration, LIGHTSYNC view |
+| `07-assignments-labels.png` | The Assignments diagram alone, with leader lines |
 
 ## Adding one
 
