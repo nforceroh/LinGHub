@@ -338,7 +338,31 @@ shows and what keeps the icon rail to three icons.
 - **The card carries no hotspots.** The diagram on the card is a product image,
   not a button selector. Hotspots move to the **bindings screen**.
 
-### 2.12 Vocabulary
+### 2.12 The window
+
+*Settled in the 2026-11-21 grilling, questions Q65–Q69.*
+
+- **A minimum width, not a compact mode.** A floor around 900px, below which the
+  window refuses to shrink. A compact mode is a second layout to build, test and
+  keep in sync, for a case that only arises if someone deliberately shrinks the
+  window.
+- **Keyboard navigation: tab order and the icon rail.** Every control reachable
+  by Tab, and the three view icons arrow-navigable as a group. That is the
+  baseline a GTK app is expected to meet. Full keyboard support for the
+  diagram's hotspots is not worth it — the table below is the keyboard path to
+  the same actions.
+- **The window does not remember its own size or pane position.** The desktop
+  already remembers the size, and that is what caused the too-tall-window bug
+  (#26). A second memory means two sources that can disagree; the `map` handler
+  already treats the remembered size as a suggestion, which is the right
+  relationship.
+- **The icon rail is icons with tooltips**, not labels. Three icons is few enough
+  to learn, and labels would widen the rail for no gain.
+- **The status line stays in the window header**, below the title. It is the only
+  place a write failure or a daemon error can appear regardless of which view you
+  are on.
+
+### 2.13 Vocabulary
 
 - The five DPI values are **DPI presets**, never "DPI slots". The bare word
   **Slot** always means a flash position a whole profile is loaded into.
@@ -472,15 +496,7 @@ All three views share a frame:
 
 Nothing here is decided. Each item names the question, not an answer.
 
-### 4.1 The window as a whole
-
-- Is there a compact mode, or a minimum size below which the layout reflows?
-- Does the window need a keyboard-navigation story? Nothing is currently
-  reachable without a pointer except the profile list.
-- Should the window remember its own size and pane positions, given the desktop
-  already remembers the size and that caused the too-tall-window bug?
-
-### 4.2 Process
+### 4.1 Process
 
 - Does version 2 ship as one change or as a sequence of independently shippable
   steps? The layout work already landed; the DPI track landed; the colour work
