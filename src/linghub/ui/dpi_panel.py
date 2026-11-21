@@ -15,6 +15,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk
 
 from . import panel_rules
+from .staged_edit import StagedEdit
 
 
 # The range ratbagd accepts for a G502; read from the device where possible.
@@ -27,11 +28,14 @@ class DpiPanel(Gtk.Box):
 
     def __init__(self, on_save):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        self._on_save = on_save
-        self._loading = False
-        self._baseline: list | None = None
         self._rows: list[dict] = []
         self._rates: tuple[int, ...] = ()
+        self._staged = StagedEdit(
+            self._values,
+            on_save=lambda values: on_save(*values),
+            on_restore=self._restore,
+            on_changed=self._on_changed,
+        )
 
         hint = Gtk.Label(xalign=0, wrap=True)
         hint.add_css_class("dim-label")
@@ -69,7 +73,7 @@ class DpiPanel(Gtk.Box):
         self._status.add_css_class("caption")
         self.append(self._status)
 
-        self._update_actions()
+        self._staged.mark_saved()
 
     # --- construction ----------------------------------------------------
 
@@ -104,26 +108,22 @@ class DpiPanel(Gtk.Box):
 
     def _on_toggled(self, index: int) -> None:
         """Only one slot may be the default, so ticking one clears the rest."""
-        if self._loading:
+        if self._staged.restoring_now:
             return
         current = [row["default"].get_active() for row in self._rows]
         wanted = panel_rules.default_mask(
             current, index, on=self._rows[index]["default"].get_active()
         )
-        self._loading = True
-        try:
+        with self._staged.restoring():
             for row, active in zip(self._rows, wanted):
                 row["default"].set_active(active)
-        finally:
-            self._loading = False
-        self._on_edited()
+        self._staged.edited()
 
     # --- state -----------------------------------------------------------
 
     def load(self, resolutions: list[dict], rates: tuple[int, ...], report_rate: int) -> None:
         """Fill the panel from a profile's DPI slots and rates."""
-        self._loading = True
-        try:
+        with self._staged.restoring():
             while len(self._rows) < len(resolutions):
                 self._rows.append(self._build_slot_row(len(self._rows)))
             for position, slot in enumerate(resolutions):
@@ -137,10 +137,7 @@ class DpiPanel(Gtk.Box):
             self._rate.set_model(Gtk.StringList.new(labels))
             if report_rate in self._rates:
                 self._rate.set_selected(self._rates.index(report_rate))
-        finally:
-            self._loading = False
-        self._baseline = self._values()
-        self._update_actions()
+        self._staged.mark_saved()
 
     def _values(self) -> list:
         slots = [
@@ -156,15 +153,12 @@ class DpiPanel(Gtk.Box):
 
     @property
     def dirty(self) -> bool:
-        return self._baseline is not None and self._values() != self._baseline
+        return self._staged.dirty
 
     def _on_edited(self, *_args) -> None:
-        if self._loading:
-            return
-        self._update_actions()
+        self._staged.edited()
 
-    def _update_actions(self) -> None:
-        changed = self.dirty
+    def _on_changed(self, changed: bool) -> None:
         self._save_button.set_sensitive(changed)
         self._revert_button.set_sensitive(changed)
         self._status.set_text(
@@ -172,27 +166,20 @@ class DpiPanel(Gtk.Box):
         )
 
     def _save(self) -> None:
-        if not self.dirty:
-            return
-        slots, rate = self._values()
-        self._on_save(slots, rate)
+        self._staged.save()
 
     def mark_saved(self) -> None:
-        self._baseline = self._values()
-        self._update_actions()
+        self._staged.mark_saved()
 
     def revert(self) -> None:
-        if self._baseline is None:
-            return
-        slots, rate = self._baseline
-        self._loading = True
-        try:
-            for row, (dpi, is_default, disabled) in zip(self._rows, slots):
-                row["spin"].set_value(dpi)
-                row["default"].set_active(is_default)
-                row["disabled"].set_active(disabled)
-            if rate in self._rates:
-                self._rate.set_selected(self._rates.index(rate))
-        finally:
-            self._loading = False
-        self._update_actions()
+        self._staged.revert()
+
+    def _restore(self, values) -> None:
+        """Put the baseline back into the widgets. Called inside restoring()."""
+        slots, rate = values
+        for row, (dpi, is_default, disabled) in zip(self._rows, slots):
+            row["spin"].set_value(dpi)
+            row["default"].set_active(is_default)
+            row["disabled"].set_active(disabled)
+        if rate in self._rates:
+            self._rate.set_selected(self._rates.index(rate))

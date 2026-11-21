@@ -19,6 +19,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk
 
 from .panel_rules import MODES, controls_for, duration_to_speed, speed_to_duration
+from .staged_edit import StagedEdit
 
 DEFAULT_COLOR = (255, 59, 16)
 DEFAULT_BRIGHTNESS = 255
@@ -30,11 +31,14 @@ class LedPanel(Gtk.Box):
 
     def __init__(self, on_save, on_revert=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        self._on_save = on_save
         self._on_revert = on_revert
-        self._loading = False
-        self._baseline: tuple | None = None
         self._clean_hint = ""
+        self._staged = StagedEdit(
+            self._values,
+            on_save=lambda values: on_save(*values),
+            on_restore=self._restore,
+            on_changed=self._on_changed,
+        )
 
         self._color_button = Gtk.ColorButton()
         self._color_button.set_title("LED colour")
@@ -81,8 +85,7 @@ class LedPanel(Gtk.Box):
         self._brightness.set_value(DEFAULT_BRIGHTNESS)
         self._speed.set_value(self._duration_to_speed(DEFAULT_DURATION))
         self._sync_sensitivity()
-        self._update_actions()
-        self._baseline = self._values()
+        self._staged.mark_saved()
 
     # --- construction ----------------------------------------------------
 
@@ -115,8 +118,7 @@ class LedPanel(Gtk.Box):
         for all of them. If they ever disagree in the config, the panel shows
         the first and writing will make them agree.
         """
-        self._loading = True
-        try:
+        with self._staged.restoring():
             if not leds:
                 self._clean_hint = "This profile has no lighting recorded."
                 self._hint.set_text(self._clean_hint)
@@ -134,11 +136,8 @@ class LedPanel(Gtk.Box):
             )
             self._clean_hint = f"{len(leds)} LED zone(s) set together."
             self._hint.set_text(self._clean_hint)
-        finally:
-            self._loading = False
         self._sync_sensitivity()
-        self._baseline = self._values()
-        self._update_actions()
+        self._staged.mark_saved()
 
     @property
     def mode(self) -> str:
@@ -175,20 +174,18 @@ class LedPanel(Gtk.Box):
     @property
     def dirty(self) -> bool:
         """True when the panel differs from what was last loaded or saved."""
-        return self._baseline is not None and self._values() != self._baseline
+        return self._staged.dirty
 
     def _on_mode_changed(self, *_args) -> None:
         self._sync_sensitivity()
-        self._on_edited()
+        self._staged.edited()
 
     def _on_edited(self, *_args) -> None:
         """A control changed: record it, but do not touch the mouse."""
-        if self._loading:
-            return
-        self._update_actions()
+        self._staged.edited()
 
-    def _update_actions(self) -> None:
-        changed = self.dirty
+    def _on_changed(self, changed: bool) -> None:
+        """The staged edit says whether the panel is dirty; show it."""
         self._save_button.set_sensitive(changed)
         self._revert_button.set_sensitive(changed)
         if changed:
@@ -197,32 +194,26 @@ class LedPanel(Gtk.Box):
             self._hint.set_text(self._clean_hint)
 
     def _save(self) -> None:
-        if not self.dirty:
-            return
-        self._on_save(*self._values())
+        self._staged.save()
 
     def mark_saved(self) -> None:
         """Accept the current values as the saved state."""
-        self._baseline = self._values()
-        self._update_actions()
+        self._staged.mark_saved()
 
     def revert(self) -> None:
         """Throw away unsaved edits and go back to the saved values."""
-        if self._baseline is None:
-            return
-        mode, brightness, duration, color = self._baseline
-        self._loading = True
-        try:
-            for position, (name, _label) in enumerate(MODES):
-                if name == mode:
-                    self._mode.set_selected(position)
-                    break
-            self._brightness.set_value(brightness)
-            self._speed.set_value(self._duration_to_speed(duration))
-            self._color_button.set_rgba(self._rgba(color))
-        finally:
-            self._loading = False
+        self._staged.revert()
+
+    def _restore(self, values) -> None:
+        """Put the baseline back into the widgets. Called inside restoring()."""
+        mode, brightness, duration, color = values
+        for position, (name, _label) in enumerate(MODES):
+            if name == mode:
+                self._mode.set_selected(position)
+                break
+        self._brightness.set_value(brightness)
+        self._speed.set_value(self._duration_to_speed(duration))
+        self._color_button.set_rgba(self._rgba(color))
         self._sync_sensitivity()
         if self._on_revert is not None:
             self._on_revert()
-        self._update_actions()
