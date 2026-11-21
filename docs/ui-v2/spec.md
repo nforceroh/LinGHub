@@ -285,6 +285,15 @@ shows and what keeps the icon rail to three icons.
   click-to-edit affordance.
 - A label shows the button's **function** (`Next Track`), not its physical name.
   The physical name (`Back (G4)`) moves to the tooltip.
+- **The diagram keeps its labels, and the table sits below it.** The labels make
+  the diagram readable without cross-referencing; the table is the complete
+  list. Both are clickable, per Q51.
+- **A label falls back to the button's physical name** (`Back (G4)`) when the
+  binding has no short form — a macro or a long chord. The full binding is in
+  the tooltip and the table, so a label always says something true rather than
+  truncating a chord into nonsense.
+- **The table keeps all four columns.** `Ratbag` is what the diagram's hotspots
+  are numbered with, so dropping it would break the link between the two.
 - **The bindings table stays, below the diagram.** The reference has no table,
   but the diagram's labels only work when a binding has a short name. A macro or
   a key chord has no label that fits on a leader line, and we do not yet have
