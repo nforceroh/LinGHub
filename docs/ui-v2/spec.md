@@ -451,33 +451,14 @@ All three views share a frame:
 
 Nothing here is decided. Each item names the question, not an answer.
 
-### 4.1 The bindings table
-
-- The table has four columns (`Manual`, `Function`, `Does`, `Ratbag`). `Manual`
-  exists only to help someone holding the printed manual, and `Ratbag` is the
-  index the diagram labels. Is four columns the right shape for a compact
-  window, or should the manual number fold into the function cell?
-- Rows are click targets that open the binding editor. Is a row the right
-  affordance, or should the `Does` cell be the only target so the row can carry
-  other controls later?
-- The table is not sortable and not filterable. With eleven rows that is fine.
-  Does it stay fine?
-
-### 4.2 The diagram
-
-- The diagram is a static image with eleven hotspots. Should a hotspot show its
-  current binding on hover, or is the table the only place bindings are read?
-- The image is cropped to the mouse. Is there a use for the space beside it, or
-  does it stay empty?
-
-### 4.4 The lighting panel
+### 4.1 The lighting panel
 
 - The G502 has two LED zones that read as one strip, so the panel drives them
   together. Should the zones be separately addressable?
 - Effects are `off`, `fixed colour`, `cycle` and `breathing`. Is a dropdown the
   right control, or should the effect be a row of buttons?
 
-### 4.5 The window as a whole
+### 4.2 The window as a whole
 
 - Is there a compact mode, or a minimum size below which the layout reflows?
 - Does the window need a keyboard-navigation story? Nothing is currently
@@ -485,7 +466,7 @@ Nothing here is decided. Each item names the question, not an answer.
 - Should the window remember its own size and pane positions, given the desktop
   already remembers the size and that caused the too-tall-window bug?
 
-### 4.6 Process
+### 4.3 Process
 
 - Does version 2 ship as one change or as a sequence of independently shippable
   steps? The layout work already landed; the DPI track landed; the colour work
