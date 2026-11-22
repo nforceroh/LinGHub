@@ -69,20 +69,6 @@ class MainWindow(Adw.ApplicationWindow):
         self._view: DaemonView | None = None
         self._refresh_task = None
         self._refresh_pending = False
-        # The profile management flows: prompts, validation and writes. The
-        # window supplies its collaborators; the module owns the shape each
-        # flow shares.
-        self._actions = ProfileActions(
-            self,
-            client,
-            self._writes,
-            report=self._status.set_text,
-            editing_profile=lambda: self._editing_profile(),
-            profile_names=lambda: self._state.profiles,
-            desktop_profile=lambda: self._state.desktop_profile,
-            profile_of_game=self._profile_of_game,
-            on_async_error=self._on_async_error,
-        )
         self._daemon_version = version.DaemonVersion.not_running()
 
         self.set_default_size(*self._preferred_size())
@@ -135,6 +121,21 @@ class MainWindow(Adw.ApplicationWindow):
         # Shown only when the daemon runs code other than this window's.
         self._banner = Adw.Banner()
         toolbar.add_top_bar(self._banner)
+
+        # The profile management flows: prompts, validation and writes. The
+        # window supplies its collaborators; the module owns the shape each
+        # flow shares. Built after the status line, which its reports land on.
+        self._actions = ProfileActions(
+            self,
+            client,
+            self._writes,
+            report=self._status.set_text,
+            editing_profile=lambda: self._editing_profile(),
+            profile_names=lambda: self._state.profiles,
+            desktop_profile=lambda: self._state.desktop_profile,
+            profile_of_game=self._profile_of_game,
+            on_async_error=self._on_async_error,
+        )
 
         # Three views in one window: the home screen the window opens on, the
         # editor reached by clicking the mouse, and the manage-profiles canvas
