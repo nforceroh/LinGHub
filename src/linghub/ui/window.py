@@ -24,6 +24,7 @@ from .binding_editor import BindingEditor
 from .buttonmap import BUTTONS, DIAGRAM_IMAGE, describe, manual_number
 from .client import DaemonClient
 from .daemon_write import DaemonWrite
+from . import edit_apply
 from .pending_edits import PendingEditsFor
 from .profile_selector import ProfileSelector
 from .home_card import HomeCard
@@ -663,41 +664,10 @@ class MainWindow(Adw.ApplicationWindow):
         edits = self._pending.for_profile(profile)
 
         async def change() -> bool:
-            for index, edit in sorted(edits.bindings.items()):
-                if edit.kind == "disabled":
-                    ok = await self._client.clear_binding(profile, index)
-                else:
-                    ok = await self._client.set_binding(
-                        profile, index, edit.kind, str(edit.value)
-                    )
-                if not ok:
-                    self._status.set_text(f"The daemon rejected button {index}.")
-                    return False
-
-            if edits.resolutions is not None:
-                for index, (dpi, is_default, disabled) in enumerate(edits.resolutions):
-                    if not await self._client.set_resolution(
-                        profile, index, dpi,
-                        make_default=is_default, disabled=disabled,
-                    ):
-                        self._status.set_text(
-                            f"The daemon rejected DPI preset {index + 1}."
-                        )
-                        return False
-
-            if edits.report_rate is not None:
-                if not await self._client.set_report_rate(profile, edits.report_rate):
-                    self._status.set_text("The daemon rejected that report rate.")
-                    return False
-
-            if edits.leds is not None:
-                leds = edits.leds
-                if not await self._client.set_leds(
-                    profile, leds["mode"], leds["brightness"],
-                    leds["duration"], leds["color"],
-                ):
-                    self._status.set_text("The daemon rejected that lighting.")
-                    return False
+            rejected = await edit_apply.apply(edits, self._client)
+            if rejected is not None:
+                self._status.set_text(rejected)
+                return False
             return True
 
         def settle() -> None:
