@@ -127,7 +127,9 @@ class MainWindow(Adw.ApplicationWindow):
         # flow shares. Built after the status line, which its reports land on.
         self._actions = ProfileActions(
             self,
-            client,
+            # A callable, not the client itself: the window's tests swap
+            # _client after construction, and the module must follow.
+            lambda: self._client,
             self._writes,
             report=self._status.set_text,
             editing_profile=lambda: self._editing_profile(),

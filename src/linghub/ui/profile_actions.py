@@ -53,34 +53,6 @@ class ProfileActions:
 
     # --- interface --------------------------------------------------------
 
-    def prompt_rename_profile(self) -> None:
-        old = self._editing_profile()
-        if old is None:
-            self._report("Select a profile to rename.")
-            return
-        self._ask_for_text(
-            title="Rename profile",
-            label="New name",
-            initial=old,
-            on_accept=lambda new, _exec, dialog: run_and_report(
-                self._rename_profile(old, new.strip(), dialog),
-                self._on_async_error,
-            ),
-        )
-
-    def prompt_delete_profile(self) -> None:
-        name = self._editing_profile()
-        if name is None:
-            self._report("Select a profile to delete.")
-            return
-        if name == self._desktop_profile():
-            self._report("The desktop profile cannot be deleted.")
-            return
-        self._confirm_delete(
-            name,
-            body="Its bindings, DPI and lighting settings are lost.",
-        )
-
     def prompt_delete_from_canvas(self, name: str) -> None:
         if name == self._desktop_profile():
             self._report("The desktop profile cannot be deleted.")
@@ -149,23 +121,6 @@ class ProfileActions:
         run_and_report(do(), self._on_async_error)
 
     # --- flows ------------------------------------------------------------
-
-    async def _rename_profile(self, old: str, new: str, dialog) -> None:
-        if not new or new == old:
-            dialog.show_error("Enter a different name.")
-            return
-
-        async def change() -> bool:
-            return await self._client().rename_profile(old, new)
-
-        await self._writes.run(
-            change,
-            report=dialog.show_error,
-            failure="Could not rename the profile",
-            rejected=f"Cannot rename to {new!r}. The name may be in use.",
-            success=f"Renamed {old} to {new}.",
-            on_success=dialog.close,
-        )
 
     async def _delete_profile(self, name: str) -> None:
         async def change() -> bool:

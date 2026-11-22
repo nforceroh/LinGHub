@@ -193,19 +193,9 @@ class ProfileManagementUiTests(unittest.TestCase):
 
         window = self._window()
         window._client = FakeClient()
-        window._editing = "desktop"
-        window._actions.prompt_delete_profile()
+        window._actions.prompt_delete_from_canvas("desktop")
         self.assertEqual(calls, [], "the desktop profile was sent to the daemon")
         self.assertIn("cannot be deleted", window._status.get_text().lower())
-
-    def test_delete_with_no_profile_says_so(self):
-        from linghub.daemon_view import ViewState
-
-        window = self._window()
-        window._state = ViewState()
-        window._editing = None
-        window._actions.prompt_delete_profile()
-        self.assertIn("select a profile", window._status.get_text().lower())
 
 
 def _in_loop(fn, *args):
