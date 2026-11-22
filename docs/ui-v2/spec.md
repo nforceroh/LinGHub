@@ -317,18 +317,14 @@ shows and what keeps the icon rail to three icons.
   read as one light; separate control would double every control for a
   distinction nobody can see. The config already stores them as a list, so
   separating them stays possible.
-- **The effect is a row of four buttons**, not a dropdown. Four options is where
-  a segmented control beats a dropdown: every option visible, one click instead
-  of two. The reference needs a dropdown because it has more effects.
+- **The effect uses a dropdown** with the four supported hardware modes: Off,
+  Fixed colour, Cycle colours and Breathing.
 - **No `PRESETS` / `FREESTYLE` / `ANIMATIONS` tabs.** One taxonomy needs no tabs
   to switch between taxonomies.
 - **No `SYNC LIGHTING OPTIONS`.** We control one device; a button that syncs to
   nothing is worse than no button.
-- **The mouse image is shown, with the current colour applied to its zones.**
-  This is the one view where the image shows the effect of a change, and it
-  fills the space the settings panel leaves.
-- **The preview updates live** as a control moves, while the mouse stays
-  unchanged until Apply. The preview is a drawing, not a write.
+- **No mouse image or live drawing** is shown on the LIGHTSYNC view. The controls
+  fill the content area, and edits remain staged until Apply.
 
 ### 2.11 The home card
 
@@ -483,7 +479,8 @@ All three views share a frame:
   is a filled blue rounded square.
 - A **settings panel** on the left of the content area, with a lock icon in its
   top right.
-- The **mouse image** on the right, large.
+- The Assignments and DPI views may use the mouse diagram or track to the right;
+  LIGHTSYNC has no mouse-image preview.
 
 **Assignments** adds:
 
@@ -506,10 +503,9 @@ All three views share a frame:
 
 **LIGHTSYNC** adds:
 
-- Tabs `PRESETS`, `FREESTYLE`, `ANIMATIONS`.
-- `EFFECT` (a dropdown, `COLOR WAVE`), `CYCLE` (`HORIZONTAL`), `RATE`
-  (`5000ms`) and `BRIGHTNESS` (`100%`).
-- A `SYNC LIGHTING OPTIONS` button at the bottom right.
+- No `PRESETS` / `FREESTYLE` / `ANIMATIONS` tabs.
+- `EFFECT`, `COLOUR`, `BRIGHTNESS` and `RATE` settings.
+- No mouse-image preview or `SYNC LIGHTING OPTIONS` button.
 
 ### 3.5 Facts verified for this screen
 
@@ -569,8 +565,8 @@ For orientation, so this document is not read as a plan for work already done.
 | Manage-profiles canvas | built |
 | Game display name and config shape | built |
 | Duplicate profile, rename a game | built |
-| LIGHTSYNC view | **not built** |
-| Colour palette indexed by preset | **not built** |
-| Superscript preset number on labels | **not built** |
-| Neutral underline for the default | **not built** |
-| `DPI preset` rename in user-visible strings | **not built** |
+| LIGHTSYNC view | built |
+| Colour palette indexed by preset | built |
+| Superscript preset number on labels | built |
+| Neutral underline for the default | built |
+| `DPI preset` rename in user-visible strings | built |

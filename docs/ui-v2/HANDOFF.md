@@ -3,6 +3,12 @@
 Everything needed to continue lives in the repo. This file is the map; the
 branch is `ui-v2`, pushed to `origin`, tip `b88e705`.
 
+The configuration work has continued after that handoff: the Assignments view
+now has its Default / Second mode toggle, DPI presets carry stable index-based
+colours and a legend, and LIGHTSYNC uses a four-effect dropdown with
+brightness and rate controls and no mouse-image preview. The current worktree
+is uncommitted and should be regression-tested before it is committed.
+
 ## Where things stand
 
 The UI v2 redesign is mid-build on branch `ui-v2`. Built and committed:

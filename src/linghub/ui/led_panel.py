@@ -26,6 +26,54 @@ DEFAULT_BRIGHTNESS = 255
 DEFAULT_DURATION = 8000
 
 
+class EffectControl(Gtk.MenuButton):
+    """The effect picker as a popover listing the four hardware effects."""
+
+    def __init__(self):
+        super().__init__()
+        self._selected = 1  # Fixed colour, the hardware default.
+        self.set_always_show_arrow(True)
+        self._label = Gtk.Label(label=MODES[self._selected][1], xalign=0)
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        box.append(self._label)
+        self.set_child(box)
+
+        popover = Gtk.Popover()
+        list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        list_box.set_margin_top(8)
+        list_box.set_margin_bottom(8)
+        list_box.set_margin_start(8)
+        list_box.set_margin_end(8)
+
+        heading = Gtk.Label(label="EFFECTS", xalign=0)
+        heading.add_css_class("heading")
+        list_box.append(heading)
+
+        for position, (_name, label) in enumerate(MODES):
+            row = Gtk.Button(label=label)
+            row.add_css_class("flat")
+            row.set_halign(Gtk.Align.FILL)
+            row.connect("clicked", lambda _b, index=position: self._choose(index))
+            list_box.append(row)
+
+        popover.set_child(list_box)
+        self.set_popover(popover)
+
+    def _choose(self, position: int) -> None:
+        self._selected = position
+        self._label.set_text(MODES[position][1])
+        self.emit("notify::selected-item")
+        self.get_popover().popdown()
+
+    def get_selected(self) -> int:
+        return self._selected
+
+    def set_selected(self, position: int) -> None:
+        position = max(0, min(len(MODES) - 1, int(position)))
+        self._selected = position
+        self._label.set_text(MODES[position][1])
+
+
 class LedPanel(Gtk.Box):
     """Colour, effect, brightness and speed for one profile's lighting."""
 
@@ -40,29 +88,60 @@ class LedPanel(Gtk.Box):
             on_changed=self._on_changed,
         )
 
-        # Two columns rather than four stacked rows: the panel sits beside the
-        # DPI track, and four rows made it the tallest thing in the window.
-        grid = Gtk.Grid()
-        grid.set_column_spacing(12)
-        grid.set_row_spacing(6)
+        # A compact settings panel mirrors the reference: one choice per row,
+        # with the live value shown beside each slider. The panel keeps a
+        # natural width rather than stretching, so the rows read as a form
+        # instead of spanning the whole window.
+        self.set_valign(Gtk.Align.START)
+        self.set_size_request(320, -1)
+        self.set_margin_top(6)
+        self.set_margin_bottom(6)
+        self.set_margin_start(6)
+        self.set_margin_end(6)
 
         self._color_button = Gtk.ColorButton()
         self._color_button.set_title("LED colour")
         self._color_button.connect("notify::rgba", self._on_edited)
-        grid.attach(self._labelled("Colour", self._color_button), 0, 0, 1, 1)
 
-        self._mode = Gtk.DropDown.new_from_strings([label for _m, label in MODES])
+        effect = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        effect.append(self._field_label("Effect"))
+        self._mode = EffectControl()
         self._mode.connect("notify::selected", self._on_mode_changed)
-        grid.attach(self._labelled("Effect", self._mode), 1, 0, 1, 1)
+        self._mode.set_hexpand(True)
+        self._mode.set_halign(Gtk.Align.FILL)
+        effect.append(self._mode)
+        self.append(effect)
+
+        colour = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        colour.append(self._field_label("Colour"))
+        self._color_button.set_halign(Gtk.Align.START)
+        colour.append(self._color_button)
+        self.append(colour)
 
         self._brightness = Gtk.Scale.new_with_range(
             Gtk.Orientation.HORIZONTAL, 0, 255, 1
         )
-        self._brightness.set_draw_value(True)
-        self._brightness.set_value_pos(Gtk.PositionType.RIGHT)
+        self._brightness.set_draw_value(False)
         self._brightness.set_hexpand(True)
         self._brightness.connect("value-changed", self._on_edited)
-        grid.attach(self._labelled("Brightness", self._brightness), 0, 1, 1, 1)
+        self._brightness_value = Gtk.Label(label="255", xalign=1)
+        self._brightness_value.add_css_class("heading")
+        brightness = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        brightness.append(self._field_label("Brightness"))
+        brightness_row = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=12,
+        )
+        brightness_row.append(self._brightness)
+        brightness_row.append(self._brightness_value)
+        brightness.append(brightness_row)
+        self.append(brightness)
+        self._brightness.connect(
+            "value-changed",
+            lambda *_args: self._brightness_value.set_text(
+                str(round(self._brightness.get_value()))
+            ),
+        )
 
         # Speed is expressed as a duration, but "fast/slow" is what a user
         # actually thinks in, so the slider is inverted: left is fastest.
@@ -70,10 +149,22 @@ class LedPanel(Gtk.Box):
         self._speed.set_draw_value(False)
         self._speed.set_hexpand(True)
         self._speed.connect("value-changed", self._on_edited)
-        self._speed_row = self._labelled("Speed", self._speed)
-        grid.attach(self._speed_row, 1, 1, 1, 1)
-
-        self.append(grid)
+        self._speed_value = Gtk.Label(label="8000ms", xalign=1)
+        self._speed_value.add_css_class("heading")
+        speed = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        speed.append(self._field_label("Rate"))
+        speed_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        speed_row.append(self._speed)
+        speed_row.append(self._speed_value)
+        speed.append(speed_row)
+        self._speed_row = speed
+        self.append(speed)
+        self._speed.connect(
+            "value-changed",
+            lambda *_args: self._speed_value.set_text(
+                f"{self._speed_to_duration(self._speed.get_value())}ms"
+            ),
+        )
 
         self._hint = Gtk.Label(xalign=0, wrap=True)
         self._hint.add_css_class("dim-label")
@@ -91,12 +182,15 @@ class LedPanel(Gtk.Box):
 
     def _labelled(self, text: str, widget: Gtk.Widget) -> Gtk.Widget:
         row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        label = Gtk.Label(label=text, xalign=0)
-        label.add_css_class("caption")
-        label.add_css_class("dim-label")
+        label = self._field_label(text)
         row.append(label)
         row.append(widget)
         return row
+
+    def _field_label(self, text: str) -> Gtk.Label:
+        label = Gtk.Label(label=text, xalign=0)
+        label.add_css_class("heading")
+        return label
 
     @staticmethod
     def _rgba(color: tuple[int, int, int]):
@@ -122,6 +216,7 @@ class LedPanel(Gtk.Box):
             if not leds:
                 self._clean_hint = "This profile has no lighting recorded."
                 self._hint.set_text(self._clean_hint)
+                self._sync_sensitivity()
                 return
             first = leds[min(leds)]
             mode = first.get("mode", "on")

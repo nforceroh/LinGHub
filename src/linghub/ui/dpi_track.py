@@ -1,6 +1,6 @@
 """A one-line DPI track: every slot as a draggable marker on a shared scale.
 
-The five slot rows this replaces spent a row each on a number that is really a
+The five DPI preset rows this replaces spent a row each on a number that is really a
 position on a scale, and the scale is the thing a user reasons about ("800 is
 here, 1600 is there"). One track shows all five at once, in the space of a
 single row.
@@ -36,6 +36,49 @@ from . import panel_rules
 # The range ratbagd accepts for a G502; read from the device where possible.
 MIN_DPI = 100
 MAX_DPI = 25600
+
+# Preset identity is indexed, not positional: preset 1 stays white even if
+# another preset is moved below it.
+PRESET_COLORS: tuple[tuple[float, float, float], ...] = (
+    (1.00, 1.00, 1.00),
+    (1.00, 0.55, 0.24),
+    (0.20, 0.78, 0.74),
+    (1.00, 0.82, 0.25),
+    (0.68, 0.48, 0.88),
+)
+
+
+def preset_color(index: int) -> tuple[float, float, float]:
+    """The stable track colour for a zero-based DPI preset index."""
+    return PRESET_COLORS[index % len(PRESET_COLORS)]
+
+
+_SUPERSCRIPTS = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
+
+
+def superscript_number(number: int) -> str:
+    """Render a DPI preset number as a compact superscript."""
+    return str(number).translate(_SUPERSCRIPTS)
+
+
+def label_parts(dpi: int, preset_indices: list[int]) -> list[tuple[str, tuple[float, float, float], int]]:
+    """The text and colours needed to draw one shared DPI label."""
+    if len(preset_indices) == 1:
+        index = preset_indices[0]
+        return [
+            (
+                f"{superscript_number(index + 1)}{dpi}",
+                preset_color(index),
+                11,
+            )
+        ]
+    return [
+        *[
+            (superscript_number(index + 1), preset_color(index), 9)
+            for index in preset_indices
+        ],
+        (str(dpi), (1.0, 1.0, 1.0), 11),
+    ]
 
 # How far apart colliding markers are drawn, in pixels.
 COLLISION_OFFSET = 14
@@ -175,17 +218,24 @@ class DpiTrack(Gtk.DrawingArea):
         value is a property of the position, so it is labelled once, centred on
         the group. Groups that would still collide move up a row.
         """
-        groups: dict[int, list[float]] = {}
+        groups: dict[int, list[tuple[float, int]]] = {}
         for index, x in enumerate(positions):
-            groups.setdefault(self._slots[index]["dpi"], []).append(x)
+            groups.setdefault(self._slots[index]["dpi"], []).append((x, index))
 
         occupied: list[list[tuple[float, float]]] = [[], []]
-        for dpi, xs in sorted(groups.items(), key=lambda item: item[1][0]):
+        for dpi, entries in sorted(groups.items(), key=lambda item: item[1][0][0]):
+            xs = [x for x, _index in entries]
+            preset_indices = [index for _x, index in entries]
             centre = sum(xs) / len(xs)
             is_default = any(
                 slot["default"] for slot in self._slots if slot["dpi"] == dpi
             )
-            half = self._text_width(cr, str(dpi), 11, bold=is_default) / 2
+            parts = label_parts(dpi, preset_indices)
+            total_width = sum(
+                self._text_width(cr, text, size)
+                for text, _color, size in parts
+            )
+            half = total_width / 2
             span = (centre - half - 4, centre + half + 4)
             row = 0
             for candidate in (0, 1):
@@ -197,10 +247,15 @@ class DpiTrack(Gtk.DrawingArea):
 
             label_y = (track_y - MARKER_RADIUS - 10
                        - row * LABEL_ROW_HEIGHT)
-            self._text(cr, str(dpi), centre, label_y, size=11,
-                       centre=True, bold=is_default)
+            left = centre - half
+            for text, color, size in parts:
+                self._text(
+                    cr, text, left, label_y, size=size,
+                    rgb=color, alpha=1.0,
+                )
+                left += self._text_width(cr, text, size)
             if is_default:
-                cr.set_source_rgba(0.36, 0.62, 0.98, 1.0)
+                cr.set_source_rgba(1.0, 1.0, 1.0, 1.0)
                 cr.set_line_width(2)
                 cr.move_to(centre - half, label_y + 9)
                 cr.line_to(centre + half, label_y + 9)
@@ -230,12 +285,11 @@ class DpiTrack(Gtk.DrawingArea):
     def _draw_marker(self, cr, index: int, x: float, track_y: float) -> None:
         slot = self._slots[index]
         disabled = bool(slot.get("disabled"))
-        is_default = bool(slot.get("default"))
 
         # A disabled slot is drawn hollow and dimmed: it is still on the track
         # so it can be re-enabled, but it is not part of the mouse's cycle.
         alpha = 0.35 if disabled else 1.0
-        cr.set_source_rgba(0.36, 0.62, 0.98, alpha)
+        cr.set_source_rgba(*preset_color(index), alpha)
         # new_sub_path, because cairo keeps the current path across stroke():
         # without it each arc appends to the previous marker's path and the
         # fill joins them into one shape spanning the whole track.
@@ -249,13 +303,14 @@ class DpiTrack(Gtk.DrawingArea):
 
     def _text(self, cr, text: str, x: float, y: float, *, size: int,
               centre: bool = False, bold: bool = False,
-              alpha: float = 0.85) -> None:
+              alpha: float = 0.85,
+              rgb: tuple[float, float, float] = (1.0, 1.0, 1.0)) -> None:
         layout = self.create_pango_layout(text)
         layout.set_font_description(
             Pango.FontDescription(f"{'Bold ' if bold else ''}{size}")
         )
         text_width, text_height = layout.get_pixel_size()
-        cr.set_source_rgba(1, 1, 1, alpha)
+        cr.set_source_rgba(*rgb, alpha)
         cr.move_to(x - text_width / 2 if centre else x, y - text_height / 2)
         PangoCairo.show_layout(cr, layout)
 
@@ -312,9 +367,22 @@ class DpiTrack(Gtk.DrawingArea):
         box.set_margin_start(10)
         box.set_margin_end(10)
 
-        heading = Gtk.Label(label=f"Slot {index + 1}", xalign=0)
+        heading_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        swatch = Gtk.DrawingArea()
+        swatch.set_content_width(12)
+        swatch.set_content_height(12)
+        rgb = preset_color(index)
+        swatch.set_draw_func(
+            lambda _area, cr, _w, _h, color=rgb:
+            (cr.set_source_rgba(*color, 1.0),
+             cr.arc(6, 6, 5, 0, 2 * math.pi),
+             cr.fill())
+        )
+        heading_row.append(swatch)
+        heading = Gtk.Label(label=f"DPI preset {index + 1}", xalign=0)
         heading.add_css_class("heading")
-        box.append(heading)
+        heading_row.append(heading)
+        box.append(heading_row)
 
         spin_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         spin_row.append(Gtk.Label(label="DPI", xalign=0))

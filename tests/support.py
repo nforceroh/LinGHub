@@ -155,7 +155,9 @@ def make_window(
         from linghub.ui.dpi_panel import DpiPanel
         from linghub.ui.led_panel import LedPanel
 
-        window._led_panel = LedPanel(on_save=lambda *a: None)
+        window._led_panel = LedPanel(
+            on_save=lambda *a: None,
+        )
         window._dpi_panel = DpiPanel(on_save=lambda *a: None)
     else:
         window._led_panel = None

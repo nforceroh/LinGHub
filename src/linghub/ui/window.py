@@ -73,7 +73,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._daemon_version = version.DaemonVersion.not_running()
 
         self.set_default_size(*self._preferred_size())
-        self.connect("map", lambda _w: self._fit_to_screen())
+        self.connect("map", self._on_map)
 
         toolbar = Adw.ToolbarView()
         header = Adw.HeaderBar()
@@ -167,6 +167,18 @@ class MainWindow(Adw.ApplicationWindow):
             min(wanted_width, int(geometry.width * 0.92)),
             min(wanted_height, int(geometry.height * 0.88)),
         )
+
+    def _on_map(self, _window) -> None:
+        """Put the window fully on-screen the first time it is shown.
+
+        The desktop remembers a window position per application id, and a
+        position saved when the window's minimum width exceeded the screen
+        keeps restoring half off-screen. Maximizing overrides it; the user
+        can unmaximize to whatever size they want afterwards.
+        """
+        self._fit_to_screen()
+        if not self.is_maximized():
+            self.maximize()
 
     def _fit_to_screen(self) -> None:
         """Shrink a window that is larger than the screen it opened on.
@@ -262,7 +274,10 @@ class MainWindow(Adw.ApplicationWindow):
 
         split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         split.set_wide_handle(True)
-        split.set_position(300)
+        # 360px: wide enough for the four group tabs and the choice labels
+        # to read without ellipsizing. Narrower defaults squeezed the tab row
+        # and left every row caption cut off until the divider was dragged.
+        split.set_position(390)
         split.set_start_child(self._assignment_sidebar)
         split.set_end_child(right)
         return split
@@ -287,7 +302,11 @@ class MainWindow(Adw.ApplicationWindow):
         box.set_margin_start(18)
         box.set_margin_end(18)
         box.append(self._section_label("LIGHTSYNC"))
-        self._led_panel = LedPanel(on_save=self._on_led_saved)
+        self._led_panel = LedPanel(
+            on_save=self._on_led_saved,
+        )
+        self._led_panel.set_hexpand(False)
+        self._led_panel.set_halign(Gtk.Align.START)
         box.append(self._led_panel)
         return box
 
@@ -301,6 +320,7 @@ class MainWindow(Adw.ApplicationWindow):
         if IMAGE.exists():
             self._diagram = MouseDiagram(str(IMAGE))
             self._diagram.connect("button-selected", self._on_button_selected)
+            self._diagram.connect("assignment-dropped", self._on_assignment_dropped)
             # No Frame: it drew a border and a filled background around the
             # image, which has a transparent background of its own. The image
             # sits directly in the pane, so the UI's background shows through.
@@ -661,7 +681,7 @@ class MainWindow(Adw.ApplicationWindow):
                         make_default=is_default, disabled=disabled,
                     ):
                         self._status.set_text(
-                            f"The daemon rejected DPI slot {index + 1}."
+                            f"The daemon rejected DPI preset {index + 1}."
                         )
                         return False
 
@@ -743,6 +763,10 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _rebuild_bindings(self) -> None:
         """Fill in what each button does, and highlight the selected row."""
+        profile = self._editing_profile()
+        pending = (
+            self._pending.for_profile(profile).bindings if profile else {}
+        )
         for index, widget in self._table_rows.items():
             if index == self._selected_button:
                 widget.add_css_class("accent")
@@ -751,7 +775,9 @@ class MainWindow(Adw.ApplicationWindow):
 
             label = self._binding_rows.get(index)
             if label is not None:
-                label.set_text(presentation.binding_label(self._bindings, index))
+                label.set_text(
+                    presentation.binding_label(self._bindings, index, pending)
+                )
         if hasattr(self, "_diagram") and self._diagram is not None:
             self._diagram.set_binding_labels(
                 {
@@ -891,6 +917,12 @@ class MainWindow(Adw.ApplicationWindow):
             value=value,
             on_apply=lambda i, k, v: self._start_binding_write(profile, i, k, v),
         ).present()
+
+    def _on_assignment_dropped(self, _diagram, index: int, choice) -> None:
+        """A sidebar choice dropped on a hotspot assigns that button."""
+        self._selected_button = index
+        self._on_assignment_chosen(choice.kind, choice.value)
+        self._rebuild_bindings()
 
     def _on_assignment_chosen(self, kind: str, value: object) -> None:
         """Stage a sidebar choice for the currently selected button."""
@@ -1227,6 +1259,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._show_canvas()
 
     def _show_canvas(self) -> None:
+        if self._view is None:
+            self._status.set_text("Waiting for the daemon profile view.")
+            return
         self._fill_canvas(self._view)
         self._stack.set_visible_child_name("manage")
         self._back_button.set_visible(True)
