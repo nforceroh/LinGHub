@@ -12,34 +12,7 @@ and event wiring, and the rules can be tested directly.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from .binding_labels import describe_binding
-
-
-@dataclass(frozen=True)
-class ProfileRow:
-    """One row of the profile list."""
-
-    name: str
-    on_the_mouse: bool
-    editing: bool
-    is_desktop: bool
-
-    @property
-    def subtitle(self) -> str:
-        """Two different facts, so two different markers.
-
-        The tick means "on the mouse"; the subtitle means "shown in the
-        panels". They are separate because a profile can be edited without
-        being loaded.
-        """
-        parts = []
-        if self.on_the_mouse:
-            parts.append("on the mouse")
-        if self.editing:
-            parts.append("editing")
-        return " · ".join(parts)
 
 
 def editing_profile(state, selection: str | None) -> str | None:
@@ -56,20 +29,6 @@ def editing_profile(state, selection: str | None) -> str | None:
     return state.profiles[0] if state.profiles else None
 
 
-def profile_rows(state, selection: str | None) -> list[ProfileRow]:
-    """Every profile as a row, in config order."""
-    editing = editing_profile(state, selection)
-    return [
-        ProfileRow(
-            name=name,
-            on_the_mouse=name == state.active_profile,
-            editing=name == editing,
-            is_desktop=name == state.desktop_profile,
-        )
-        for name in state.profiles
-    ]
-
-
 def binding_label(bindings: dict, index: int, pending=None) -> str:
     """What the "Does" column says for one button.
 
@@ -82,11 +41,6 @@ def binding_label(bindings: dict, index: int, pending=None) -> str:
         return "* " + describe_binding(edit.kind, edit.value)
     kind, value = bindings.get(index, ("", None))
     return describe_binding(kind, value) if kind else "—"
-
-
-def binding_labels(bindings: dict, indices) -> dict[int, str]:
-    """The "Does" column for every button, keyed by ratbag index."""
-    return {index: binding_label(bindings, index) for index in indices}
 
 
 def diagram_binding_label(bindings: dict, index: int) -> str:

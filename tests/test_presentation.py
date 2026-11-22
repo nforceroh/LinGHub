@@ -10,9 +10,7 @@ import unittest
 from linghub.daemon_view import ViewState
 from linghub.ui.presentation import (
     binding_label,
-    binding_labels,
     editing_profile,
-    profile_rows,
 )
 
 
@@ -46,44 +44,6 @@ class EditingProfileTests(unittest.TestCase):
         self.assertIsNone(editing_profile(state(active="", profiles=()), None))
 
 
-class ProfileRowTests(unittest.TestCase):
-    def test_one_row_per_profile_in_order(self):
-        rows = profile_rows(state(), None)
-        self.assertEqual([r.name for r in rows], ["desktop", "wot"])
-
-    def test_the_loaded_profile_is_marked(self):
-        rows = profile_rows(state(active="wot"), None)
-        self.assertTrue(rows[1].on_the_mouse)
-        self.assertFalse(rows[0].on_the_mouse)
-
-    def test_the_edited_profile_is_marked(self):
-        rows = profile_rows(state(), "wot")
-        self.assertTrue(rows[1].editing)
-        self.assertFalse(rows[0].editing)
-
-    def test_loaded_and_edited_can_differ(self):
-        """The whole point of separating them."""
-        rows = profile_rows(state(active="desktop"), "wot")
-        self.assertTrue(rows[0].on_the_mouse)
-        self.assertFalse(rows[0].editing)
-        self.assertFalse(rows[1].on_the_mouse)
-        self.assertTrue(rows[1].editing)
-
-    def test_the_desktop_profile_is_marked(self):
-        rows = profile_rows(state(), None)
-        self.assertTrue(rows[0].is_desktop)
-        self.assertFalse(rows[1].is_desktop)
-
-    def test_subtitle_names_both_facts(self):
-        rows = profile_rows(state(active="wot"), "wot")
-        self.assertEqual(rows[1].subtitle, "on the mouse · editing")
-
-    def test_subtitle_is_empty_when_neither_applies(self):
-        rows = profile_rows(state(active="desktop"), "wot")
-        self.assertEqual(rows[0].subtitle, "on the mouse")
-        self.assertEqual(rows[1].subtitle, "editing")
-
-
 class BindingLabelTests(unittest.TestCase):
     def test_a_known_binding_is_described(self):
         self.assertEqual(binding_label({0: ("key", "KEY_F")}, 0), "F")
@@ -93,11 +53,6 @@ class BindingLabelTests(unittest.TestCase):
 
     def test_an_empty_kind_shows_a_dash(self):
         self.assertEqual(binding_label({3: ("", None)}, 3), "—")
-
-    def test_every_index_gets_a_label(self):
-        labels = binding_labels({0: ("key", "KEY_F")}, [0, 1, 2])
-        self.assertEqual(sorted(labels), [0, 1, 2])
-        self.assertEqual(labels[1], "—")
 
 
 if __name__ == "__main__":
