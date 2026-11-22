@@ -181,8 +181,6 @@ class MainWindow(Adw.ApplicationWindow):
         """The home screen: the device card, centred on an empty canvas."""
         self._card = HomeCard()
         self._card.connect("configure", lambda _c: self._show_view("editor"))
-        self._card.connect("lightsync", lambda _c: self._open_manage_profiles())
-        self._card.connect("onboard", lambda _c: self._open_manage_profiles())
 
         centre = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         centre.set_halign(Gtk.Align.CENTER)
@@ -196,7 +194,6 @@ class MainWindow(Adw.ApplicationWindow):
             on_add_game=self._prompt_add_game,
             on_edit_game=self._prompt_rename_game,
             on_details=self._canvas_details,
-            on_add_profile=self._prompt_new_profile,
             on_duplicate=self._prompt_duplicate_profile,
             on_delete=self._prompt_canvas_delete,
         )
@@ -680,36 +677,6 @@ class MainWindow(Adw.ApplicationWindow):
                 label.set_text(presentation.binding_label(self._bindings, index))
 
     # --- profile management ----------------------------------------------
-
-    def _prompt_new_profile(self) -> None:
-        self._ask_for_text(
-            title="New profile",
-            label="Profile name",
-            secondary="Game executable (optional)",
-            on_accept=self._create_profile,
-        )
-
-    def _create_profile(self, name: str, executable: str, dialog) -> None:
-        if not name.strip():
-            dialog.show_error("A profile needs a name.")
-            return
-        run_and_report(
-            self._do_create_profile(name.strip(), executable.strip(), dialog),
-            self._on_async_error,
-        )
-
-    async def _do_create_profile(self, name: str, executable: str, dialog) -> None:
-        async def change() -> bool:
-            return await self._client.create_profile(name, executable)
-
-        await self._writes.run(
-            change,
-            report=dialog.show_error,
-            failure="Could not create the profile",
-            rejected=f"Cannot create {name!r}. The name may already be in use.",
-            success=f"Created profile {name}.",
-            on_success=dialog.close,
-        )
 
     async def _do_rename_profile(self, old: str, new: str, dialog) -> None:
         if not new or new == old:

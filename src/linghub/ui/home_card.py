@@ -1,8 +1,7 @@
 """The home screen: one card on an otherwise empty canvas.
 
 The card is what the window opens on. It answers "what is plugged in, and what
-is it doing" — the device name, its charge, and two buttons into the two things
-that are not per-profile: LIGHTSYNC and the mouse's onboard memory.
+is it doing" — the device name and its charge.
 
 Clicking the mouse itself opens the configuration screen. The card carries no
 hotspots: the diagram here is a product image, and selecting a button to edit
@@ -10,8 +9,7 @@ belongs on the Assignments view, where there is room to say what each button
 does.
 
 The layout follows the reference: a compact card, name and charge top-left, the
-mouse centred, the two buttons bottom-right. Everything centred read as a
-placeholder rather than a card.
+mouse centred. Everything centred read as a placeholder rather than a card.
 """
 
 from __future__ import annotations
@@ -37,14 +35,11 @@ IMAGE_HEIGHT = 300
 class HomeCard(Gtk.Frame):
     """The home screen's card: the device card, its charge, and two ways into it.
 
-    Emits `configure` when the mouse is clicked, and `lightsync` or
-    `onboard` for the two buttons.
+    Emits `configure` when the mouse is clicked.
     """
 
     __gsignals__ = {
         "configure": (GObject.SignalFlags.RUN_FIRST, None, ()),
-        "lightsync": (GObject.SignalFlags.RUN_FIRST, None, ()),
-        "onboard": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
     def __init__(self, image_path: str = DIAGRAM_IMAGE):
@@ -95,26 +90,6 @@ class HomeCard(Gtk.Frame):
         click.connect("released", lambda _g, _n, _x, _y: self.emit("configure"))
         self._image.add_controller(click)
         box.append(self._image)
-
-        # The two buttons sit bottom-right, as the reference does. They are the
-        # two things that are not per-profile, so they are card-level actions
-        # rather than part of the header.
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        row.set_halign(Gtk.Align.END)
-
-        lightsync = Gtk.Button(icon_name="weather-clear-symbolic")
-        lightsync.set_tooltip_text("LIGHTSYNC")
-        lightsync.add_css_class("flat")
-        lightsync.connect("clicked", lambda _b: self.emit("lightsync"))
-        row.append(lightsync)
-
-        onboard = Gtk.Button(icon_name="drive-harddisk-symbolic")
-        onboard.set_tooltip_text("Onboard memory")
-        onboard.add_css_class("flat")
-        onboard.connect("clicked", lambda _b: self.emit("onboard"))
-        row.append(onboard)
-
-        box.append(row)
 
     def show_device(self, name: str, battery) -> None:
         """Fill the card. `battery` is a Battery, or None for a wired mouse."""

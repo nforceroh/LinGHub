@@ -18,7 +18,6 @@ dist/
 htmlcov/
 
 # Editor and OS noise
-.vscode/
 .idea/
 *.swp
 .DS_Store
@@ -26,3 +25,4 @@ htmlcov/
 # Logitech G HUB reference material, kept locally for protocol research.
 # Proprietary binaries; never commit them.
 LGHUB/
+uv.lock

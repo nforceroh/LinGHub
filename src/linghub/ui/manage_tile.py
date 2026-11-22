@@ -1,15 +1,14 @@
-"""The two tiles the manage-profiles canvas is made of.
+"""The tiles the manage-profiles canvas is made of.
 
-A game tile shows the display name the user chose (or the stripped
-executable, per spec §2.7), and a profile tile shows its name plus the
-one-line summary — the default preset's DPI and the report rate. The
-reference's blurred screenshot preview is decoration we cannot produce; a
-summary is information a user can compare across profiles.
+A profile tile shows its name, the game it is tied to, and the one-line
+summary — the default preset's DPI and the report rate. The reference's
+blurred screenshot preview is decoration we cannot produce; a summary is
+information a user can compare across profiles.
 
 Both are click targets, not buttons: a tile that looks like a button invites
 "click to do what?". The profile tile's DETAILS action is the flow into the
-main window's panels; the game tile's click re-opens the add-game dialog with
-its fields filled in, which is how a display name is renamed.
+main window's panels; clicking the game's name re-opens the add-game dialog
+with its fields filled in, which is how a display name is renamed.
 """
 
 from __future__ import annotations
@@ -59,27 +58,6 @@ class AddTile(Gtk.Button):
         self.connect("clicked", lambda _b: on_click())
 
 
-class GameTile(Gtk.Button):
-    """One game's tile: its display name, in the games row.
-
-    Clicking it re-opens the add-game dialog for this game, which is how the
-    display name is renamed later. There is no separate edit affordance: the
-    tile is the affordance.
-    """
-
-    def __init__(self, executable: str, name: str, on_edit):
-        super().__init__()
-        self._executable = executable
-
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        box.set_valign(Gtk.Align.CENTER)
-        box.append(Gtk.Label(label=name, wrap=True))
-        self.set_child(box)
-        self.set_size_request(TILE_WIDTH, 120)
-        self.set_tooltip_text(executable)
-        self.connect("clicked", lambda _b: on_edit(executable, name))
-
-
 class ProfileTile(Gtk.Box):
     """One profile's tile: its name, its summary line, and its actions.
 
@@ -96,9 +74,17 @@ class ProfileTile(Gtk.Box):
         "delete": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
-    def __init__(self, summary: ProfileSummary, *, deletable: bool):
+    def __init__(self, summary: ProfileSummary, *, deletable: bool, on_edit_game):
+        """Build the tile.
+
+        `on_edit_game(executable, name)` is how the game's display name is
+        renamed: clicking the game's name re-opens the add-game dialog filled
+        in. A profile with no game shows no game line, and there is nothing
+        to click.
+        """
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self._name = summary.name
+        self._games = summary.games
 
         self.set_size_request(TILE_WIDTH, 120)
 
@@ -107,6 +93,19 @@ class ProfileTile(Gtk.Box):
         label = Gtk.Label(label=summary.name, wrap=True)
         label.add_css_class("heading")
         box.append(label)
+
+        if summary.games:
+            executable, game_name = summary.games[0]
+            game = Gtk.Button()
+            game.set_child(Gtk.Label(label=game_name or executable, wrap=True))
+            game.set_tooltip_text(f"{executable} — click to rename")
+            game.add_css_class("flat")
+            game.add_css_class("caption")
+            game.connect(
+                "clicked", lambda _b, e=executable, n=game_name: on_edit_game(e, n)
+            )
+            box.append(game)
+
         line = profile_summary_line(summary)
         if line:
             detail = Gtk.Label(label=line, wrap=True)
@@ -140,3 +139,11 @@ class ProfileTile(Gtk.Box):
     @property
     def name(self) -> str:
         return self._name
+
+    @property
+    def game_name(self) -> str | None:
+        """The display name of the game this profile is tied to, or None."""
+        if not self._games:
+            return None
+        executable, display = self._games[0]
+        return display or executable

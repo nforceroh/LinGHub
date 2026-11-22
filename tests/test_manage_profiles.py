@@ -74,27 +74,38 @@ class CanvasFillTests(unittest.TestCase):
             [child for child in tile if isinstance(child, type(tile))], []
         )
 
-    def test_games_come_from_every_profile(self):
+    def test_the_desktop_profile_has_no_delete(self):
         window = self._window()
-        window._fill_canvas(view(summaries=(
-            summary_line(name="desktop"),
-            summary_line(
-                name="wot", games=(("WorldOfTanks.exe", "World of Tanks"),)
-            ),
-            summary_line(name="sc", games=(("StarCitizen.exe", "Star Citizen"),)),
-        )))
+        window._fill_canvas(view(profiles=("desktop",)))
+        tile = window._manage._profile_tiles["desktop"]
         self.assertEqual(
-            list(window._manage._game_tiles),
-            ["WorldOfTanks.exe", "StarCitizen.exe"],
+            [child for child in tile if isinstance(child, type(tile))], []
         )
 
-    def test_a_game_shared_by_two_profiles_appears_once(self):
+    def test_a_profile_shows_the_game_it_is_tied_to(self):
         window = self._window()
         window._fill_canvas(view(summaries=(
-            summary_line(name="wot", games=(("WoT.exe", "WoT"),)),
-            summary_line(name="wot-copy", games=(("WoT.exe", "WoT"),)),
+            summary_line(name="wot", games=(("WorldOfTanks.exe", "World of Tanks"),)),
         )))
-        self.assertEqual(list(window._manage._game_tiles), ["WoT.exe"])
+        tile = window._manage._profile_tiles["wot"]
+        self.assertEqual(tile.game_name, "World of Tanks")
+
+    def test_a_gameless_profile_shows_no_game(self):
+        window = self._window()
+        window._fill_canvas(view(summaries=(summary_line(name="desktop"),)))
+        tile = window._manage._profile_tiles["desktop"]
+        self.assertIsNone(tile.game_name)
+
+    def test_there_is_no_separate_games_row(self):
+        window = self._window()
+        window._fill_canvas(view())
+        self.assertFalse(hasattr(window._manage, "_games_row"))
+
+    def test_the_add_tile_starts_the_add_game_flow(self):
+        """Profiles are created through a game, so ADD PROFILE is gone."""
+        window = self._window()
+        window._fill_canvas(view())
+        self.assertEqual(window._manage._add_game_tile.get_label(), "+ ADD GAME")
 
     def test_the_canvas_is_hidden_until_opened(self):
         window = self._window()

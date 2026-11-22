@@ -123,7 +123,7 @@ def make_window(
     window._manage = ManageProfiles(
         on_add_game=lambda: None,
         on_edit_game=lambda *a: None, on_details=lambda name: None,
-        on_add_profile=lambda: None, on_duplicate=lambda name: None,
+        on_duplicate=lambda name: None,
         on_delete=lambda name: None,
     )
     window._stack.add_named(window._manage, "manage")
