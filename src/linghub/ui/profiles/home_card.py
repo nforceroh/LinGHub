@@ -21,7 +21,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import GObject, Gtk
 
-from .buttonmap import DIAGRAM_IMAGE
+from ..buttonmap import DIAGRAM_IMAGE
 
 # The card is compact, like the reference: wide enough for the name and the
 # image, narrow enough that it reads as one object rather than a panel.

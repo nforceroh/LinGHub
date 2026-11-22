@@ -17,7 +17,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Gdk, Gtk, Pango
 
-from .assignment_catalogue import (
+from .catalogue import (
     GROUPS,
     AssignmentChoice,
     assignment_choices,

@@ -31,7 +31,7 @@ gi.require_version("PangoCairo", "1.0")
 
 from gi.repository import Gdk, Gtk, Pango, PangoCairo
 
-from . import panel_rules
+from . import rules as panel_rules
 
 # The range ratbagd accepts for a G502; read from the device where possible.
 MIN_DPI = 100

@@ -8,7 +8,7 @@ dirty tracking, and that nothing is published before Save.
 
 import unittest
 
-from linghub.ui.led_panel import MODES, LedPanel
+from linghub.ui.device.led_panel import MODES, LedPanel
 
 
 class DirtyStateTests(unittest.TestCase):
@@ -19,7 +19,7 @@ class DirtyStateTests(unittest.TestCase):
     """
 
     def _panel(self):
-        from linghub.ui.led_panel import LedPanel
+        from linghub.ui.device.led_panel import LedPanel
 
         panel = LedPanel(on_save=lambda *a: None)
         panel.load({
@@ -64,7 +64,7 @@ class DirtyStateTests(unittest.TestCase):
     def test_edits_are_not_published_before_save(self):
         """The whole point: dragging must not write to the daemon."""
         calls = []
-        from linghub.ui.led_panel import LedPanel
+        from linghub.ui.device.led_panel import LedPanel
 
         panel = LedPanel(on_save=lambda *a: calls.append(a))
         panel.load({

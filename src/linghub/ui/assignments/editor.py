@@ -15,7 +15,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gtk
 
-from .assignment_catalogue import (
+from .catalogue import (
     CHORD,
     DROPDOWN,
     LABELS as MODE_LABELS,
@@ -27,10 +27,10 @@ from .assignment_catalogue import (
     single_key_of,
     stored_binding,
 )
-from .assignment_catalogue import COMMON_KEYS as _CHORD_KEY_CHOICES
-from .assignment_catalogue import describe_chord
-from .binding_labels import describe_binding
-from .buttonmap import describe
+from .catalogue import COMMON_KEYS as _CHORD_KEY_CHOICES
+from .catalogue import describe_chord
+from .labels import describe_binding
+from ..buttonmap import describe
 
 
 class BindingEditor(Adw.Window):

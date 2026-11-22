@@ -18,8 +18,8 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gtk
 
-from .panel_rules import MODES, controls_for, duration_to_speed, speed_to_duration
-from .staged_edit import StagedEdit
+from .rules import MODES, controls_for, duration_to_speed, speed_to_duration
+from ..staged_edit import StagedEdit
 
 DEFAULT_COLOR = (255, 59, 16)
 DEFAULT_BRIGHTNESS = 255

@@ -12,7 +12,7 @@ and event wiring, and the rules can be tested directly.
 
 from __future__ import annotations
 
-from .binding_labels import describe_binding
+from .assignments.labels import describe_binding
 
 
 def editing_profile(state, selection: str | None) -> str | None:

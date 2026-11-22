@@ -7,7 +7,7 @@ apart, are bugs no amount of clicking would make obvious.
 
 import unittest
 
-from linghub.ui.dpi_track import (
+from linghub.ui.device.dpi_track import (
     COLLISION_OFFSET,
     LABEL_BAND,
     MARKER_RADIUS,

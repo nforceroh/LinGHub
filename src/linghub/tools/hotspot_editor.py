@@ -33,7 +33,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk
 
-from .buttonmap import BY_INDEX, DIAGRAM_IMAGE, NAMES, describe, manual_number, user_hotspots
+from ..ui.buttonmap import BY_INDEX, DIAGRAM_IMAGE, NAMES, describe, manual_number, user_hotspots
 
 
 DEFAULT_OUTPUT = user_hotspots()

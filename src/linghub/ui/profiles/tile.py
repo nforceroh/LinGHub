@@ -20,7 +20,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import GObject, Gtk
 
-from ..daemon_view import ProfileSummary
+from ...daemon_view import ProfileSummary
 
 
 TILE_WIDTH = 200

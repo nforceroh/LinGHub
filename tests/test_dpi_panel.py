@@ -5,7 +5,7 @@ Same rule as the lighting panel: edits must not reach the mouse until Save.
 
 import unittest
 
-from linghub.ui.dpi_panel import MAX_DPI, MIN_DPI, DpiPanel
+from linghub.ui.device.dpi_panel import MAX_DPI, MIN_DPI, DpiPanel
 
 
 def _panel(saved=None):

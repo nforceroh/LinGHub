@@ -7,8 +7,8 @@ through `LedPanel`, and the "only one default" rule not at all.
 
 import unittest
 
-from linghub.ui import panel_rules
-from linghub.ui.panel_rules import (
+from linghub.ui.device import rules as panel_rules
+from linghub.ui.device.rules import (
     MODES,
     SPEED_MAX,
     SPEED_MIN,

@@ -21,7 +21,7 @@ class SummaryLineTests(unittest.TestCase):
     """The tile's one line, which is what a user compares across profiles."""
 
     def test_both_facts(self):
-        from linghub.ui.manage_tile import profile_summary_line
+        from linghub.ui.profiles.tile import profile_summary_line
 
         self.assertEqual(
             profile_summary_line(summary_line()), "800 DPI · 1000 Hz"
@@ -29,17 +29,17 @@ class SummaryLineTests(unittest.TestCase):
 
     def test_no_default_preset(self):
         """A hand-edited config can lack a default; that is not "0 DPI"."""
-        from linghub.ui.manage_tile import profile_summary_line
+        from linghub.ui.profiles.tile import profile_summary_line
 
         self.assertEqual(profile_summary_line(summary_line(dpi=0)), "1000 Hz")
 
     def test_no_report_rate(self):
-        from linghub.ui.manage_tile import profile_summary_line
+        from linghub.ui.profiles.tile import profile_summary_line
 
         self.assertEqual(profile_summary_line(summary_line(rate=0)), "800 DPI")
 
     def test_neither(self):
-        from linghub.ui.manage_tile import profile_summary_line
+        from linghub.ui.profiles.tile import profile_summary_line
 
         self.assertEqual(profile_summary_line(summary_line(dpi=0, rate=0)), "")
 

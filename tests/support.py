@@ -105,12 +105,12 @@ def make_window(
     from linghub import version
 
     window._daemon_version = version.DaemonVersion.not_running()
-    from linghub.ui.profile_selector import ProfileSelector
+    from linghub.ui.profiles.selector import ProfileSelector
 
     window._selector = ProfileSelector(
         on_chosen=lambda name: None, on_manage=lambda: None
     )
-    from linghub.ui.home_card import HomeCard
+    from linghub.ui.profiles.home_card import HomeCard
 
     window._card = HomeCard()
     # The stack needs both children and a visible one, or get_visible_child_name
@@ -123,7 +123,7 @@ def make_window(
     window._config_stack.add_named(Gtk.Label(label="dpi"), "dpi")
     window._config_stack.add_named(Gtk.Label(label="lightsync"), "lightsync")
     window._config_stack.set_visible_child_name("assignments")
-    from linghub.ui.manage_profiles import ManageProfiles
+    from linghub.ui.profiles.manage import ManageProfiles
 
     window._manage = ManageProfiles(
         on_add_game=lambda: None,
@@ -135,7 +135,7 @@ def make_window(
     window._stack.set_visible_child_name("home")
     window._back_button = Gtk.Button()
     window._back_button.set_visible(False)
-    from linghub.ui.assignments_view import AssignmentsView
+    from linghub.ui.assignments.view import AssignmentsView
 
     window._assignments = AssignmentsView(
         on_stage=lambda *a: None,
@@ -168,8 +168,8 @@ def make_window(
     window._editing = editing
 
     if panels:
-        from linghub.ui.dpi_panel import DpiPanel
-        from linghub.ui.led_panel import LedPanel
+        from linghub.ui.device.dpi_panel import DpiPanel
+        from linghub.ui.device.led_panel import LedPanel
 
         window._led_panel = LedPanel(
             on_save=lambda *a: None,

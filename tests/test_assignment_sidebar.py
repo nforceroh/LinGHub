@@ -2,7 +2,7 @@
 
 import unittest
 
-from linghub.ui.assignment_catalogue import (
+from linghub.ui.assignments.catalogue import (
     assignment_choices,
     filter_assignment_choices,
 )
@@ -46,7 +46,7 @@ class CatalogueConsistencyTests(unittest.TestCase):
         binding staged from the sidebar's full keyboard opened the dialog
         showing whichever key happened to be listed first.
         """
-        from linghub.ui.assignment_catalogue import BY_NAME, MODE_KEY
+        from linghub.ui.assignments.catalogue import BY_NAME, MODE_KEY
 
         sidebar_keys = {
             choice.value for choice in assignment_choices()
@@ -56,7 +56,7 @@ class CatalogueConsistencyTests(unittest.TestCase):
         self.assertEqual(sidebar_keys, editor_keys)
 
     def test_the_macro_mode_offers_the_same_keys(self):
-        from linghub.ui.assignment_catalogue import BY_NAME, MODE_KEY, MODE_KEY_MACRO
+        from linghub.ui.assignments.catalogue import BY_NAME, MODE_KEY, MODE_KEY_MACRO
 
         key_choices = BY_NAME[MODE_KEY].dropdown_choices()
         macro_choices = BY_NAME[MODE_KEY_MACRO].dropdown_choices()

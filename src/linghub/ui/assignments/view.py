@@ -23,11 +23,11 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Gtk
 
-from . import presentation
-from .assignment_sidebar import AssignmentSidebar
-from .binding_editor import BindingEditor
-from .binding_labels import describe_binding
-from .buttonmap import BUTTONS, DIAGRAM_IMAGE, describe, manual_number
+from .. import presentation
+from .sidebar import AssignmentSidebar
+from .editor import BindingEditor
+from .labels import describe_binding
+from ..buttonmap import BUTTONS, DIAGRAM_IMAGE, describe, manual_number
 from .diagram import MouseDiagram
 
 IMAGE = DIAGRAM_IMAGE

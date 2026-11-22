@@ -23,7 +23,7 @@ class HotspotDrawingTests(unittest.TestCase):
         import cairo
 
         from linghub.ui.buttonmap import ButtonSpot
-        from linghub.ui.diagram import HOTSPOT_RADIUS, MouseDiagram
+        from linghub.ui.assignments.diagram import HOTSPOT_RADIUS, MouseDiagram
 
         # _draw_hotspot touches no widget state, so build the object without
         # GTK: DrawingArea wants a display and this should run headless.
@@ -69,7 +69,7 @@ class HitTestGeometryTests(unittest.TestCase):
     """
 
     def _diagram(self, image_width: int, image_height: int):
-        from linghub.ui.diagram import MouseDiagram
+        from linghub.ui.assignments.diagram import MouseDiagram
 
         diagram = MouseDiagram.__new__(MouseDiagram)
         diagram._selected = None
@@ -104,7 +104,7 @@ class HitTestGeometryTests(unittest.TestCase):
 
     def test_click_at_the_circle_selects_the_button(self):
         """Clicking exactly on a painted circle must select it."""
-        from linghub.ui import diagram as diagram_module
+        from linghub.ui.assignments import diagram as diagram_module
         from linghub.ui.buttonmap import BUTTONS
 
         width, height = 566, 486
@@ -122,7 +122,7 @@ class HitTestGeometryTests(unittest.TestCase):
     def test_click_just_off_the_circle_still_selects(self):
         """The target is larger than the drawn circle, within reason."""
         from linghub.ui.buttonmap import BUTTONS
-        from linghub.ui.diagram import HOTSPOT_RADIUS
+        from linghub.ui.assignments.diagram import HOTSPOT_RADIUS
 
         width, height = 566, 486
         widget = self._diagram(1024, 555)
@@ -160,7 +160,7 @@ class HotspotEditorTests(unittest.TestCase):
     """
 
     def _editor(self, points=None):
-        from linghub.ui.hotspot_editor import HotspotEditor
+        from linghub.tools.hotspot_editor import HotspotEditor
 
         editor = HotspotEditor.__new__(HotspotEditor)
         editor._points = dict(points or {})
@@ -316,7 +316,7 @@ class HotspotEditorTests(unittest.TestCase):
         import tempfile
         from pathlib import Path
 
-        from linghub.ui.hotspot_editor import load_points
+        from linghub.tools.hotspot_editor import load_points
 
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "hotspots.json"
@@ -332,7 +332,7 @@ class HotspotEditorTests(unittest.TestCase):
     def test_load_points_tolerates_a_missing_file(self):
         from pathlib import Path
 
-        from linghub.ui.hotspot_editor import load_points
+        from linghub.tools.hotspot_editor import load_points
 
         self.assertEqual(load_points(Path("/nonexistent/hotspots.json")), {})
 
@@ -364,7 +364,7 @@ class BindingEditorTests(unittest.TestCase):
     ]
 
     def _open(self, kind, value):
-        from linghub.ui.binding_editor import BindingEditor
+        from linghub.ui.assignments.editor import BindingEditor
 
         # Adw.Window needs an application, but the widget tree can be built
         # with a plain Gtk.Window parent.

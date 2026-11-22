@@ -58,7 +58,7 @@ class ProfileSelectorTests(unittest.TestCase):
         self.assertFalse(window._selector._search.get_visible())
 
     def test_the_search_field_appears_for_a_long_list(self):
-        from linghub.ui.profile_selector import SEARCH_THRESHOLD
+        from linghub.ui.profiles.selector import SEARCH_THRESHOLD
 
         names = tuple(f"p{n}" for n in range(SEARCH_THRESHOLD))
         window = self._window()

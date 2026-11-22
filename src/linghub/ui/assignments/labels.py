@@ -13,7 +13,7 @@ authority on whether it works.
 
 from __future__ import annotations
 
-from .assignment_catalogue import (
+from .catalogue import (
     _MODIFIER_NAMES,
     BUTTON_LABELS,
     KEY_LABELS,

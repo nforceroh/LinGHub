@@ -6,7 +6,7 @@ tests pin the round-trip: every mode must map a stored binding back to itself.
 
 import unittest
 
-from linghub.ui.assignment_catalogue import (
+from linghub.ui.assignments.catalogue import (
     BY_NAME,
     MODE_BUTTON,
     MODE_CHORD,

@@ -8,7 +8,7 @@ implementation and may change freely.
 
 import unittest
 
-from linghub.ui.assignments_view import AssignmentsView
+from linghub.ui.assignments.view import AssignmentsView
 
 
 def make_view():

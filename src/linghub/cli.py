@@ -375,7 +375,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.command == "hotspots":
-        from .ui.hotspot_editor import main as editor_main
+        from .tools.hotspot_editor import main as editor_main
 
         argv = []
         if args.image is not None:

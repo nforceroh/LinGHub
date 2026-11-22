@@ -14,7 +14,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gtk
 
-from . import panel_rules
+from . import rules as panel_rules
 from .dpi_track import (
     MAX_DPI,
     MIN_DPI,
@@ -22,7 +22,7 @@ from .dpi_track import (
     preset_color,
     superscript_number,
 )
-from .staged_edit import StagedEdit
+from ..staged_edit import StagedEdit
 
 
 class DpiPanel(Gtk.Box):

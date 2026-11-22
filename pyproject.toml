@@ -28,7 +28,6 @@ where = ["src"]
 # The diagram and the placed hotspots are read at runtime, so they must be in
 # the wheel: a packaged install has no clone to find them in.
 "linghub.ui" = ["hotspots.json", "images/*.png"]
-
 [tool.setuptools_scm]
 # Builds outside a clone (an sdist without git metadata) still get a version.
 fallback_version = "0.0.0"

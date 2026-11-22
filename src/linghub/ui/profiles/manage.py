@@ -21,9 +21,9 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Gtk
 
-from ..daemon_view import ProfileSummary
+from ...daemon_view import ProfileSummary
 from .add_game_dialog import AddGameDialog
-from .manage_tile import AddTile, ProfileTile
+from .tile import AddTile, ProfileTile
 
 
 class ManageProfiles(Gtk.ScrolledWindow):

@@ -31,7 +31,7 @@ not available. The split also gives the tray a property worth keeping: it
 survives closing the main window.
 
 **A port was costed.** The UI is 3,134 lines: 906 toolkit-independent
-(`client`, `buttonmap`, `binding_labels`, `assignment_catalogue`, `panel_rules`,
+(`client`, `buttonmap`, `assignments/labels`, `assignments/catalogue`, `device/rules`,
 `presentation`, `asyncbridge`) and 2,228 GTK4/libadwaita widget code. A port
 rewrites the 2,228 and keeps the 906, plus 1,395 lines of UI tests that drive
 GTK widgets directly. It is not mechanical: the window uses eleven libadwaita

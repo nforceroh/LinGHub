@@ -15,7 +15,7 @@ gi.require_version("Pango", "1.0")
 
 from gi.repository import Gdk, GdkPixbuf, GObject, Gtk, Pango
 
-from .buttonmap import BUTTONS, ButtonSpot
+from ..buttonmap import BUTTONS, ButtonSpot
 
 
 HOTSPOT_RADIUS = 13.0

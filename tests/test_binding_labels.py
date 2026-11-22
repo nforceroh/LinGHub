@@ -9,13 +9,13 @@ import unittest
 
 from linghub.domain.profile import Binding
 from linghub.hardware.mapping import SPECIAL_ACTIONS, encode
-from linghub.ui.assignment_catalogue import (
+from linghub.ui.assignments.catalogue import (
     BUTTON_CHOICES,
     COMMON_KEYS,
     SPECIAL_CHOICES,
     describe_chord,
 )
-from linghub.ui.binding_labels import describe_binding
+from linghub.ui.assignments.labels import describe_binding
 
 
 class VocabularyTests(unittest.TestCase):

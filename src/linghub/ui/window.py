@@ -19,7 +19,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
-from .assignments_view import AssignmentsView
+from .assignments import AssignmentsView
 from .asyncbridge import run_and_report
 from .buttonmap import DIAGRAM_IMAGE, describe
 from .client import DaemonClient
@@ -27,16 +27,16 @@ from .daemon_write import DaemonWrite
 from . import edit_apply
 from .pending_edits import PendingEditsFor
 from .profile_actions import ProfileActions
-from .profile_selector import ProfileSelector
-from .home_card import HomeCard
-from .manage_profiles import ManageProfiles
+from .profiles import ProfileSelector
+from .profiles import HomeCard
+from .profiles import ManageProfiles
 from .config_rail import ConfigRail
 from ..hardware.battery import battery, model_name
 from ..daemon_view import DaemonView, ProfileSummary, ViewState
 from . import presentation
 from .. import version
-from .dpi_panel import DpiPanel
-from .led_panel import LedPanel
+from .device import DpiPanel
+from .device import LedPanel
 
 
 logger = logging.getLogger("linghub.ui.window")
