@@ -154,6 +154,19 @@ def make_window(
 
     window._writes = DaemonWrite(window._refresh_now)
     window._pending = PendingEditsFor()
+    from linghub.ui.profile_actions import ProfileActions
+
+    window._actions = ProfileActions(
+        window,
+        client=lambda: window._client,
+        writes=window._writes,
+        report=window._status.set_text,
+        editing_profile=lambda: window._editing_profile(),
+        profile_names=lambda: window._state.profiles,
+        desktop_profile=lambda: window._state.desktop_profile,
+        profile_of_game=lambda executable: None,
+        on_async_error=lambda exc: None,
+    )
     window._save_button = Gtk.Button()
     window._discard_button = Gtk.Button()
     window._editing = editing

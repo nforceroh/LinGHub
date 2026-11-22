@@ -233,12 +233,9 @@ class CanvasWriteTests(unittest.TestCase):
         window = self._window()
         window._client = FakeClient()
 
-        async def run():
-            await window._do_create_game_profile(
-                "WorldOfTanks.exe", "World of Tanks", "wot-new"
-            )
-
-        asyncio.run(run())
+        asyncio.run(window._actions._create_game_profile(
+            "WorldOfTanks.exe", "World of Tanks", "wot-new"
+        ))
         self.assertEqual(
             calls,
             [
@@ -257,7 +254,7 @@ class CanvasWriteTests(unittest.TestCase):
 
         window = self._window()
         window._client = FakeClient()
-        window._create_game_profile("WoT.exe", "", "wot")
+        window._actions.create_game_profile("WoT.exe", "", "wot")
         self.assertEqual(calls, [])
         self.assertIn("already exists", window._status.get_text())
 
@@ -286,10 +283,7 @@ class CanvasWriteTests(unittest.TestCase):
         window = self._window()
         window._client = FakeClient()
 
-        async def run():
-            await window._do_create_game_profile("WoT.exe", "", "new")
-
-        asyncio.run(run())
+        asyncio.run(window._actions._create_game_profile("WoT.exe", "", "new"))
         self.assertEqual(calls, [("create",)])
 
     def test_a_refused_create_says_so(self):
@@ -310,10 +304,7 @@ class CanvasWriteTests(unittest.TestCase):
         window = self._window()
         window._client = RefusingClient()
 
-        async def run():
-            await window._do_create_game_profile("WoT.exe", "WoT", "desktop")
-
-        asyncio.run(run())
+        asyncio.run(window._actions._create_game_profile("WoT.exe", "WoT", "desktop"))
         self.assertIn("cannot add", window._status.get_text().lower())
 
     def test_duplicating_calls_the_daemon(self):
@@ -337,10 +328,9 @@ class CanvasWriteTests(unittest.TestCase):
         window = self._window()
         window._client = FakeClient()
 
-        async def run():
-            await window._do_duplicate_profile("wot", "wot copy", _FakeDialog())
-
-        asyncio.run(run())
+        asyncio.run(
+            window._actions._duplicate_profile("wot", "wot copy", _FakeDialog())
+        )
         self.assertEqual(calls, [("wot", "wot copy")])
 
     def test_deleting_the_desktop_from_the_canvas_is_refused(self):
@@ -353,7 +343,7 @@ class CanvasWriteTests(unittest.TestCase):
 
         window = self._window()
         window._client = FakeClient()
-        window._prompt_canvas_delete("desktop")
+        window._actions.prompt_delete_from_canvas("desktop")
         self.assertEqual(calls, [])
         self.assertIn("cannot be deleted", window._status.get_text().lower())
 

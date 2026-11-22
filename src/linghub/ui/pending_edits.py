@@ -53,6 +53,16 @@ class PendingEdits:
             or self.leds is not None
         )
 
+    @property
+    def has_resolutions(self) -> bool:
+        """True when the DPI table or report rate has a staged edit."""
+        return self.resolutions is not None
+
+    @property
+    def has_leds(self) -> bool:
+        """True when lighting has a staged edit."""
+        return self.leds is not None
+
     def set_binding(self, index: int, kind: str, value: object = None) -> None:
         self.bindings[index] = BindingEdit(index, kind, value)
 
