@@ -376,6 +376,52 @@ class DaemonState:
             self.loaded_fingerprint = None
         return True
 
+    def duplicate_profile(self, name: str, new: str) -> bool:
+        """Add `new` as a full copy of `name`, including its games.
+
+        A new profile usually starts as a copy of an existing one, and a copy
+        that dropped the games would silently stop switching for them. The
+        copy is not loaded: duplicating is an edit-side action, and taking
+        over the mouse is a separate decision.
+        """
+        new = new.strip()
+        source = self.config.profile_named(name)
+        if not new or source is None or self.config.profile_named(new) is not None:
+            return False
+        copy = replace(
+            source,
+            name=new,
+            games=tuple(Game(executable=g.executable, name=g.name) for g in source.games),
+            resolutions=tuple(dict(slot) for slot in source.resolutions),
+            bindings=dict(source.bindings),
+            leds=tuple(dict(entry) for entry in source.leds),
+        )
+        self.config = replace(
+            self.config,
+            profiles=[*self.config.profiles, copy],
+        )
+        return True
+
+    def rename_game(self, profile_name: str, executable: str, name: str) -> bool:
+        """Set one game's display name.
+
+        The executable identifies the game within the profile; the display
+        name is what the canvas shows for it. Only an existing game is
+        renamed, so a typo in the executable cannot add a game by accident.
+        """
+        profile = self.config.profile_named(profile_name)
+        if profile is None:
+            return False
+        games = list(profile.games)
+        for position, game in enumerate(games):
+            if game.key == Game(executable).key:
+                games[position] = replace(game, name=name.strip())
+                self._replace_profile(
+                    profile_name, replace(profile, games=tuple(games))
+                )
+                return True
+        return False
+
     def _replace_profile(self, profile_name: str, updated: Profile) -> None:
         self.config = replace(
             self.config,

@@ -69,6 +69,33 @@ class GameTests(unittest.TestCase):
     def test_the_key_is_case_folded(self):
         self.assertEqual(Game("WorldOfTanks.exe").key, "worldoftanks.exe")
 
+    def test_a_named_game_shows_its_name(self):
+        self.assertEqual(
+            Game("WorldOfTanks.exe", "World of Tanks").display_name,
+            "World of Tanks",
+        )
+
+    def test_a_nameless_game_shows_its_executable_without_the_extension(self):
+        """The fallback is the executable, not a prettified version of it.
+
+        It is literally what the config says, and obvious enough that a user
+        will fill the name in.
+        """
+        self.assertEqual(Game("WorldOfTanks.exe").display_name, "WorldOfTanks")
+
+    def test_a_blank_name_falls_back_like_a_missing_one(self):
+        self.assertEqual(Game("StarCitizen.exe", "   ").display_name, "StarCitizen")
+
+    def test_a_name_is_trimmed(self):
+        self.assertEqual(Game("x.exe", "  Star Citizen  ").display_name, "Star Citizen")
+
+    def test_an_executable_without_an_extension_is_shown_whole(self):
+        self.assertEqual(Game("star-citizen").display_name, "star-citizen")
+
+    def test_only_a_trailing_exe_is_stripped(self):
+        """`exe` in the middle of a name is part of the name."""
+        self.assertEqual(Game("exeRunner.exe").display_name, "exeRunner")
+
 
 class ProfileTests(unittest.TestCase):
     def test_an_empty_name_is_refused(self):

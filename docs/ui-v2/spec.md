@@ -317,27 +317,24 @@ shows and what keeps the icon rail to three icons.
   read as one light; separate control would double every control for a
   distinction nobody can see. The config already stores them as a list, so
   separating them stays possible.
-- **The effect is a row of four buttons**, not a dropdown. Four options is where
-  a segmented control beats a dropdown: every option visible, one click instead
-  of two. The reference needs a dropdown because it has more effects.
+- **The effect uses a dropdown** with the four supported hardware modes: Off,
+  Fixed colour, Cycle colours and Breathing.
 - **No `PRESETS` / `FREESTYLE` / `ANIMATIONS` tabs.** One taxonomy needs no tabs
   to switch between taxonomies.
 - **No `SYNC LIGHTING OPTIONS`.** We control one device; a button that syncs to
   nothing is worse than no button.
-- **The mouse image is shown, with the current colour applied to its zones.**
-  This is the one view where the image shows the effect of a change, and it
-  fills the space the settings panel leaves.
-- **The preview updates live** as a control moves, while the mouse stays
-  unchanged until Apply. The preview is a drawing, not a write.
+- **No mouse image or live drawing** is shown on the LIGHTSYNC view. The controls
+  fill the content area, and edits remain staged until Apply.
 
-### 2.11 The device card
+### 2.11 The home card
 
 *Settled in the 2026-11-21 grilling, questions Q40 and Q43.*
 
-- The card's two icon buttons are **LIGHTSYNC** (the lighting) and **onboard
+- The **device card** is the picture of the mouse itself; the card that holds it, its charge and its buttons is the **home card**.
+- The home card's two icon buttons are **LIGHTSYNC** (the lighting) and **onboard
   memory** (the mouse's flash slots).
-- **The card carries no hotspots.** The diagram on the card is a product image,
-  not a button selector. Hotspots move to the **bindings screen**.
+- **The device card carries no hotspots.** It is a picture, not a button
+  selector. Hotspots live on the Assignments view.
 
 ### 2.12 The window
 
@@ -482,7 +479,8 @@ All three views share a frame:
   is a filled blue rounded square.
 - A **settings panel** on the left of the content area, with a lock icon in its
   top right.
-- The **mouse image** on the right, large.
+- The Assignments and DPI views may use the mouse diagram or track to the right;
+  LIGHTSYNC has no mouse-image preview.
 
 **Assignments** adds:
 
@@ -505,10 +503,9 @@ All three views share a frame:
 
 **LIGHTSYNC** adds:
 
-- Tabs `PRESETS`, `FREESTYLE`, `ANIMATIONS`.
-- `EFFECT` (a dropdown, `COLOR WAVE`), `CYCLE` (`HORIZONTAL`), `RATE`
-  (`5000ms`) and `BRIGHTNESS` (`100%`).
-- A `SYNC LIGHTING OPTIONS` button at the bottom right.
+- No `PRESETS` / `FREESTYLE` / `ANIMATIONS` tabs.
+- `EFFECT`, `COLOUR`, `BRIGHTNESS` and `RATE` settings.
+- No mouse-image preview or `SYNC LIGHTING OPTIONS` button.
 
 ### 3.5 Facts verified for this screen
 
@@ -527,7 +524,16 @@ All three views share a frame:
 
 ## 4. Open
 
-Nothing. Every question asked so far is settled in §2.
+- **The add-game dialog's file browser partially supersedes Q31.** The
+  grilling rejected a file chooser because a Wine executable cannot be
+  browsed; the user then asked for one, so the dialog takes both — an
+  editable path field (typed Wine paths) with Browse beside it (real files).
+  §2.7's two-field dialog is now three fields: executable, display name, and
+  the profile the game belongs to.
+- **The onboard-memory screen has no spec section.** Named in Q40 (a home
+  card button), never grilled.
+- **The DPI track's 800/750 label collision** (seen on the user's machine)
+  was noticed and not fixed.
 
 ---
 
@@ -548,12 +554,19 @@ For orientation, so this document is not read as a plan for work already done.
 | Colliding markers fanned out | built |
 | One label per distinct DPI | built |
 | `DPI preset` in the glossary | built |
-| Two-level navigation, home and three views | **not built** |
-| Profile selector dropdown | **not built** |
-| Manage-profiles canvas | **not built** |
-| Game display name and config shape | **not built** |
-| LIGHTSYNC view | **not built** |
-| Colour palette indexed by preset | **not built** |
-| Superscript preset number on labels | **not built** |
-| Neutral underline for the default | **not built** |
-| `DPI preset` rename in user-visible strings | **not built** |
+| Home screen with the device card | built |
+| Profile selector dropdown | built |
+| Two-level navigation, home and configuration | built |
+| Configuration icon rail: DPI, Assignments, LIGHTSYNC | built |
+| Assignments searchable command sidebar | built |
+| Assignments labels with diagram leader lines | built |
+| DPI configuration view | built |
+| LIGHTSYNC configuration view | built |
+| Manage-profiles canvas | built |
+| Game display name and config shape | built |
+| Duplicate profile, rename a game | built |
+| LIGHTSYNC view | built |
+| Colour palette indexed by preset | built |
+| Superscript preset number on labels | built |
+| Neutral underline for the default | built |
+| `DPI preset` rename in user-visible strings | built |

@@ -1,6 +1,7 @@
 """The LinGHub application entry point."""
 
 from __future__ import annotations
+import os
 
 import logging
 import sys
@@ -23,8 +24,14 @@ logger = logging.getLogger("linghub.ui")
 
 class LingHubApplication(Adw.Application):
     def __init__(self):
+        # GApplication is single-instance per id: a second process with the
+        # same id hands its work over to the running one and exits. A probe
+        # that builds the window to measure it must therefore use a different
+        # id, or it activates the user's window and quits, which is what made
+        # the real UI flash and vanish whenever a probe ran.
+        app_id = "org.linghub.UI.Probe" if os.environ.get("LINGHUB_PROBE") else "org.linghub.UI"
         super().__init__(
-            application_id="org.linghub.UI",
+            application_id=app_id,
             flags=Gio.ApplicationFlags.DEFAULT_FLAGS,
         )
         self._client = DaemonClient()

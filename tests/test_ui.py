@@ -76,17 +76,21 @@ class GetViewDecodeTests(unittest.TestCase):
 
     def _raw(self):
         return (
-            "wot", "x.exe", "desktop", ["desktop", "wot"],
-            [(0, "key", "KEY_F"), (3, "button", "4")],
-            [(0, "breathing", (255, 0, 0), 128, 3000)],
-            [(0, 800, 1, 0), (1, 1600, 0, 1)],
-            [125, 250, 500, 1000],
-            500,
+            (
+                "wot", "x.exe", "desktop", ["desktop", "wot"],
+                [(0, "key", "KEY_F"), (3, "button", "4")],
+                [(0, "breathing", (255, 0, 0), 128, 3000)],
+                [(0, 800, 1, 0), (1, 1600, 0, 1)],
+                [125, 250, 500, 1000],
+                500,
+            ),
+            [("wot", 1600, 500, [("x.exe", "World of Tanks")])],
         )
 
     def test_the_struct_decodes_to_the_view(self):
         import asyncio
 
+        from linghub.daemon_view import ProfileSummary
         from linghub.ui.client import DaemonClient, DaemonView
 
         client = DaemonClient()
@@ -124,6 +128,11 @@ class GetViewDecodeTests(unittest.TestCase):
         )
         self.assertEqual(view.profile.report_rates, (125, 250, 500, 1000))
         self.assertEqual(view.profile.report_rate, 500)
+        self.assertEqual(
+            view.summaries,
+            (ProfileSummary(name="wot", dpi=1600, report_rate=500,
+                            games=(("x.exe", "World of Tanks"),)),),
+        )
 
     def test_empty_sections_decode_to_empty_collections(self):
         """An unknown profile yields empty sections, not an error."""
@@ -134,7 +143,7 @@ class GetViewDecodeTests(unittest.TestCase):
         client = DaemonClient()
 
         async def fake_invoke(_member, *args):
-            return ("", "", "desktop", [], [], [], [], [], 0)
+            return (("", "", "desktop", [], [], [], [], [], 0), [])
 
         client._invoke = fake_invoke
         view = asyncio.run(client.get_view("gone"))

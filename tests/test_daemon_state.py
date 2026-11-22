@@ -1,6 +1,7 @@
 """Tests for the daemon's profile-selection state machine."""
 
 import unittest
+from dataclasses import replace
 
 from linghub.config import Config
 from linghub.daemon.state import DaemonState
@@ -430,6 +431,76 @@ class ProfileManagementTests(unittest.TestCase):
         state.delete_profile("star-citizen")
         self.assertEqual(state.stack, [])
         self.assertIsNone(state.loaded_profile)
+
+
+class DuplicateProfileTests(unittest.TestCase):
+    def _state(self, **kwargs):
+        wot = replace(WOT, **kwargs)
+        return DaemonState(config=make_config(DESKTOP, wot, SC))
+
+    def test_a_copy_copies_everything(self):
+        state = self._state(
+            games=(Game("WorldOfTanks.exe"), Game("Launcher.exe")),
+            report_rate=500,
+            bindings={3: Binding("key", "KEY_F")},
+            resolutions=({"dpi": 800}, {"dpi": 1600, "default": True}),
+            leds=({"index": 0, "mode": "on"},),
+        )
+        self.assertTrue(state.duplicate_profile("world-of-tanks", "wot copy"))
+        copy = state.config.profile_named("wot copy")
+        self.assertEqual(copy.games, state.config.profile_named("world-of-tanks").games)
+        self.assertEqual(copy.report_rate, 500)
+        self.assertEqual(copy.bindings[3].value, "KEY_F")
+        source = state.config.profile_named("world-of-tanks")
+        self.assertEqual(copy.resolutions, source.resolutions)
+        self.assertEqual(copy.leds, source.leds)
+
+    def test_the_copy_is_not_loaded(self):
+        state = self._state()
+        state.mark_loaded("world-of-tanks")
+        state.duplicate_profile("world-of-tanks", "wot copy")
+        self.assertEqual(state.loaded_profile, "world-of-tanks")
+
+    def test_a_refused_name(self):
+        state = self._state()
+        self.assertFalse(state.duplicate_profile("world-of-tanks", "star-citizen"))
+        self.assertFalse(state.duplicate_profile("world-of-tanks", "  "))
+        self.assertFalse(state.duplicate_profile("missing", "x"))
+
+    def test_the_source_is_untouched(self):
+        state = self._state()
+        state.duplicate_profile("world-of-tanks", "wot copy")
+        self.assertIsNotNone(state.config.profile_named("world-of-tanks"))
+        self.assertEqual(len(state.config.profiles), 4)
+
+
+class RenameGameTests(unittest.TestCase):
+    def test_a_game_gains_its_name(self):
+        state = DaemonState(config=make_config(DESKTOP, WOT))
+        self.assertTrue(
+            state.rename_game("world-of-tanks", "WorldOfTanks.exe", "World of Tanks")
+        )
+        game = state.config.profile_named("world-of-tanks").games[0]
+        self.assertEqual(game.name, "World of Tanks")
+        self.assertEqual(game.executable, "WorldOfTanks.exe")
+
+    def test_the_executable_is_matched_case_insensitively(self):
+        state = DaemonState(config=make_config(DESKTOP, WOT))
+        self.assertTrue(state.rename_game("world-of-tanks", "worldoftanks.EXE", "WoT"))
+
+    def test_an_unknown_executable_is_refused(self):
+        state = DaemonState(config=make_config(DESKTOP, WOT))
+        self.assertFalse(state.rename_game("world-of-tanks", "Other.exe", "X"))
+        self.assertEqual(state.config.profile_named("world-of-tanks").games[0].name, "")
+
+    def test_an_unknown_profile_is_refused(self):
+        state = DaemonState(config=make_config(DESKTOP, WOT))
+        self.assertFalse(state.rename_game("missing", "WorldOfTanks.exe", "X"))
+
+    def test_a_stripped_name_is_stored_stripped(self):
+        state = DaemonState(config=make_config(DESKTOP, WOT))
+        state.rename_game("world-of-tanks", "WorldOfTanks.exe", "  WoT  ")
+        self.assertEqual(state.config.profile_named("world-of-tanks").games[0].name, "WoT")
 
 
 class ActiveSlotTests(unittest.TestCase):

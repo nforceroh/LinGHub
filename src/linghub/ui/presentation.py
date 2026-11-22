@@ -70,8 +70,16 @@ def profile_rows(state, selection: str | None) -> list[ProfileRow]:
     ]
 
 
-def binding_label(bindings: dict, index: int) -> str:
-    """What the "Does" column says for one button."""
+def binding_label(bindings: dict, index: int, pending=None) -> str:
+    """What the "Does" column says for one button.
+
+    A staged edit wins over the saved binding, so the table shows what the
+    profile will do once Apply is pressed, not what it does now. Pending
+    labels are marked with a bullet so the staged state is visible.
+    """
+    if pending is not None and index in pending:
+        edit = pending[index]
+        return "* " + describe_binding(edit.kind, edit.value)
     kind, value = bindings.get(index, ("", None))
     return describe_binding(kind, value) if kind else "—"
 
@@ -79,3 +87,13 @@ def binding_label(bindings: dict, index: int) -> str:
 def binding_labels(bindings: dict, indices) -> dict[int, str]:
     """The "Does" column for every button, keyed by ratbag index."""
     return {index: binding_label(bindings, index) for index in indices}
+
+
+def diagram_binding_label(bindings: dict, index: int) -> str:
+    """A compact, truthful label for a diagram leader line."""
+    kind, _value = bindings.get(index, ("", None))
+    if kind in ("key", "special", "button", "disabled"):
+        label = binding_label(bindings, index)
+        return label if label != "—" else "Nothing"
+    from .buttonmap import describe
+    return describe(index)

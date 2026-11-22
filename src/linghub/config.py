@@ -179,8 +179,28 @@ def write_default(path: Path | str = DEFAULT_CONFIG_PATH) -> None:
     save(path, factory_default())
 
 
+def _parse_game(raw) -> Game:
+    """One game entry, in either shape the config accepts.
+
+    A bare string is a game with no name, which is what every config written
+    before names existed holds. The object form carries the name. Accepting
+    both means no migration step for a field that is purely cosmetic.
+    """
+    if isinstance(raw, str):
+        return Game(executable=raw)
+    if isinstance(raw, dict):
+        executable = raw.get("executable")
+        if not isinstance(executable, str):
+            raise ConfigError(f"game entry needs an executable: {raw!r}")
+        name = raw.get("name", "")
+        if not isinstance(name, str):
+            raise ConfigError(f"game name must be a string: {raw!r}")
+        return Game(executable=executable, name=name)
+    raise ConfigError(f"game entry must be a string or an object: {raw!r}")
+
+
 def _parse_profile(name: str, raw: dict) -> Profile:
-    games = tuple(Game(executable=g) for g in raw.get("games", []))
+    games = tuple(_parse_game(g) for g in raw.get("games", []))
     return Profile(
         name=name,
         games=games,
@@ -236,7 +256,12 @@ def _profile_to_raw(profile: Profile) -> dict:
     """Serialize the parts of a profile the model understands."""
     raw: dict = {}
     if profile.games:
-        raw["games"] = [game.executable for game in profile.games]
+        # The object form always, even for a nameless game: one shape written
+        # is easier to reason about than two, and the reader takes both.
+        raw["games"] = [
+            {"executable": game.executable, "name": game.name}
+            for game in profile.games
+        ]
     if profile.report_rate is not None:
         raw["report_rate"] = profile.report_rate
     if profile.resolutions:

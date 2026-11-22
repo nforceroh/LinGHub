@@ -13,11 +13,15 @@ from linghub.ui.dpi_track import (
     MARKER_RADIUS,
     MAX_DPI,
     MIN_DPI,
+    PRESET_COLORS,
     TRACK_INSET,
     DpiTrack,
     dpi_at,
+    label_parts,
     position_of,
+    preset_color,
     spread,
+    superscript_number,
 )
 
 
@@ -64,6 +68,29 @@ class DpiAtTests(unittest.TestCase):
     def test_values_snap_to_the_step(self):
         """A drag must not produce 1237, which nobody would type."""
         self.assertEqual(dpi_at(position_of(1237, 400), 400), 1250)
+
+
+class PresetIdentityTests(unittest.TestCase):
+    def test_preset_colors_are_stable_by_index(self):
+        self.assertEqual(preset_color(0), PRESET_COLORS[0])
+        self.assertEqual(preset_color(4), PRESET_COLORS[4])
+        self.assertEqual(preset_color(5), PRESET_COLORS[0])
+
+    def test_preset_numbers_use_superscripts(self):
+        self.assertEqual(superscript_number(1), "¹")
+        self.assertEqual(superscript_number(5), "⁵")
+
+    def test_a_single_preset_uses_its_own_color(self):
+        parts = label_parts(1600, [3])
+        self.assertEqual(parts, [
+            ("⁴1600", preset_color(3), 11),
+        ])
+
+    def test_a_shared_dpi_keeps_preset_numbers_colored(self):
+        parts = label_parts(800, [0, 1])
+        self.assertEqual(parts[0], ("¹", preset_color(0), 9))
+        self.assertEqual(parts[1], ("²", preset_color(1), 9))
+        self.assertEqual(parts[2], ("800", (1.0, 1.0, 1.0), 11))
 
 
 class SpreadTests(unittest.TestCase):

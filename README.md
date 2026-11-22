@@ -333,7 +333,7 @@ editing the config file.
 | `ListProfiles` | method → `as` | Every profile name in the config |
 | `LoadProfile(s)` | method → `b` | Load a profile now; false if it does not exist |
 | `Reload` | method → `b` | Re-read the config file |
-| `GetView(s)` | method → `(sssasa(iss)a(us(uuu)uu)a(uuuu)auu)` | Everything a client shows, in one read: active profile, detected game, desktop profile, profile names; then the named profile's bindings (index, type, value), LED zones (index, mode, colour, brightness, duration), DPI slots (index, dpi, is_default, is_disabled), accepted report rates, and its current report rate. Unknown profile: empty sections |
+| `GetView(s)` | method → `(sssasa(iss)a(us(uuu)uu)a(uuuu)auu)a(suua(ss))` | Everything a client shows, in one read: active profile, detected game, desktop profile, profile names; then the named profile's bindings (index, type, value), LED zones (index, mode, colour, brightness, duration), DPI slots (index, dpi, is_default, is_disabled), accepted report rates, and its current report rate; then every profile's canvas summary (name, default DPI, report rate, games as executable + display name). Unknown profile: empty sections |
 | `SetBinding(s,i,s,s)` → `siss` | method → `b` | Assign one button's binding |
 | `ClearBinding(s,i)` → `si` | method → `b` | Record a button as doing nothing |
 | `SetLeds(s,s,u,u,u,u,u)` → `ssuuuuu` | method → `b` | Set every LED zone to one effect |
@@ -342,6 +342,8 @@ editing the config file.
 | `CreateProfile(s,s)` | method → `b` | Add a profile; second argument is a game executable or empty |
 | `RenameProfile(s,s)` | method → `b` | Rename a profile and every reference to it |
 | `DeleteProfile(s)` | method → `b` | Remove a profile; refused for the desktop one |
+| `DuplicateProfile(s,s)` | method → `b` | Add a profile as a full copy of another, including its games; the copy is not loaded |
+| `RenameGame(s,s,s)` | method → `b` | Set one game's display name, by profile and executable |
 | `ActiveProfile` | property `s` | Profile currently on the mouse, empty if unknown |
 | `DetectedGame` | property `s` | Game currently detected, empty if none |
 | `DesktopProfile` | property `s` | Profile used when no game is running |

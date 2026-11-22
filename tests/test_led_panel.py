@@ -8,7 +8,7 @@ dirty tracking, and that nothing is published before Save.
 
 import unittest
 
-from linghub.ui.led_panel import LedPanel
+from linghub.ui.led_panel import MODES, LedPanel
 
 
 class DirtyStateTests(unittest.TestCase):
@@ -74,6 +74,36 @@ class DirtyStateTests(unittest.TestCase):
         for value in range(100, 121):
             panel._brightness.set_value(value)
         self.assertEqual(calls, [])
+
+
+class EffectControlTests(unittest.TestCase):
+    def test_four_effect_options_are_available(self):
+        panel = LedPanel(on_save=lambda *a: None)
+        self.assertEqual(
+            [label for _name, label in MODES],
+            ["Off", "Fixed colour", "Cycle colours", "Breathing"],
+        )
+        self.assertEqual(panel._mode.get_selected(), 1)
+
+    def test_selecting_cycle_updates_the_panel_mode(self):
+        panel = LedPanel(on_save=lambda *a: None)
+        panel._mode.set_selected(2)
+        self.assertEqual(panel.mode, "cycle")
+
+    def test_rate_and_brightness_values_update_as_labels(self):
+        panel = LedPanel(on_save=lambda *a: None)
+        panel.load({
+            0: {
+                "mode": "on",
+                "color": (10, 20, 30),
+                "brightness": 100,
+                "duration": 5000,
+            },
+        })
+        panel._brightness.set_value(180)
+        panel._speed.set_value(10)
+        self.assertEqual(panel._brightness_value.get_text(), "180")
+        self.assertEqual(panel._speed_value.get_text(), "2000ms")
 
 
 if __name__ == "__main__":

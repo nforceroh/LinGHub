@@ -51,14 +51,21 @@ def view(
     active: str = "desktop",
     profiles: tuple[str, ...] = ("desktop", "world-of-tanks", "star-citizen"),
     leds=None,
+    summaries=None,
 ):
     """A DaemonView, for tests that apply one to an existing window.
 
     The poll delivers a view; a test that simulates a poll builds one of these
     rather than hand-rolling the two-level dataclass.
     """
-    from linghub.daemon_view import DaemonView, ProfileView, ViewState
+    from linghub.daemon_view import DaemonView, ProfileSummary, ProfileView, ViewState
 
+    if summaries is None:
+        summaries = tuple(
+            ProfileSummary(name=name)
+            for name in ("desktop", "world-of-tanks", "star-citizen", "wot")
+            if name in profiles
+        )
     return DaemonView(
         state=ViewState(
             active_profile=active,
@@ -66,6 +73,7 @@ def view(
             desktop_profile="desktop",
         ),
         profile=ProfileView(leds=leds or {}),
+        summaries=summaries,
     )
 
 
@@ -97,10 +105,36 @@ def make_window(
     from linghub import version
 
     window._daemon_version = version.DaemonVersion.not_running()
-    window._profile_list = Gtk.ListBox()
-    window._profile_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+    from linghub.ui.profile_selector import ProfileSelector
 
-    window._profile_rows = {}
+    window._selector = ProfileSelector(
+        on_chosen=lambda name: None, on_manage=lambda: None
+    )
+    from linghub.ui.home_card import HomeCard
+
+    window._card = HomeCard()
+    # The stack needs both children and a visible one, or get_visible_child_name
+    # returns None and the home-screen tests cannot tell which view is showing.
+    window._stack = Gtk.Stack()
+    window._stack.add_named(Gtk.Label(label="home"), "home")
+    window._stack.add_named(Gtk.Label(label="editor"), "editor")
+    window._config_stack = Gtk.Stack()
+    window._config_stack.add_named(Gtk.Label(label="assignments"), "assignments")
+    window._config_stack.add_named(Gtk.Label(label="dpi"), "dpi")
+    window._config_stack.add_named(Gtk.Label(label="lightsync"), "lightsync")
+    window._config_stack.set_visible_child_name("assignments")
+    from linghub.ui.manage_profiles import ManageProfiles
+
+    window._manage = ManageProfiles(
+        on_add_game=lambda: None,
+        on_edit_game=lambda *a: None, on_details=lambda name: None,
+        on_duplicate=lambda name: None,
+        on_delete=lambda name: None,
+    )
+    window._stack.add_named(window._manage, "manage")
+    window._stack.set_visible_child_name("home")
+    window._back_button = Gtk.Button()
+    window._back_button.set_visible(False)
     window._table_rows = {}
     window._binding_rows = {}
     window._bindings = {}
@@ -121,7 +155,9 @@ def make_window(
         from linghub.ui.dpi_panel import DpiPanel
         from linghub.ui.led_panel import LedPanel
 
-        window._led_panel = LedPanel(on_save=lambda *a: None)
+        window._led_panel = LedPanel(
+            on_save=lambda *a: None,
+        )
         window._dpi_panel = DpiPanel(on_save=lambda *a: None)
     else:
         window._led_panel = None

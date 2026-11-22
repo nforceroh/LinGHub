@@ -109,6 +109,17 @@ class LoadTests(unittest.TestCase):
         panel.load([{"dpi": 800}], (125, 250), 1337)
         self.assertFalse(panel.dirty)
 
+    def test_legend_tracks_preset_values_and_default(self):
+        panel = _panel()
+        text = panel._legend_labels[1].get_text()
+        self.assertIn("800", text)
+        self.assertIn("²", text)
+
+    def test_disabled_preset_is_dimmed_in_the_legend(self):
+        panel = _panel()
+        text = panel._legend_labels[2].get_text()
+        self.assertIn("1600", text)
+
     def test_range_covers_the_g502(self):
         self.assertEqual(MIN_DPI, 100)
         self.assertGreaterEqual(MAX_DPI, 25600)

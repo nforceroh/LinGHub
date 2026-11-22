@@ -25,7 +25,13 @@ from .buttonmap import BUTTONS, DIAGRAM_IMAGE, describe, manual_number
 from .client import DaemonClient
 from .daemon_write import DaemonWrite
 from .pending_edits import PendingEditsFor
-from ..daemon_view import DaemonView, ViewState
+from .profile_selector import ProfileSelector
+from .home_card import HomeCard
+from .manage_profiles import ManageProfiles
+from .assignment_sidebar import AssignmentSidebar
+from .config_rail import ConfigRail
+from ..hardware.battery import battery, model_name
+from ..daemon_view import DaemonView, ProfileSummary, ViewState
 from .diagram import MouseDiagram
 from . import presentation
 from .. import version
@@ -59,7 +65,6 @@ class MainWindow(Adw.ApplicationWindow):
         # profile is loaded on the mouse: editing must not reconfigure it.
         self._editing: str | None = None
         self._bindings: dict[int, tuple[str, str]] = {}
-        self._profile_rows: dict[str, Adw.ActionRow] = {}
         self._led_panel: LedPanel | None = None
         self._dpi_panel: DpiPanel | None = None
         self._view: DaemonView | None = None
@@ -68,13 +73,44 @@ class MainWindow(Adw.ApplicationWindow):
         self._daemon_version = version.DaemonVersion.not_running()
 
         self.set_default_size(*self._preferred_size())
-        self.connect("map", lambda _w: self._fit_to_screen())
+        self.connect("map", self._on_map)
 
         toolbar = Adw.ToolbarView()
         header = Adw.HeaderBar()
         header.set_title_widget(Adw.WindowTitle(title="LinGHub", subtitle=""))
         self._title = header.get_title_widget()
+
+        self._back_button = Gtk.Button(icon_name="go-previous-symbolic")
+        self._back_button.set_tooltip_text("Back to the device")
+        self._back_button.add_css_class("flat")
+        self._back_button.connect("clicked", lambda _b: self._back_clicked())
+        self._back_button.set_visible(False)
+        header.pack_start(self._back_button)
+
+        self._discard_button = Gtk.Button(label="Discard")
+        self._discard_button.set_tooltip_text("Discard all unsaved changes")
+        self._discard_button.add_css_class("flat")
+        self._discard_button.connect("clicked", lambda _b: self._discard_changes())
+        self._discard_button.set_sensitive(False)
+        header.pack_end(self._discard_button)
+
+        self._save_button = Gtk.Button(label="Apply")
+        self._save_button.set_tooltip_text("Apply changes to the profile")
+        self._save_button.add_css_class("suggested-action")
+        self._save_button.connect("clicked", lambda _b: self._save_changes())
+        self._save_button.set_sensitive(False)
+        header.pack_end(self._save_button)
+
+        # The selector lives in the header so it is present on every view: which
+        # profile you are editing is context for all of them. It sits at the
+        # right, before the menu, as the reference does.
+        self._selector = ProfileSelector(
+            on_chosen=self._choose_profile,
+            on_manage=self._open_manage_profiles,
+        )
+        header.pack_end(self._selector)
         header.pack_end(self._build_main_menu())
+
         toolbar.add_top_bar(header)
 
         self._status = Gtk.Label(label="Connecting…")
@@ -87,7 +123,17 @@ class MainWindow(Adw.ApplicationWindow):
         self._banner = Adw.Banner()
         toolbar.add_top_bar(self._banner)
 
-        toolbar.set_content(self._build_content())
+        # Three views in one window: the home screen the window opens on, the
+        # editor reached by clicking the mouse, and the manage-profiles canvas
+        # reached from the selector. A stack rather than three windows, so
+        # there is one place to refresh and one thing to manage.
+        self._stack = Gtk.Stack()
+        self._stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self._stack.add_named(self._build_home(), "home")
+        self._stack.add_named(self._build_editor(), "editor")
+        self._stack.add_named(self._build_manage(), "manage")
+
+        toolbar.set_content(self._stack)
         self.set_content(toolbar)
 
         # No poll: the daemon announces every change the window shows, and
@@ -122,6 +168,18 @@ class MainWindow(Adw.ApplicationWindow):
             min(wanted_height, int(geometry.height * 0.88)),
         )
 
+    def _on_map(self, _window) -> None:
+        """Put the window fully on-screen the first time it is shown.
+
+        The desktop remembers a window position per application id, and a
+        position saved when the window's minimum width exceeded the screen
+        keeps restoring half off-screen. Maximizing overrides it; the user
+        can unmaximize to whatever size they want afterwards.
+        """
+        self._fit_to_screen()
+        if not self.is_maximized():
+            self.maximize()
+
     def _fit_to_screen(self) -> None:
         """Shrink a window that is larger than the screen it opened on.
 
@@ -147,31 +205,110 @@ class MainWindow(Adw.ApplicationWindow):
             min(height, int(geometry.height * 0.88)),
         )
 
-    def _build_content(self) -> Gtk.Widget:
-        """Diagram and bindings on top, the device panels across the bottom.
+    def _build_home(self) -> Gtk.Widget:
+        """The home screen: the device card, centred on an empty canvas."""
+        self._card = HomeCard()
+        self._card.connect("configure", lambda _c: self._show_view("editor"))
 
-        DPI and lighting sit under *both* columns rather than inside the right
-        one. They are wide controls (five slot rows, a colour, two sliders) and
-        the right column alone squeezed them, while the diagram left a tall
-        empty area beside them. Spanning the full width gives each panel the
-        room it needs and shortens the right column at the same time.
-        """
-        top = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
-        # The diagram needs 584px and the side pane 538px, so the split sits
-        # where both get their natural width at the default window size.
-        top.set_position(600)
-        top.set_wide_handle(True)
-        top.set_start_child(self._build_diagram_pane())
-        top.set_end_child(self._build_side_pane())
-        # The top row takes whatever height is left after the panels below
-        # have their natural height.
-        top.set_vexpand(True)
+        centre = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        centre.set_halign(Gtk.Align.CENTER)
+        centre.set_valign(Gtk.Align.CENTER)
+        centre.append(self._card)
+        return centre
 
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        content.append(top)
-        content.append(Gtk.Separator())
-        content.append(self._build_device_panels())
+    def _build_manage(self) -> Gtk.Widget:
+        """The manage-profiles canvas: games across the top, profiles below."""
+        self._manage = ManageProfiles(
+            on_add_game=self._prompt_add_game,
+            on_edit_game=self._prompt_rename_game,
+            on_details=self._canvas_details,
+            on_duplicate=self._prompt_duplicate_profile,
+            on_delete=self._prompt_canvas_delete,
+        )
+        return self._manage
+
+    def _build_editor(self) -> Gtk.Widget:
+        """The configuration screen: one rail and three configuration views."""
+        self._config_rail = ConfigRail(
+            on_view=self._show_config_view,
+            on_manage=self._open_manage_profiles,
+        )
+
+        self._config_stack = Gtk.Stack()
+        self._config_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self._config_stack.add_named(self._build_assignments_view(), "assignments")
+        self._config_stack.add_named(self._build_dpi_view(), "dpi")
+        self._config_stack.add_named(self._build_lightsync_view(), "lightsync")
+        self._config_stack.set_visible_child_name("assignments")
+
+        content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        content.append(self._config_rail)
+        content.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
+        content.append(self._config_stack)
         return content
+
+    def _build_assignments_view(self) -> Gtk.Widget:
+        """Assignments: command sidebar on the left, diagram and table on the right."""
+        self._assignment_sidebar = AssignmentSidebar(
+            on_chosen=self._on_assignment_chosen,
+        )
+
+        right = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
+        right.set_wide_handle(True)
+        right.set_position(430)
+        right.set_start_child(self._build_diagram_pane())
+
+        table_scroller = Gtk.ScrolledWindow()
+        table_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        table_scroller.set_vexpand(True)
+
+        table_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        table_box.set_margin_top(8)
+        table_box.set_margin_bottom(12)
+        table_box.set_margin_start(12)
+        table_box.set_margin_end(12)
+        table_box.append(self._section_label("Bindings"))
+        table_box.append(self._build_button_table())
+        table_scroller.set_child(table_box)
+        right.set_end_child(table_scroller)
+
+        split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        split.set_wide_handle(True)
+        # 360px: wide enough for the four group tabs and the choice labels
+        # to read without ellipsizing. Narrower defaults squeezed the tab row
+        # and left every row caption cut off until the divider was dragged.
+        split.set_position(390)
+        split.set_start_child(self._assignment_sidebar)
+        split.set_end_child(right)
+        return split
+
+    def _build_dpi_view(self) -> Gtk.Widget:
+        """The DPI view, moved out of the old full-width device row."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box.set_margin_top(18)
+        box.set_margin_bottom(18)
+        box.set_margin_start(18)
+        box.set_margin_end(18)
+        box.append(self._section_label("Sensitivity (DPI)"))
+        self._dpi_panel = DpiPanel(on_save=self._on_dpi_saved)
+        box.append(self._dpi_panel)
+        return box
+
+    def _build_lightsync_view(self) -> Gtk.Widget:
+        """The lighting view, moved out of the old full-width device row."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box.set_margin_top(18)
+        box.set_margin_bottom(18)
+        box.set_margin_start(18)
+        box.set_margin_end(18)
+        box.append(self._section_label("LIGHTSYNC"))
+        self._led_panel = LedPanel(
+            on_save=self._on_led_saved,
+        )
+        self._led_panel.set_hexpand(False)
+        self._led_panel.set_halign(Gtk.Align.START)
+        box.append(self._led_panel)
+        return box
 
     def _build_diagram_pane(self) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -183,13 +320,15 @@ class MainWindow(Adw.ApplicationWindow):
         if IMAGE.exists():
             self._diagram = MouseDiagram(str(IMAGE))
             self._diagram.connect("button-selected", self._on_button_selected)
-            frame = Gtk.Frame()
-            frame.set_child(self._diagram)
+            self._diagram.connect("assignment-dropped", self._on_assignment_dropped)
+            # No Frame: it drew a border and a filled background around the
+            # image, which has a transparent background of its own. The image
+            # sits directly in the pane, so the UI's background shows through.
             # Top-aligned: the image cannot grow to fill a tall pane without
             # distorting, so the space it leaves belongs at the bottom rather
             # than split above and below it.
-            frame.set_valign(Gtk.Align.START)
-            box.append(frame)
+            self._diagram.set_valign(Gtk.Align.START)
+            box.append(self._diagram)
         else:
             self._diagram = None
             box.append(Gtk.Label(label=f"Diagram not found: {IMAGE}"))
@@ -212,17 +351,6 @@ class MainWindow(Adw.ApplicationWindow):
 
         pane.append(self._build_profile_header())
 
-        self._profile_list = Gtk.ListBox()
-        self._profile_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        self._profile_list.connect("row-selected", self._on_profile_row_selected)
-        profile_scroller = Gtk.ScrolledWindow()
-        profile_scroller.set_child(self._profile_list)
-        profile_scroller.set_min_content_height(96)
-        profile_scroller.set_max_content_height(160)
-        profile_scroller.set_propagate_natural_height(True)
-        pane.append(profile_scroller)
-
-        pane.append(self._section_label("Bindings"))
         # The table is not in its own scroller: the whole pane scrolls as one,
         # so there is a single scrollbar and no section can be clipped to a
         # sliver while the pane still has room below it.
@@ -238,45 +366,17 @@ class MainWindow(Adw.ApplicationWindow):
         return scroller
 
     def _build_profile_header(self) -> Gtk.Widget:
-        """The Profiles heading, its management buttons, and the commit pair.
+        """The Bindings heading and the commit pair.
 
-        Apply and Discard live here rather than in the header bar because this
-        is where the eye is while editing. They are separated from the profile
-        buttons by a gap: those choose *which* profile, these commit what you
-        changed in it.
+        The profile buttons that used to live here are gone: choosing a profile
+        is the selector's job, and adding, renaming and deleting moved to the
+        manage-profiles canvas. Apply and Discard stay, because they commit what
+        you changed in the profile the selector chose.
         """
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        heading = self._section_label("Profiles")
+        heading = self._section_label("Bindings")
         heading.set_hexpand(True)
         header.append(heading)
-
-        self._new_profile_button = Gtk.Button(icon_name="list-add-symbolic")
-        self._new_profile_button.set_tooltip_text("Add a profile")
-        self._new_profile_button.add_css_class("flat")
-        self._new_profile_button.connect("clicked", lambda _b: self._prompt_new_profile())
-        header.append(self._new_profile_button)
-
-        self._rename_profile_button = Gtk.Button(icon_name="document-edit-symbolic")
-        self._rename_profile_button.set_tooltip_text("Rename the selected profile")
-        self._rename_profile_button.add_css_class("flat")
-        self._rename_profile_button.connect("clicked", lambda _b: self._prompt_rename_profile())
-        header.append(self._rename_profile_button)
-
-        self._delete_profile_button = Gtk.Button(icon_name="user-trash-symbolic")
-        self._delete_profile_button.set_tooltip_text("Delete the selected profile")
-        self._delete_profile_button.add_css_class("flat")
-        self._delete_profile_button.connect("clicked", lambda _b: self._prompt_delete_profile())
-        header.append(self._delete_profile_button)
-
-        # Loading is its own action: selecting a profile only chooses what to
-        # edit, so this is how you put one on the mouse.
-        self._load_profile_button = Gtk.Button(label="Load")
-        self._load_profile_button.set_tooltip_text("Load the selected profile onto the mouse")
-        self._load_profile_button.add_css_class("flat")
-        self._load_profile_button.connect("clicked", lambda _b: self._load_selected())
-        header.append(self._load_profile_button)
-
-        header.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
 
         self._discard_button = Gtk.Button(icon_name="edit-undo-symbolic")
         self._discard_button.set_tooltip_text("Discard all unsaved changes")
@@ -356,7 +456,10 @@ class MainWindow(Adw.ApplicationWindow):
             manual = Gtk.Label(label=manual_number(spot.index), xalign=0)
             manual.add_css_class("dim-label")
             function = Gtk.Label(label=describe(spot.index), xalign=0)
-            function.set_hexpand(True)
+            # No hexpand: it stretched the Function column across the pane and
+            # pushed Does and Ratbag to the far edge, leaving a wide gap
+            # between Function and Does. The columns now sit at their natural
+            # widths, close together.
             does = Gtk.Label(label="—", xalign=0)
             ratbag = Gtk.Label(label=str(spot.index), xalign=1)
             ratbag.add_css_class("dim-label")
@@ -506,6 +609,14 @@ class MainWindow(Adw.ApplicationWindow):
 
         self._rebuild_profiles()
         self._rebuild_bindings()
+        if hasattr(self, "_diagram") and self._diagram is not None:
+            self._diagram.set_binding_labels(
+                {
+                    index: presentation.diagram_binding_label(self._bindings, index)
+                    for index in [spot.index for spot in BUTTONS]
+                }
+            )
+        self._card.show_device(self._device_name(), battery())
         if self._led_panel is not None:
             # Never reload the panel over unsaved edits: any change signal
             # refreshes the view, and would silently discard whatever the user
@@ -527,7 +638,7 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._pending.for_profile(profile).set_resolutions(slots, rate)
         self._sync_save_buttons()
-        self._status.set_text("DPI changes pending — press Save to apply.")
+        self._status.set_text("DPI changes pending — press Apply.")
 
     def _sync_save_buttons(self) -> None:
         """Enable Save and Discard only when something is pending."""
@@ -570,7 +681,7 @@ class MainWindow(Adw.ApplicationWindow):
                         make_default=is_default, disabled=disabled,
                     ):
                         self._status.set_text(
-                            f"The daemon rejected DPI slot {index + 1}."
+                            f"The daemon rejected DPI preset {index + 1}."
                         )
                         return False
 
@@ -610,6 +721,10 @@ class MainWindow(Adw.ApplicationWindow):
     def _discard_changes(self) -> None:
         """Throw away every pending edit and show the config as it is."""
         self._pending.clear()
+        if self._dpi_panel is not None:
+            self._dpi_panel.revert()
+        if self._led_panel is not None:
+            self._led_panel.revert()
         self._sync_save_buttons()
         self._status.set_text("Discarded unsaved changes.")
         # Reload from the daemon rather than from a remembered snapshot: the
@@ -623,42 +738,35 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._pending.for_profile(profile).set_leds(mode, brightness, duration, color)
         self._sync_save_buttons()
-        self._status.set_text("Lighting changes pending — press Save to apply.")
+        self._status.set_text("Lighting changes pending — press Apply.")
+
+    def _device_name(self) -> str:
+        """The mouse's name, as the card shows it.
+
+        The kernel's hidpp power-supply entry carries the full model name, and
+        the daemon publishes none of its own. A wired mouse has no such entry,
+        so the fallback is the generic name rather than nothing.
+        """
+        return model_name() or "Logitech G502"
 
     def _rebuild_profiles(self) -> None:
-        """Make the profile list match the daemon's state, reusing rows.
+        """Make the selector match the daemon's state.
 
-        Rows are updated in place rather than recreated. Rebuilding the list
-        on every refresh destroyed the user's selection, so clicking a
-        profile appeared to bounce back to the first row.
+        The selector updates its rows in place, so a refresh does not destroy
+        the user's place in the list.
         """
-        rows = presentation.profile_rows(self._state, self._editing)
-        names = [display.name for display in rows]
-
-        # Drop rows for profiles that went away.
-        existing = self._profile_rows
-        for name in [name for name in existing if name not in names]:
-            self._profile_list.remove(existing.pop(name))
-
-        for position, display in enumerate(rows):
-            name = display.name
-            row = existing.get(name)
-            if row is None:
-                row = Adw.ActionRow(title=name)
-                row.set_activatable(True)
-                row._check = Gtk.Image.new_from_icon_name("object-select-symbolic")
-                row.add_prefix(row._check)
-                row._desktop = Gtk.Label(label="desktop")
-                row.add_suffix(row._desktop)
-                existing[name] = row
-                self._profile_list.insert(row, position)
-
-            row._check.set_visible(display.on_the_mouse)
-            row.set_subtitle(display.subtitle)
-            row._desktop.set_visible(display.is_desktop)
+        self._selector.show_profiles(
+            self._state.profiles,
+            active=self._state.active_profile,
+            editing=self._editing_profile(),
+        )
 
     def _rebuild_bindings(self) -> None:
         """Fill in what each button does, and highlight the selected row."""
+        profile = self._editing_profile()
+        pending = (
+            self._pending.for_profile(profile).bindings if profile else {}
+        )
         for index, widget in self._table_rows.items():
             if index == self._selected_button:
                 widget.add_css_class("accent")
@@ -667,44 +775,18 @@ class MainWindow(Adw.ApplicationWindow):
 
             label = self._binding_rows.get(index)
             if label is not None:
-                label.set_text(presentation.binding_label(self._bindings, index))
+                label.set_text(
+                    presentation.binding_label(self._bindings, index, pending)
+                )
+        if hasattr(self, "_diagram") and self._diagram is not None:
+            self._diagram.set_binding_labels(
+                {
+                    index: presentation.diagram_binding_label(self._bindings, index)
+                    for index in [spot.index for spot in BUTTONS]
+                }
+            )
 
     # --- profile management ----------------------------------------------
-
-    def _selected_profile(self) -> str | None:
-        """The profile the list currently highlights."""
-        row = self._profile_list.get_selected_row()
-        return row.get_title() if row is not None else None
-
-    def _prompt_new_profile(self) -> None:
-        self._ask_for_text(
-            title="New profile",
-            label="Profile name",
-            secondary="Game executable (optional)",
-            on_accept=self._create_profile,
-        )
-
-    def _create_profile(self, name: str, executable: str, dialog) -> None:
-        if not name.strip():
-            dialog.show_error("A profile needs a name.")
-            return
-        run_and_report(
-            self._do_create_profile(name.strip(), executable.strip(), dialog),
-            self._on_async_error,
-        )
-
-    async def _do_create_profile(self, name: str, executable: str, dialog) -> None:
-        async def change() -> bool:
-            return await self._client.create_profile(name, executable)
-
-        await self._writes.run(
-            change,
-            report=dialog.show_error,
-            failure="Could not create the profile",
-            rejected=f"Cannot create {name!r}. The name may already be in use.",
-            success=f"Created profile {name}.",
-            on_success=dialog.close,
-        )
 
     async def _do_rename_profile(self, old: str, new: str, dialog) -> None:
         if not new or new == old:
@@ -724,7 +806,7 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def _prompt_rename_profile(self) -> None:
-        old = self._selected_profile()
+        old = self._editing_profile()
         if old is None:
             self._status.set_text("Select a profile to rename.")
             return
@@ -739,7 +821,7 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def _prompt_delete_profile(self) -> None:
-        name = self._selected_profile()
+        name = self._editing_profile()
         if name is None:
             self._status.set_text("Select a profile to delete.")
             return
@@ -836,6 +918,35 @@ class MainWindow(Adw.ApplicationWindow):
             on_apply=lambda i, k, v: self._start_binding_write(profile, i, k, v),
         ).present()
 
+    def _on_assignment_dropped(self, _diagram, index: int, choice) -> None:
+        """A sidebar choice dropped on a hotspot assigns that button."""
+        self._selected_button = index
+        self._on_assignment_chosen(choice.kind, choice.value)
+        self._rebuild_bindings()
+
+    def _on_assignment_chosen(self, kind: str, value: object) -> None:
+        """Stage a sidebar choice for the currently selected button."""
+        if self._selected_button is None:
+            self._status.set_text(
+                "Select a button on the diagram or in the bindings table first."
+            )
+            return
+        profile = self._editing_profile()
+        if profile is None:
+            self._status.set_text("Select a profile first.")
+            return
+        self._start_binding_write(
+            profile, self._selected_button, kind, value
+        )
+        if kind == "disabled":
+            assigned = "Nothing"
+        else:
+            from .binding_labels import describe_binding
+            assigned = describe_binding(kind, value)
+        self._status.set_text(
+            f"{describe(self._selected_button)} will do {assigned} — press Apply."
+        )
+
     def _editing_profile(self) -> str | None:
         """The profile the panels show and edit."""
         return presentation.editing_profile(self._state, self._editing)
@@ -850,7 +961,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._pending.for_profile(profile).set_binding(index, kind, value)
         self._sync_save_buttons()
         self._status.set_text(
-            f"{describe(index)} pending — press Save to apply."
+            f"{describe(index)} pending — press Apply."
         )
         return True
 
@@ -863,14 +974,13 @@ class MainWindow(Adw.ApplicationWindow):
         self._status.set_text(f"Selected: {describe(index)}")
         self._rebuild_bindings()
 
-    def _on_profile_row_selected(self, _list, row) -> None:
-        """Selecting a row chooses what to edit. It does not load anything."""
-        if row is None:
-            return
-        self._select_profile(row.get_title())
+    def _choose_profile(self, name: str) -> None:
+        """Choose a profile from the selector, and load it onto the mouse.
 
-    def _select_profile(self, name: str) -> None:
-        """Make `name` the profile the panels show and edit.
+        Choosing and loading are one action now. The old window had two — a
+        list that chose what to edit and a `Load` button that put it on the
+        mouse — and that distinction is the thing users are least likely to
+        expect.
 
         Switching with unsaved changes asks first: the pending edits belong to
         the profile being left, and holding them for several profiles at once
@@ -883,23 +993,330 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._apply_selection(name)
 
-    def _apply_selection(self, name: str) -> None:
+    def _show_view(self, name: str) -> None:
+        """Swap between the home, manage and configuration screens."""
+        self._stack.set_visible_child_name(name)
+        self._back_button.set_visible(name != "home")
+        if name == "editor":
+            self._show_config_view("assignments")
+
+    def _show_config_view(self, name: str) -> None:
+        """Choose one of the three configuration views."""
+        if hasattr(self, "_config_stack"):
+            self._config_stack.set_visible_child_name(name)
+        if hasattr(self, "_config_rail") and name in (
+            "dpi", "assignments", "lightsync"
+        ):
+            self._config_rail.select(name)
+
+    def _open_manage_profiles(self) -> None:
+        """Open the manage-profiles canvas.
+
+        The canvas is a view in this window, not a separate one: one source
+        of truth, one place to refresh. Opening it with edits pending asks
+        first, reusing the switch-profile prompt — it is the same question,
+        because leaving the profile being edited behind is what both do
+        (spec §2.7).
+        """
+        if self._pending.dirty:
+            self._confirm_switch_for_canvas()
+            return
+        self._show_canvas()
+
+    # --- canvas actions --------------------------------------------------
+
+    def _fill_canvas(self, view: DaemonView) -> None:
+        """Fill the canvas from a view, if one has been read.
+
+        A daemon from before the canvas publishes no summaries, so the tiles
+        are built from the profile names alone: name-only tiles are what a
+        user can act on, and the summary line arrives when the daemon does.
+        """
+        if view is None or self._manage is None:
+            return
+        summaries = view.summaries or tuple(
+            ProfileSummary(name=name) for name in view.state.profiles
+        )
+        self._manage.show(summaries, view.state.desktop_profile)
+
+    def _prompt_add_game(self) -> None:
+        """Add a game: the executable to match, a name, and its profile."""
+        self._manage.open_add_game(
+            self,
+            self._state.profiles,
+            self._create_game_profile,
+        )
+
+    def _prompt_rename_game(self, executable: str, name: str) -> None:
+        """Rename a game's display name, by re-opening the dialog filled in.
+
+        The dialog's callback takes (executable, name, profile); editing
+        never moves the game between profiles, so the profile arrives empty
+        and the owning profile is looked up here, from the view.
+        """
+        self._manage.open_edit_game(
+            self, executable, name,
+            self._state.profiles,
+            lambda _exec, new_name, _profile:
+                self._rename_game(executable, new_name.strip()),
+        )
+
+    def _create_game_profile(self, executable: str, name: str, profile: str) -> None:
+        """Create the profile a new game belongs to, carrying the game.
+
+        ADD GAME creates both: in LinGHub a game is owned by a profile, so a
+        game with no profile left matches nothing. A profile name that is
+        already in use is refused by the daemon and reported, not silently
+        attached to the existing one.
+        """
+        profile = profile.strip()
+        if profile in self._state.profiles:
+            self._status.set_text(
+                f"Profile {profile!r} already exists; "
+                "rename it or choose another name."
+            )
+            return
+        run_and_report(
+            self._do_create_game_profile(executable, name, profile),
+            self._on_async_error,
+        )
+
+    async def _do_create_game_profile(
+        self, executable: str, name: str, profile: str
+    ) -> None:
+        async def change() -> bool:
+            ok = await self._client.create_profile(profile, executable)
+            if not ok:
+                return False
+            if name and name != executable:
+                return await self._client.rename_game(profile, executable, name)
+            return True
+
+        await self._writes.run(
+            change,
+            report=self._status.set_text,
+            failure="Could not add the game",
+            rejected=(
+                f"Cannot add {executable!r}. The profile name may be in use."
+            ),
+            success=f"Added {name or executable} to {profile}.",
+        )
+
+    def _rename_game(self, executable: str, name: str) -> None:
+        """Set a game's display name, reporting on the status line.
+
+        The prompt has closed by the time the daemon answers, so its errors
+        belong on the status line rather than in a dialog nobody is looking
+        at.
+        """
+        profile = self._profile_of_game(executable)
+        if profile is None:
+            self._status.set_text(f"No profile carries {executable}.")
+            return
+
+        async def change() -> bool:
+            return await self._client.rename_game(profile, executable, name)
+
+        async def do():
+            await self._writes.run(
+                change,
+                report=self._status.set_text,
+                failure="Could not rename the game",
+                rejected=f"Cannot rename {executable!r}.",
+                success=f"Renamed the game to {name}.",
+            )
+
+        run_and_report(do(), self._on_async_error)
+
+    def _profile_of_game(self, executable: str) -> str | None:
+        """The profile carrying this game, from the last view read."""
+        if self._view is None:
+            return None
+        for summary in self._view.summaries:
+            for game_executable, _name in summary.games:
+                if game_executable.casefold() == executable.casefold():
+                    return summary.name
+        return None
+
+    def _canvas_details(self, name: str) -> None:
+        """Close the canvas and edit the profile, without loading it.
+
+        The main window is where bindings, DPI and lighting are edited; a
+        second editor would be a second place for the same rules. Editing
+        deliberately does not load: DETAILS is an edit-side action, and
+        taking over the mouse is the selector's job (spec §2.7).
+        """
+        if self._pending.dirty:
+            self._confirm_switch(name, load=False)
+            return
+        self._edit_without_loading(name)
+
+    def _edit_without_loading(self, name: str) -> None:
         self._editing = name
         self._pending.clear()
         self._sync_save_buttons()
-        self._status.set_text(f"Editing {name}.")
+        self._stack.set_visible_child_name("editor")
+        self._back_button.set_visible(True)
+        self._status.set_text(f"Editing {name} (not loaded).")
+        self._rebuild_profiles()
         self._refresh()
 
-    def _confirm_switch(self, name: str) -> None:
-        """Ask what to do with unsaved changes before switching profiles."""
+    def _prompt_duplicate_profile(self, name: str) -> None:
+        self._ask_for_text(
+            title=f"Duplicate {name}",
+            label="New profile name",
+            initial=f"{name} copy",
+            on_accept=lambda new, _exec, dialog: run_and_report(
+                self._do_duplicate_profile(name, new.strip(), dialog),
+                self._on_async_error,
+            ),
+        )
+
+    async def _do_duplicate_profile(self, old: str, new: str, dialog) -> None:
+        if not new:
+            dialog.show_error("Enter a name for the copy.")
+            return
+
+        async def change() -> bool:
+            return await self._client.duplicate_profile(old, new)
+
+        await self._writes.run(
+            change,
+            report=dialog.show_error,
+            failure="Could not duplicate the profile",
+            rejected=f"Cannot name the copy {new!r}. The name may be in use.",
+            success=f"Copied {old} to {new}.",
+            on_success=dialog.close,
+        )
+
+    def _prompt_canvas_delete(self, name: str) -> None:
+        if name == self._state.desktop_profile:
+            self._status.set_text("The desktop profile cannot be deleted.")
+            return
+        dialog = Adw.MessageDialog(
+            transient_for=self,
+            heading=f"Delete {name}?",
+            body="Its bindings, DPI and lighting settings are lost, "
+                 "along with its games.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("delete", "Delete")
+        dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.connect(
+            "response",
+            lambda _d, response: (
+                run_and_report(self._do_delete_profile(name), self._on_async_error)
+                if response == "delete"
+                else None
+            ),
+        )
+        dialog.present()
+
+    def _confirm_switch_for_canvas(self) -> None:
+        """Ask what to do with unsaved changes before opening the canvas."""
         dialog = Adw.MessageDialog(
             transient_for=self,
             heading="Unsaved changes",
-            body=f"Save your changes to {self._editing} before switching to {name}?",
+            body=(
+                f"Apply your changes to {self._editing} before managing "
+                "profiles?"
+            ),
         )
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("discard", "Discard")
-        dialog.add_response("save", "Save")
+        dialog.add_response("save", "Apply")
+        dialog.set_response_appearance("discard", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("save")
+        dialog.set_close_response("cancel")
+
+        def on_response(_dialog, response):
+            dialog.close()
+            if response == "cancel":
+                return
+            if response == "discard":
+                self._pending.clear()
+                self._sync_save_buttons()
+                self._show_canvas()
+                return
+            if response == "save":
+                run_and_report(
+                    self._save_then_open_canvas(), self._on_async_error
+                )
+
+        dialog.connect("response", on_response)
+        dialog.present()
+
+    async def _save_then_open_canvas(self) -> None:
+        """Save the pending edits, then open the canvas only on success."""
+        profile = self._editing_profile()
+        if profile is None:
+            return
+        await self._do_save(profile)
+        if self._pending.dirty:
+            # The save was refused; the edits stay where they are.
+            return
+        self._show_canvas()
+
+    def _show_canvas(self) -> None:
+        if self._view is None:
+            self._status.set_text("Waiting for the daemon profile view.")
+            return
+        self._fill_canvas(self._view)
+        self._stack.set_visible_child_name("manage")
+        self._back_button.set_visible(True)
+
+    def _back_clicked(self) -> None:
+        """Return from wherever we are, without changing the selection."""
+        if self._stack.get_visible_child_name() == "manage":
+            # Leaving the canvas does not touch the editing profile: the
+            # canvas is a place you navigate to, so its way back is not
+            # "pick something" (spec §2.7).
+            self._stack.set_visible_child_name("editor")
+            self._back_button.set_visible(True)
+            return
+        self._show_view("home")
+
+    def _apply_selection(self, name: str) -> None:
+        """Show `name` in the panels and put it on the mouse.
+
+        The refresh happens regardless of the load's outcome. Editing a profile
+        that is not on the mouse is a legitimate state — the whole point of
+        separating edit from load — so the panels must follow `_editing` even
+        when the daemon refuses the write. Refreshing only on success would
+        leave them showing the previous profile's bindings under the new one's
+        name.
+        """
+        self._editing = name
+        self._pending.clear()
+        self._sync_save_buttons()
+        self._status.set_text(f"Loading {name}…")
+        self._refresh()
+        # Through the injected scheduler, like the refresh: a test drives its
+        # own loop, and the GTK bridge would never run there.
+        self._schedule(self._load_profile(name), self._on_async_error)
+
+    def _confirm_switch(self, name: str, *, load: bool = True) -> None:
+        """Ask what to do with unsaved changes before switching profiles.
+
+        `load=False` is the canvas's DETAILS action: the destination is
+        "editing the profile", not "editing and loading it", so accept paths
+        that would put it on the mouse are not offered.
+        """
+        dialog = Adw.MessageDialog(
+            transient_for=self,
+            heading="Unsaved changes",
+            body=(
+                f"Apply your changes to {self._editing} before "
+                f"switching to {name}?"
+                if load
+                else f"Apply your changes to {self._editing} before "
+                f"editing {name}?"
+            ),
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("discard", "Discard")
+        dialog.add_response("save", "Apply")
         dialog.set_response_appearance("discard", Adw.ResponseAppearance.DESTRUCTIVE)
         dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
         dialog.set_default_response("save")
@@ -912,17 +1329,21 @@ class MainWindow(Adw.ApplicationWindow):
                 self._reselect_current()
                 return
             if response == "discard":
-                self._apply_selection(name)
+                if load:
+                    self._apply_selection(name)
+                else:
+                    self._edit_without_loading(name)
                 return
             if response == "save":
                 run_and_report(
-                    self._save_then_select(name), self._on_async_error
+                    self._save_then_select(name, load=load),
+                    self._on_async_error,
                 )
 
         dialog.connect("response", on_response)
         dialog.present()
 
-    async def _save_then_select(self, name: str) -> None:
+    async def _save_then_select(self, name: str, *, load: bool = True) -> None:
         """Save the pending edits, then switch only if the save succeeded."""
         profile = self._editing_profile()
         if profile is None:
@@ -932,26 +1353,19 @@ class MainWindow(Adw.ApplicationWindow):
             # The save was refused; stay where the edits are.
             self._reselect_current()
             return
-        self._apply_selection(name)
+        if load:
+            self._apply_selection(name)
+        else:
+            self._edit_without_loading(name)
 
     def _reselect_current(self) -> None:
-        """Point the profile list back at the profile still being edited."""
-        current = self._editing_profile()
-        if current is None:
-            return
-        for position in range(len(self._state.profiles)):
-            row = self._profile_list.get_row_at_index(position)
-            if row is not None and row.get_title() == current:
-                self._profile_list.select_row(row)
-                return
+        """Put the selector back on the profile still being edited.
 
-    def _load_selected(self) -> None:
-        """Load the selected profile onto the mouse. A deliberate action."""
-        name = self._editing_profile()
-        if name is None:
-            self._status.set_text("Select a profile to load.")
-            return
-        run_and_report(self._load_profile(name), self._on_async_error)
+        The selector is a dropdown, so there is no row to re-highlight: its
+        label is derived from `_editing`, and re-showing the profiles is what
+        puts it back.
+        """
+        self._rebuild_profiles()
 
     async def _load_profile(self, name: str) -> None:
         async def change() -> bool:
@@ -961,5 +1375,6 @@ class MainWindow(Adw.ApplicationWindow):
             change,
             report=self._status.set_text,
             failure=f"Could not load {name}",
+            rejected=f"The daemon refused to load {name}.",
             success=f"Loaded {name}.",
         )

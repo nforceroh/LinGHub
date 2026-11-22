@@ -126,6 +126,18 @@ class ProfileLifecycle:
             f"RenameProfile({old!r}, {new!r})",
         )
 
+    def duplicate(self, name: str, new: str) -> bool:
+        return self._writes.apply(
+            lambda state: state.duplicate_profile(name, new),
+            f"DuplicateProfile({name!r}, {new!r})",
+        )
+
+    def rename_game(self, profile: str, executable: str, name: str) -> bool:
+        return self._writes.apply(
+            lambda state: state.rename_game(profile, executable, name),
+            f"RenameGame({profile!r}, {executable!r})",
+        )
+
     def delete(self, name: str) -> bool:
         return self._writes.apply(
             lambda state: state.delete_profile(name),

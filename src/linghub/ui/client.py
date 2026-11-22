@@ -14,7 +14,13 @@ from dbus_fast.aio import MessageBus
 
 
 from .. import dbus_contract as contract
-from ..daemon_view import DaemonUnavailable, DaemonView, ProfileView, ViewState
+from ..daemon_view import (
+    DaemonUnavailable,
+    DaemonView,
+    ProfileSummary,
+    ProfileView,
+    ViewState,
+)
 
 
 SERVICE = contract.SERVICE
@@ -112,6 +118,10 @@ class DaemonClient:
             timeout=5,
         )
         _raise_for_error(reply, member)
+        # GetView now returns two structs, and a decoder that kept only the
+        # first would silently drop the other. The tuple is the whole body.
+        if reply.body and len(reply.body) > 1:
+            return tuple(reply.body)
         return reply.body[0] if reply.body else None
 
     async def get_view(self, profile: str) -> DaemonView:
@@ -122,10 +132,19 @@ class DaemonClient:
         "nothing there" is the answer it needs.
         """
         raw = await self._invoke(contract.GET_VIEW, profile)
+        # Two shapes reach this decoder. A daemon from before the canvas
+        # answers with one flat struct of nine fields and no summaries; the
+        # current one answers with the state+sections struct and a second
+        # summaries struct. Accepting both means an old daemon costs the
+        # canvas its tiles rather than the window its state.
+        if len(raw) == 2 and not isinstance(raw[0], str):
+            main, summaries = raw
+        else:
+            main, summaries = raw, ()
         (
             active, detected, desktop, names,
             bindings, leds, resolutions, rates, rate,
-        ) = raw
+        ) = main
         return DaemonView(
             state=ViewState(
                 active_profile=active,
@@ -158,6 +177,18 @@ class DaemonClient:
                 ],
                 report_rates=tuple(int(r) for r in rates),
                 report_rate=int(rate),
+            ),
+            summaries=tuple(
+                ProfileSummary(
+                    name=str(name),
+                    dpi=int(dpi),
+                    report_rate=int(rate_value),
+                    games=tuple(
+                        (str(executable), str(game_name))
+                        for executable, game_name in games
+                    ),
+                )
+                for name, dpi, rate_value, games in summaries
             ),
         )
 
@@ -218,6 +249,12 @@ class DaemonClient:
 
     async def delete_profile(self, name: str) -> bool:
         return bool(await self._invoke(contract.DELETE_PROFILE, name))
+
+    async def duplicate_profile(self, name: str, new: str) -> bool:
+        return bool(await self._invoke(contract.DUPLICATE_PROFILE, name, new))
+
+    async def rename_game(self, profile: str, executable: str, name: str) -> bool:
+        return bool(await self._invoke(contract.RENAME_GAME, profile, executable, name))
 
     async def set_resolution(
         self, profile: str, index: int, dpi: int, *,

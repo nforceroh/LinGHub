@@ -16,6 +16,13 @@ can be loaded into, 0 through 4. Slot 0 holds the desktop profile; slot 1 holds
 whichever gaming profile is active.
 _Avoid_: index, bank, channel
 
+**Device card**:
+The picture of the mouse shown on the home screen. It identifies the hardware
+and is the way into the configuration screen; it carries no hotspots, so it is
+not a control for anything else. The card that holds it, its charge and its
+buttons is the **home card**.
+_Avoid_: diagram, product image, hero image
+
 **DPI preset**:
 One of the five DPI values a profile stores, each with a DPI, a flag for whether
 it is the default, and a flag for whether it is disabled. Unrelated to a

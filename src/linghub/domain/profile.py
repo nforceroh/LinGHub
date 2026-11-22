@@ -16,9 +16,15 @@ class Game:
     `executable` is matched case-insensitively against the basename of a
     process's argv[0], so `WorldOfTanks.exe` matches the Wine process whose
     argv[0] is `C:\\Games\\World_of_Tanks_NA\\win64\\WorldOfTanks.exe`.
+
+    `name` is what the user calls the game, and is optional: a config written
+    before it existed has none, and a game added in a hurry may not have one
+    yet. `display_name` is what a client shows, so no caller has to decide what
+    an unnamed game looks like.
     """
 
     executable: str
+    name: str = ""
 
     def __post_init__(self) -> None:
         if not self.executable.strip():
@@ -27,6 +33,21 @@ class Game:
     @property
     def key(self) -> str:
         return self.executable.casefold()
+
+    @property
+    def display_name(self) -> str:
+        """The name to show: the user's, or the executable without `.exe`.
+
+        The fallback is deliberately the executable rather than a prettified
+        version of it. It is literally what the config says, and it is obvious
+        enough that a user will fill the name in.
+        """
+        if self.name.strip():
+            return self.name.strip()
+        stem = self.executable.strip()
+        if stem.lower().endswith(".exe"):
+            stem = stem[:-4]
+        return stem or self.executable.strip()
 
 
 @dataclass(frozen=True)

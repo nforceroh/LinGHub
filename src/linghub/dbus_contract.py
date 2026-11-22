@@ -54,7 +54,9 @@ RELOAD = Member("Reload", "", "b")
 LIST_PROFILES = Member("ListProfiles", "", "as")
 GET_VIEW = Member(
     "GetView", "s",
-    "(sssasa(iss)a(us(uuu)uu)a(uuuu)auu)",
+    # state, profile sections, then every profile's canvas summary:
+    # (name, default DPI, report rate, and its games as (executable, name)).
+    "(sssasa(iss)a(us(uuu)uu)a(uuuu)auu)a(suua(ss))",
 )
 SET_BINDING = Member("SetBinding", "siss", "b")
 CLEAR_BINDING = Member("ClearBinding", "si", "b")
@@ -64,6 +66,8 @@ SET_REPORT_RATE = Member("SetReportRate", "su", "b")
 CREATE_PROFILE = Member("CreateProfile", "ss", "b")
 RENAME_PROFILE = Member("RenameProfile", "ss", "b")
 DELETE_PROFILE = Member("DeleteProfile", "s", "b")
+DUPLICATE_PROFILE = Member("DuplicateProfile", "ss", "b")
+RENAME_GAME = Member("RenameGame", "sss", "b")
 
 METHODS: tuple[Member, ...] = (
     LOAD_PROFILE, RELOAD, LIST_PROFILES, GET_VIEW,
@@ -72,6 +76,7 @@ METHODS: tuple[Member, ...] = (
     SET_RESOLUTION,
     SET_REPORT_RATE,
     CREATE_PROFILE, RENAME_PROFILE, DELETE_PROFILE,
+    DUPLICATE_PROFILE, RENAME_GAME,
 )
 
 BY_NAME = {member.name: member for member in METHODS}

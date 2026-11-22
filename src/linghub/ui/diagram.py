@@ -11,8 +11,9 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
+gi.require_version("Pango", "1.0")
 
-from gi.repository import Gdk, GdkPixbuf, GObject, Gtk
+from gi.repository import Gdk, GdkPixbuf, GObject, Gtk, Pango
 
 from .buttonmap import BUTTONS, ButtonSpot
 
@@ -33,6 +34,9 @@ class MouseDiagram(Gtk.DrawingArea):
 
     __gsignals__ = {
         "button-selected": (GObject.SignalFlags.RUN_FIRST, None, (int,)),
+        # Emitted when a dragged assignment is dropped on a hotspot, with the
+        # ratbag index and the AssignmentChoice's (kind, value) payload.
+        "assignment-dropped": (GObject.SignalFlags.RUN_FIRST, None, (int, object)),
     }
 
     def __init__(self, image_path: str):
@@ -40,11 +44,14 @@ class MouseDiagram(Gtk.DrawingArea):
         self._surface, self._surface_data = self._load_surface(image_path)
         self._selected: int | None = None
         self._hovered: int | None = None
+        self._binding_labels: dict[int, str] = {}
 
         # Matches the shipped image's aspect (705x400), so the diagram fills
-        # its widget instead of letterboxing inside it.
-        self.set_content_width(560)
-        self.set_content_height(318)
+        # its widget instead of letterboxing inside it. The width is a floor
+        # the window must fit: a larger floor made the window's minimum width
+        # exceed a 1324px screen, and the compositor hung it off-screen.
+        self.set_content_width(400)
+        self.set_content_height(227)
         self.set_hexpand(True)
         self.set_vexpand(True)
 
@@ -57,10 +64,23 @@ class MouseDiagram(Gtk.DrawingArea):
         click.connect("pressed", self._on_pressed)
         self.add_controller(click)
 
+        # Accepts the sidebar's dragged choices. The payload is a Python
+        # object (an AssignmentChoice), carried in a GValue box.
+        drop = Gtk.DropTarget()
+        drop.set_actions(Gdk.DragAction.COPY)
+        drop.set_gtypes([object])
+        drop.connect("drop", self._on_drop)
+        self.add_controller(drop)
+
         self.set_draw_func(self._draw)
 
     def set_selected(self, index: int | None) -> None:
         self._selected = index
+        self.queue_draw()
+
+    def set_binding_labels(self, labels: dict[int, str]) -> None:
+        """Show a compact binding label beside every hotspot."""
+        self._binding_labels = dict(labels)
         self.queue_draw()
 
     def _layout(self, width: float, height: float) -> tuple[float, float, float, float]:
@@ -113,6 +133,13 @@ class MouseDiagram(Gtk.DrawingArea):
         self.set_cursor(None)
         self.queue_draw()
 
+    def _on_drop(self, _target, value, x: float, y: float) -> bool:
+        spot = self._spot_at(x, y)
+        if spot is None or value is None:
+            return False
+        self.emit("assignment-dropped", spot.index, value)
+        return True
+
     def _on_pressed(self, _gesture, _n_press, x, y) -> None:
         spot = self._spot_at(x, y)
         if spot is not None:
@@ -148,6 +175,9 @@ class MouseDiagram(Gtk.DrawingArea):
 
         self._draw_texture(cr, offset_x, offset_y, draw_w, draw_h)
 
+        # Hotspots only: the numbered circles stay clickable, but the binding
+        # text is not drawn on the image. What each button does is read in the
+        # bindings table below, which has room for full names.
         for spot in BUTTONS:
             cx, cy = self._centre(spot, width, height)
             self._draw_hotspot(cr, cx, cy, spot)
