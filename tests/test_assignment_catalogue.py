@@ -1,4 +1,4 @@
-"""Tests for the binding editor's mode table.
+"""Tests for the assignment catalogue's mode table.
 
 The table exists so that adding a mode is one row rather than four edits. These
 tests pin the round-trip: every mode must map a stored binding back to itself.
@@ -6,7 +6,7 @@ tests pin the round-trip: every mode must map a stored binding back to itself.
 
 import unittest
 
-from linghub.ui.binding_modes import (
+from linghub.ui.assignment_catalogue import (
     BY_NAME,
     MODE_BUTTON,
     MODE_CHORD,

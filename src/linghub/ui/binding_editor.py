@@ -15,15 +15,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gtk
 
-from .binding_labels import (
-    COMMON_KEYS,
-    describe_binding,
-    describe_chord,
-)
-from .buttonmap import describe
-
-
-from .binding_modes import (
+from .assignment_catalogue import (
     CHORD,
     DROPDOWN,
     LABELS as MODE_LABELS,
@@ -35,6 +27,12 @@ from .binding_modes import (
     single_key_of,
     stored_binding,
 )
+from .assignment_catalogue import COMMON_KEYS as _CHORD_KEY_CHOICES
+from .binding_labels import (
+    describe_binding,
+    describe_chord,
+)
+from .buttonmap import describe
 
 
 class BindingEditor(Adw.Window):
@@ -140,9 +138,9 @@ class BindingEditor(Adw.Window):
             row.append(check)
         wrapper.append(row)
 
-        self._chord_labels = [label for _name, label in COMMON_KEYS]
+        self._chord_labels = [label for _name, label in _CHORD_KEY_CHOICES]
         self._chord_key = Gtk.DropDown.new_from_strings(self._chord_labels)
-        self._chord_key._choices = [name_ for name_, _label in COMMON_KEYS]
+        self._chord_key._choices = [name_ for name_, _label in _CHORD_KEY_CHOICES]
         wrapper.append(self._chord_key)
 
         self._stack.add_named(wrapper, name)

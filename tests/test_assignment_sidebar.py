@@ -2,7 +2,7 @@
 
 import unittest
 
-from linghub.ui.assignment_sidebar import (
+from linghub.ui.assignment_catalogue import (
     assignment_choices,
     filter_assignment_choices,
 )
@@ -34,3 +34,30 @@ class AssignmentChoiceTests(unittest.TestCase):
     def test_nothing_is_offered(self):
         choices = assignment_choices()
         self.assertIn("Nothing", [choice.label for choice in choices])
+
+
+class CatalogueConsistencyTests(unittest.TestCase):
+    """The sidebar and the editor read one vocabulary, so they cannot drift."""
+
+    def test_the_editor_offers_every_key_the_sidebar_offers(self):
+        """A binding staged from the sidebar must be visible in the dialog.
+
+        The editor's key dropdown used to offer only the common keys, so a
+        binding staged from the sidebar's full keyboard opened the dialog
+        showing whichever key happened to be listed first.
+        """
+        from linghub.ui.assignment_catalogue import BY_NAME, MODE_KEY
+
+        sidebar_keys = {
+            choice.value for choice in assignment_choices()
+            if choice.kind == "key"
+        }
+        editor_keys = {value for value, _label in BY_NAME[MODE_KEY].dropdown_choices()}
+        self.assertEqual(sidebar_keys, editor_keys)
+
+    def test_the_macro_mode_offers_the_same_keys(self):
+        from linghub.ui.assignment_catalogue import BY_NAME, MODE_KEY, MODE_KEY_MACRO
+
+        key_choices = BY_NAME[MODE_KEY].dropdown_choices()
+        macro_choices = BY_NAME[MODE_KEY_MACRO].dropdown_choices()
+        self.assertEqual(key_choices, macro_choices)

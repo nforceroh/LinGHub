@@ -3,11 +3,12 @@
 It exposes the binding choices the hardware can actually encode. Choosing a
 row stages the assignment for the selected button; the window owns the save
 and the daemon write, so this widget does not touch the mouse or config.
+
+The choices, their groups and their labels come from the assignment
+catalogue, which the binding editor reads too — one vocabulary, two views.
 """
 
 from __future__ import annotations
-
-from dataclasses import dataclass
 
 import gi
 
@@ -16,84 +17,13 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Gdk, Gtk, Pango
 
-from .binding_labels import (
-    BUTTON_CHOICES,
-    COMMON_KEYS,
-    COMMAND_CHORDS,
-    SPECIAL_CHOICES,
-    _all_keys,
-    chord_label,
-    describe_chord,
+from .assignment_catalogue import (
+    GROUPS,
+    AssignmentChoice,
+    assignment_choices,
+    choices_in_group,
+    filter_assignment_choices,
 )
-
-
-@dataclass(frozen=True)
-class AssignmentChoice:
-    kind: str
-    value: object
-    label: str
-    group: str
-
-
-def assignment_choices() -> tuple[AssignmentChoice, ...]:
-    """Every assignment choice, grouped like the reference.
-
-    Commands are key combinations applications respond to, encoded as
-    modifier chords. Keys are single keys. Macros are single keys sent the
-    macro way, which some games need. System covers mouse actions and
-    functions. Nothing is the explicit no-assignment.
-    """
-    choices = []
-    for keys, label in COMMAND_CHORDS:
-        choices.append(
-            AssignmentChoice("macro", describe_chord(list(keys)), label, "Commands")
-        )
-    # The full keyboard: every key the kernel defines, after the common
-    # shortcuts. Duplicates are dropped so a common key is not listed twice.
-    seen = {value for value, _label in COMMON_KEYS}
-    for value, label in COMMON_KEYS:
-        choices.append(AssignmentChoice("key", value, label, "Keys"))
-    for value, label in _all_keys():
-        if value not in seen:
-            seen.add(value)
-            choices.append(AssignmentChoice("key", value, label, "Keys"))
-    for value, label in COMMON_KEYS:
-        choices.append(
-            AssignmentChoice("macro", value, f"{label} (macro)", "Macros")
-        )
-    for value, label in SPECIAL_CHOICES:
-        choices.append(AssignmentChoice("special", value, label, "System"))
-    for value, label in BUTTON_CHOICES:
-        choices.append(AssignmentChoice("button", value, label, "System"))
-    choices.append(AssignmentChoice("disabled", None, "Nothing", "System"))
-    # Alphabetical within each group, so an option can be found by scanning
-    # instead of remembering the order the tables happen to be written in.
-    return tuple(sorted(choices, key=lambda choice: (choice.group, choice.label.casefold())))
-
-
-GROUPS: tuple[str, ...] = ("Commands", "Keys", "Macros", "System")
-
-
-def filter_assignment_choices(
-    choices: tuple[AssignmentChoice, ...], query: str
-) -> tuple[AssignmentChoice, ...]:
-    """Case-insensitive label/group search."""
-    needle = query.strip().casefold()
-    if not needle:
-        return choices
-    return tuple(
-        choice
-        for choice in choices
-        if needle in choice.label.casefold()
-        or needle in choice.group.casefold()
-    )
-
-
-def choices_in_group(
-    choices: tuple[AssignmentChoice, ...], group: str
-) -> tuple[AssignmentChoice, ...]:
-    """The choices belonging to one group."""
-    return tuple(choice for choice in choices if choice.group == group)
 
 
 class AssignmentSidebar(Gtk.Box):
