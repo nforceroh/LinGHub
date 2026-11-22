@@ -28,10 +28,8 @@ from .assignment_catalogue import (
     stored_binding,
 )
 from .assignment_catalogue import COMMON_KEYS as _CHORD_KEY_CHOICES
-from .binding_labels import (
-    describe_binding,
-    describe_chord,
-)
+from .assignment_catalogue import describe_chord
+from .binding_labels import describe_binding
 from .buttonmap import describe
 
 
