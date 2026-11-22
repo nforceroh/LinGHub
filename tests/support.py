@@ -135,8 +135,16 @@ def make_window(
     window._stack.set_visible_child_name("home")
     window._back_button = Gtk.Button()
     window._back_button.set_visible(False)
-    window._table_rows = {}
-    window._binding_rows = {}
+    from linghub.ui.assignments_view import AssignmentsView
+
+    window._assignments = AssignmentsView.__new__(AssignmentsView)
+    Gtk.Paned.__init__(window._assignments)
+    window._assignments._table_rows = {}
+    window._assignments._binding_rows = {}
+    window._assignments._diagram = None
+    window._assignments._selected = None
+    window._assignments._bindings = {}
+    window._assignments._pending_bindings = {}
     window._bindings = {}
     window._view = None
     window._refresh_task = None
@@ -148,7 +156,6 @@ def make_window(
     window._pending = PendingEditsFor()
     window._save_button = Gtk.Button()
     window._discard_button = Gtk.Button()
-    window._selected_button = None
     window._editing = editing
 
     if panels:

@@ -19,9 +19,9 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
+from .assignments_view import AssignmentsView
 from .asyncbridge import run_and_report
-from .binding_editor import BindingEditor
-from .buttonmap import BUTTONS, DIAGRAM_IMAGE, describe, manual_number
+from .buttonmap import DIAGRAM_IMAGE, describe
 from .client import DaemonClient
 from .daemon_write import DaemonWrite
 from . import edit_apply
@@ -29,11 +29,9 @@ from .pending_edits import PendingEditsFor
 from .profile_selector import ProfileSelector
 from .home_card import HomeCard
 from .manage_profiles import ManageProfiles
-from .assignment_sidebar import AssignmentSidebar
 from .config_rail import ConfigRail
 from ..hardware.battery import battery, model_name
 from ..daemon_view import DaemonView, ProfileSummary, ViewState
-from .diagram import MouseDiagram
 from . import presentation
 from .. import version
 from .dpi_panel import DpiPanel
@@ -61,7 +59,6 @@ class MainWindow(Adw.ApplicationWindow):
         # window on its own loop instead of patching this module's global.
         self._schedule = schedule
         self._state = ViewState()
-        self._selected_button: int | None = None
         # Which profile the panels show. Deliberately separate from which
         # profile is loaded on the mouse: editing must not reconfigure it.
         self._editing: str | None = None
@@ -250,38 +247,11 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _build_assignments_view(self) -> Gtk.Widget:
         """Assignments: command sidebar on the left, diagram and table on the right."""
-        self._assignment_sidebar = AssignmentSidebar(
-            on_chosen=self._on_assignment_chosen,
+        self._assignments = AssignmentsView(
+            on_stage=self._on_assignment_staged,
+            on_status=self._status.set_text,
         )
-
-        right = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
-        right.set_wide_handle(True)
-        right.set_position(430)
-        right.set_start_child(self._build_diagram_pane())
-
-        table_scroller = Gtk.ScrolledWindow()
-        table_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        table_scroller.set_vexpand(True)
-
-        table_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        table_box.set_margin_top(8)
-        table_box.set_margin_bottom(12)
-        table_box.set_margin_start(12)
-        table_box.set_margin_end(12)
-        table_box.append(self._section_label("Bindings"))
-        table_box.append(self._build_button_table())
-        table_scroller.set_child(table_box)
-        right.set_end_child(table_scroller)
-
-        split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
-        split.set_wide_handle(True)
-        # 360px: wide enough for the four group tabs and the choice labels
-        # to read without ellipsizing. Narrower defaults squeezed the tab row
-        # and left every row caption cut off until the divider was dragged.
-        split.set_position(390)
-        split.set_start_child(self._assignment_sidebar)
-        split.set_end_child(right)
-        return split
+        return self._assignments
 
     def _build_dpi_view(self) -> Gtk.Widget:
         """The DPI view, moved out of the old full-width device row."""
@@ -310,180 +280,6 @@ class MainWindow(Adw.ApplicationWindow):
         self._led_panel.set_halign(Gtk.Align.START)
         box.append(self._led_panel)
         return box
-
-    def _build_diagram_pane(self) -> Gtk.Widget:
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        box.set_margin_top(12)
-        box.set_margin_bottom(12)
-        box.set_margin_start(12)
-        box.set_margin_end(12)
-
-        if IMAGE.exists():
-            self._diagram = MouseDiagram(str(IMAGE))
-            self._diagram.connect("button-selected", self._on_button_selected)
-            self._diagram.connect("assignment-dropped", self._on_assignment_dropped)
-            # No Frame: it drew a border and a filled background around the
-            # image, which has a transparent background of its own. The image
-            # sits directly in the pane, so the UI's background shows through.
-            # Top-aligned: the image cannot grow to fill a tall pane without
-            # distorting, so the space it leaves belongs at the bottom rather
-            # than split above and below it.
-            self._diagram.set_valign(Gtk.Align.START)
-            box.append(self._diagram)
-        else:
-            self._diagram = None
-            box.append(Gtk.Label(label=f"Diagram not found: {IMAGE}"))
-
-        return box
-
-    def _build_side_pane(self) -> Gtk.Widget:
-        """Profiles, bindings, then DPI and lighting side by side.
-
-        A plain vertical box, not a Paned: the sections have natural heights
-        and nothing needs to stretch, so a draggable divider would only let
-        the user drag one into a useless position. DPI and lighting share a
-        row because together they are taller than the window.
-        """
-        pane = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        pane.set_margin_top(12)
-        pane.set_margin_start(12)
-        pane.set_margin_end(12)
-        pane.set_margin_bottom(12)
-
-        pane.append(self._build_profile_header())
-
-        # The table is not in its own scroller: the whole pane scrolls as one,
-        # so there is a single scrollbar and no section can be clipped to a
-        # sliver while the pane still has room below it.
-        pane.append(self._build_button_table())
-
-        # One scrollbar for the pane. At the default window height everything
-        # fits; on a shorter screen the pane scrolls rather than squeezing the
-        # table into a two-row window.
-        scroller = Gtk.ScrolledWindow()
-        scroller.set_child(pane)
-        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroller.set_propagate_natural_height(True)
-        return scroller
-
-    def _build_profile_header(self) -> Gtk.Widget:
-        """The Bindings heading and the commit pair.
-
-        The profile buttons that used to live here are gone: choosing a profile
-        is the selector's job, and adding, renaming and deleting moved to the
-        manage-profiles canvas. Apply and Discard stay, because they commit what
-        you changed in the profile the selector chose.
-        """
-        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        heading = self._section_label("Bindings")
-        heading.set_hexpand(True)
-        header.append(heading)
-
-        self._discard_button = Gtk.Button(icon_name="edit-undo-symbolic")
-        self._discard_button.set_tooltip_text("Discard all unsaved changes")
-        self._discard_button.add_css_class("flat")
-        self._discard_button.connect("clicked", lambda _b: self._discard_changes())
-        self._discard_button.set_sensitive(False)
-        header.append(self._discard_button)
-
-        self._save_button = Gtk.Button(icon_name="document-save-symbolic")
-        self._save_button.set_tooltip_text("Save all changes to the profile")
-        self._save_button.add_css_class("suggested-action")
-        self._save_button.connect("clicked", lambda _b: self._save_changes())
-        self._save_button.set_sensitive(False)
-        header.append(self._save_button)
-
-        return header
-
-    def _build_device_panels(self) -> Gtk.Widget:
-        """DPI and lighting side by side, across the full window width.
-
-        DPI carries five slot rows plus a rate dropdown; lighting carries four
-        controls. DPI gets the larger share because its rows are the widest
-        thing here, and lighting is left-aligned in what remains.
-        """
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=24)
-        row.set_margin_top(12)
-        row.set_margin_bottom(12)
-        row.set_margin_start(12)
-        row.set_margin_end(12)
-
-        dpi_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        dpi_box.set_hexpand(True)
-        dpi_box.append(self._section_label("DPI and report rate"))
-        self._dpi_panel = DpiPanel(on_save=self._on_dpi_saved)
-        dpi_box.append(self._dpi_panel)
-        row.append(dpi_box)
-
-        led_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        led_box.set_hexpand(True)
-        led_box.append(self._section_label("Lighting"))
-        self._led_panel = LedPanel(on_save=self._on_led_saved)
-        led_box.append(self._led_panel)
-        row.append(led_box)
-
-        # Not homogeneous: that would force 1:1 and squeeze the five DPI slot
-        # rows. DPI expands into the slack and lighting keeps its natural
-        # width, which is what the two panels actually need.
-        dpi_box.set_hexpand(True)
-        led_box.set_hexpand(False)
-        return row
-
-    def _build_button_table(self) -> Gtk.Widget:
-        """Every button: manual number, function and ratbag index.
-
-        The diagram labels circles with ratbag indices, so `Ratbag` is the
-        column to read against the picture. `Manual` is only there to help
-        someone holding the printed manual.
-        """
-        grid = Gtk.Grid()
-        grid.set_column_spacing(18)
-        # 2px between rows: eleven rows at 6px cost 66px of pure gap, and the
-        # table is the tallest thing in the pane.
-        grid.set_row_spacing(2)
-        grid.set_margin_top(4)
-
-        titles = ("Manual", "Function", "Does", "Ratbag")
-        for column, title in enumerate(titles):
-            label = Gtk.Label(label=title, xalign=0 if column != 3 else 1)
-            label.add_css_class("dim-label")
-            label.add_css_class("caption")
-            grid.attach(label, column, 0, 1, 1)
-
-        self._table_rows: dict[int, Gtk.Widget] = {}
-        self._binding_rows: dict[int, Gtk.Widget] = {}
-
-        for row, spot in enumerate(BUTTONS, start=1):
-            manual = Gtk.Label(label=manual_number(spot.index), xalign=0)
-            manual.add_css_class("dim-label")
-            function = Gtk.Label(label=describe(spot.index), xalign=0)
-            # No hexpand: it stretched the Function column across the pane and
-            # pushed Does and Ratbag to the far edge, leaving a wide gap
-            # between Function and Does. The columns now sit at their natural
-            # widths, close together.
-            does = Gtk.Label(label="—", xalign=0)
-            ratbag = Gtk.Label(label=str(spot.index), xalign=1)
-            ratbag.add_css_class("dim-label")
-
-            widgets = (manual, function, does, ratbag)
-            for column, widget in enumerate(widgets):
-                grid.attach(widget, column, row, 1, 1)
-
-            # The whole row is the click target, so a narrow label is not the
-            # only way to open the editor. A controller can only belong to one
-            # widget, so each label gets its own.
-            for widget in widgets:
-                click = Gtk.GestureClick()
-                click.connect(
-                    "released",
-                    lambda _g, _n, _x, _y, i=spot.index: self._open_editor(i),
-                )
-                widget.add_controller(click)
-
-            self._table_rows[spot.index] = function
-            self._binding_rows[spot.index] = does
-
-        return grid
 
     def _section_label(self, text: str) -> Gtk.Label:
         label = Gtk.Label(label=text, xalign=0)
@@ -610,13 +406,6 @@ class MainWindow(Adw.ApplicationWindow):
 
         self._rebuild_profiles()
         self._rebuild_bindings()
-        if hasattr(self, "_diagram") and self._diagram is not None:
-            self._diagram.set_binding_labels(
-                {
-                    index: presentation.diagram_binding_label(self._bindings, index)
-                    for index in [spot.index for spot in BUTTONS]
-                }
-            )
         self._card.show_device(self._device_name(), battery())
         if self._led_panel is not None:
             # Never reload the panel over unsaved edits: any change signal
@@ -737,24 +526,7 @@ class MainWindow(Adw.ApplicationWindow):
         pending = (
             self._pending.for_profile(profile).bindings if profile else {}
         )
-        for index, widget in self._table_rows.items():
-            if index == self._selected_button:
-                widget.add_css_class("accent")
-            else:
-                widget.remove_css_class("accent")
-
-            label = self._binding_rows.get(index)
-            if label is not None:
-                label.set_text(
-                    presentation.binding_label(self._bindings, index, pending)
-                )
-        if hasattr(self, "_diagram") and self._diagram is not None:
-            self._diagram.set_binding_labels(
-                {
-                    index: presentation.diagram_binding_label(self._bindings, index)
-                    for index in [spot.index for spot in BUTTONS]
-                }
-            )
+        self._assignments.refresh(self._bindings, pending)
 
     # --- profile management ----------------------------------------------
 
@@ -868,54 +640,14 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.connect("response", on_response)
         dialog.present()
 
-    def _open_editor(self, index: int) -> None:
-        """Open the binding editor for one button."""
-        if not self._state.profiles:
-            self._status.set_text("No profile to edit.")
-            return
-
+    def _on_assignment_staged(self, index: int, kind: str, value) -> None:
+        """The view staged an assignment; record it for the profile being edited."""
         profile = self._editing_profile()
         if profile is None:
             self._status.set_text("Select a profile first.")
             return
-
-        kind, value = self._bindings.get(index, ("disabled", None))
-        BindingEditor(
-            parent=self,
-            button_index=index,
-            kind=kind or "disabled",
-            value=value,
-            on_apply=lambda i, k, v: self._start_binding_write(profile, i, k, v),
-        ).present()
-
-    def _on_assignment_dropped(self, _diagram, index: int, choice) -> None:
-        """A sidebar choice dropped on a hotspot assigns that button."""
-        self._selected_button = index
-        self._on_assignment_chosen(choice.kind, choice.value)
+        self._start_binding_write(profile, index, kind, value)
         self._rebuild_bindings()
-
-    def _on_assignment_chosen(self, kind: str, value: object) -> None:
-        """Stage a sidebar choice for the currently selected button."""
-        if self._selected_button is None:
-            self._status.set_text(
-                "Select a button on the diagram or in the bindings table first."
-            )
-            return
-        profile = self._editing_profile()
-        if profile is None:
-            self._status.set_text("Select a profile first.")
-            return
-        self._start_binding_write(
-            profile, self._selected_button, kind, value
-        )
-        if kind == "disabled":
-            assigned = "Nothing"
-        else:
-            from .binding_labels import describe_binding
-            assigned = describe_binding(kind, value)
-        self._status.set_text(
-            f"{describe(self._selected_button)} will do {assigned} — press Apply."
-        )
 
     def _editing_profile(self) -> str | None:
         """The profile the panels show and edit."""
@@ -936,13 +668,6 @@ class MainWindow(Adw.ApplicationWindow):
         return True
 
     # --- interaction -----------------------------------------------------
-
-    def _on_button_selected(self, _diagram, index: int) -> None:
-        self._selected_button = index
-        if self._diagram is not None:
-            self._diagram.set_selected(index)
-        self._status.set_text(f"Selected: {describe(index)}")
-        self._rebuild_bindings()
 
     def _choose_profile(self, name: str) -> None:
         """Choose a profile from the selector, and load it onto the mouse.
