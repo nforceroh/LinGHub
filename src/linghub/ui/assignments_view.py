@@ -26,6 +26,7 @@ from gi.repository import Gtk
 from . import presentation
 from .assignment_sidebar import AssignmentSidebar
 from .binding_editor import BindingEditor
+from .binding_labels import describe_binding
 from .buttonmap import BUTTONS, DIAGRAM_IMAGE, describe, manual_number
 from .diagram import MouseDiagram
 
@@ -242,8 +243,6 @@ class AssignmentsView(Gtk.Paned):
                 "Select a button on the diagram or in the bindings table first."
             )
             return
-        from .binding_labels import describe_binding
-
         if kind == "disabled":
             assigned = "Nothing"
         else:

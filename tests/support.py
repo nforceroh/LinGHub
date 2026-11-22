@@ -137,14 +137,10 @@ def make_window(
     window._back_button.set_visible(False)
     from linghub.ui.assignments_view import AssignmentsView
 
-    window._assignments = AssignmentsView.__new__(AssignmentsView)
-    Gtk.Paned.__init__(window._assignments)
-    window._assignments._table_rows = {}
-    window._assignments._binding_rows = {}
-    window._assignments._diagram = None
-    window._assignments._selected = None
-    window._assignments._bindings = {}
-    window._assignments._pending_bindings = {}
+    window._assignments = AssignmentsView(
+        on_stage=lambda *a: None,
+        on_status=lambda text: None,
+    )
     window._bindings = {}
     window._view = None
     window._refresh_task = None

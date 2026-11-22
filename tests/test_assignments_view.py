@@ -1,32 +1,24 @@
 """The Assignments view: selection, staging and refresh through its interface.
 
-These tests used to need the whole window: the view's state lived on the
-window as private fields, so a drop or a selection could only be exercised by
-building a half-constructed MainWindow. The view now owns that state, so the
-tests cross its interface — refresh, set_selected, and the stage callback.
+These tests construct the view normally — GTK and cairo are importable here —
+so the interface is the test surface: refresh, set_selected, selected, and
+the stage callback. Nothing pokes _table_rows or _diagram; those are
+implementation and may change freely.
 """
 
 import unittest
-
-from gi.repository import Gtk
 
 from linghub.ui.assignments_view import AssignmentsView
 
 
 def make_view():
-    """A view without the diagram: the tests here do not draw."""
+    """A real view with recording callbacks."""
     staged: list[tuple[int, str, object]] = []
     statuses: list[str] = []
-    view = AssignmentsView.__new__(AssignmentsView)
-    Gtk.Paned.__init__(view)
-    view._on_stage = lambda index, kind, value: staged.append((index, kind, value))
-    view._on_status = statuses.append
-    view._selected = None
-    view._bindings = {}
-    view._pending_bindings = {}
-    view._diagram = None
-    view._table_rows = {}
-    view._binding_rows = {}
+    view = AssignmentsView(
+        on_stage=lambda index, kind, value: staged.append((index, kind, value)),
+        on_status=statuses.append,
+    )
     return view, staged, statuses
 
 
