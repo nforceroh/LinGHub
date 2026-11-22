@@ -28,6 +28,8 @@ from .pending_edits import PendingEditsFor
 from .profile_selector import ProfileSelector
 from .home_card import HomeCard
 from .manage_profiles import ManageProfiles
+from .assignment_sidebar import AssignmentSidebar
+from .config_rail import ConfigRail
 from ..hardware.battery import battery, model_name
 from ..daemon_view import DaemonView, ProfileSummary, ViewState
 from .diagram import MouseDiagram
@@ -84,6 +86,20 @@ class MainWindow(Adw.ApplicationWindow):
         self._back_button.connect("clicked", lambda _b: self._back_clicked())
         self._back_button.set_visible(False)
         header.pack_start(self._back_button)
+
+        self._discard_button = Gtk.Button(label="Discard")
+        self._discard_button.set_tooltip_text("Discard all unsaved changes")
+        self._discard_button.add_css_class("flat")
+        self._discard_button.connect("clicked", lambda _b: self._discard_changes())
+        self._discard_button.set_sensitive(False)
+        header.pack_end(self._discard_button)
+
+        self._save_button = Gtk.Button(label="Apply")
+        self._save_button.set_tooltip_text("Apply changes to the profile")
+        self._save_button.add_css_class("suggested-action")
+        self._save_button.connect("clicked", lambda _b: self._save_changes())
+        self._save_button.set_sensitive(False)
+        header.pack_end(self._save_button)
 
         # The selector lives in the header so it is present on every view: which
         # profile you are editing is context for all of them. It sits at the
@@ -200,30 +216,80 @@ class MainWindow(Adw.ApplicationWindow):
         return self._manage
 
     def _build_editor(self) -> Gtk.Widget:
-        """Diagram and bindings on top, the device panels across the bottom.
+        """The configuration screen: one rail and three configuration views."""
+        self._config_rail = ConfigRail(
+            on_view=self._show_config_view,
+            on_manage=self._open_manage_profiles,
+        )
 
-        DPI and lighting sit under *both* columns rather than inside the right
-        one. They are wide controls (five slot rows, a colour, two sliders) and
-        the right column alone squeezed them, while the diagram left a tall
-        empty area beside them. Spanning the full width gives each panel the
-        room it needs and shortens the right column at the same time.
-        """
-        top = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
-        # The diagram needs 584px and the side pane 538px, so the split sits
-        # where both get their natural width at the default window size.
-        top.set_position(600)
-        top.set_wide_handle(True)
-        top.set_start_child(self._build_diagram_pane())
-        top.set_end_child(self._build_side_pane())
-        # The top row takes whatever height is left after the panels below
-        # have their natural height.
-        top.set_vexpand(True)
+        self._config_stack = Gtk.Stack()
+        self._config_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self._config_stack.add_named(self._build_assignments_view(), "assignments")
+        self._config_stack.add_named(self._build_dpi_view(), "dpi")
+        self._config_stack.add_named(self._build_lightsync_view(), "lightsync")
+        self._config_stack.set_visible_child_name("assignments")
 
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        content.append(top)
-        content.append(Gtk.Separator())
-        content.append(self._build_device_panels())
+        content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        content.append(self._config_rail)
+        content.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
+        content.append(self._config_stack)
         return content
+
+    def _build_assignments_view(self) -> Gtk.Widget:
+        """Assignments: command sidebar on the left, diagram and table on the right."""
+        self._assignment_sidebar = AssignmentSidebar(
+            on_chosen=self._on_assignment_chosen,
+        )
+
+        right = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
+        right.set_wide_handle(True)
+        right.set_position(430)
+        right.set_start_child(self._build_diagram_pane())
+
+        table_scroller = Gtk.ScrolledWindow()
+        table_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        table_scroller.set_vexpand(True)
+
+        table_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        table_box.set_margin_top(8)
+        table_box.set_margin_bottom(12)
+        table_box.set_margin_start(12)
+        table_box.set_margin_end(12)
+        table_box.append(self._section_label("Bindings"))
+        table_box.append(self._build_button_table())
+        table_scroller.set_child(table_box)
+        right.set_end_child(table_scroller)
+
+        split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        split.set_wide_handle(True)
+        split.set_position(300)
+        split.set_start_child(self._assignment_sidebar)
+        split.set_end_child(right)
+        return split
+
+    def _build_dpi_view(self) -> Gtk.Widget:
+        """The DPI view, moved out of the old full-width device row."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box.set_margin_top(18)
+        box.set_margin_bottom(18)
+        box.set_margin_start(18)
+        box.set_margin_end(18)
+        box.append(self._section_label("Sensitivity (DPI)"))
+        self._dpi_panel = DpiPanel(on_save=self._on_dpi_saved)
+        box.append(self._dpi_panel)
+        return box
+
+    def _build_lightsync_view(self) -> Gtk.Widget:
+        """The lighting view, moved out of the old full-width device row."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box.set_margin_top(18)
+        box.set_margin_bottom(18)
+        box.set_margin_start(18)
+        box.set_margin_end(18)
+        box.append(self._section_label("LIGHTSYNC"))
+        self._led_panel = LedPanel(on_save=self._on_led_saved)
+        box.append(self._led_panel)
+        return box
 
     def _build_diagram_pane(self) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -523,6 +589,13 @@ class MainWindow(Adw.ApplicationWindow):
 
         self._rebuild_profiles()
         self._rebuild_bindings()
+        if hasattr(self, "_diagram") and self._diagram is not None:
+            self._diagram.set_binding_labels(
+                {
+                    index: presentation.diagram_binding_label(self._bindings, index)
+                    for index in [spot.index for spot in BUTTONS]
+                }
+            )
         self._card.show_device(self._device_name(), battery())
         if self._led_panel is not None:
             # Never reload the panel over unsaved edits: any change signal
@@ -545,7 +618,7 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._pending.for_profile(profile).set_resolutions(slots, rate)
         self._sync_save_buttons()
-        self._status.set_text("DPI changes pending — press Save to apply.")
+        self._status.set_text("DPI changes pending — press Apply.")
 
     def _sync_save_buttons(self) -> None:
         """Enable Save and Discard only when something is pending."""
@@ -628,6 +701,10 @@ class MainWindow(Adw.ApplicationWindow):
     def _discard_changes(self) -> None:
         """Throw away every pending edit and show the config as it is."""
         self._pending.clear()
+        if self._dpi_panel is not None:
+            self._dpi_panel.revert()
+        if self._led_panel is not None:
+            self._led_panel.revert()
         self._sync_save_buttons()
         self._status.set_text("Discarded unsaved changes.")
         # Reload from the daemon rather than from a remembered snapshot: the
@@ -641,7 +718,7 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._pending.for_profile(profile).set_leds(mode, brightness, duration, color)
         self._sync_save_buttons()
-        self._status.set_text("Lighting changes pending — press Save to apply.")
+        self._status.set_text("Lighting changes pending — press Apply.")
 
     def _device_name(self) -> str:
         """The mouse's name, as the card shows it.
@@ -675,6 +752,13 @@ class MainWindow(Adw.ApplicationWindow):
             label = self._binding_rows.get(index)
             if label is not None:
                 label.set_text(presentation.binding_label(self._bindings, index))
+        if hasattr(self, "_diagram") and self._diagram is not None:
+            self._diagram.set_binding_labels(
+                {
+                    index: presentation.diagram_binding_label(self._bindings, index)
+                    for index in [spot.index for spot in BUTTONS]
+                }
+            )
 
     # --- profile management ----------------------------------------------
 
@@ -808,6 +892,29 @@ class MainWindow(Adw.ApplicationWindow):
             on_apply=lambda i, k, v: self._start_binding_write(profile, i, k, v),
         ).present()
 
+    def _on_assignment_chosen(self, kind: str, value: object) -> None:
+        """Stage a sidebar choice for the currently selected button."""
+        if self._selected_button is None:
+            self._status.set_text(
+                "Select a button on the diagram or in the bindings table first."
+            )
+            return
+        profile = self._editing_profile()
+        if profile is None:
+            self._status.set_text("Select a profile first.")
+            return
+        self._start_binding_write(
+            profile, self._selected_button, kind, value
+        )
+        if kind == "disabled":
+            assigned = "Nothing"
+        else:
+            from .binding_labels import describe_binding
+            assigned = describe_binding(kind, value)
+        self._status.set_text(
+            f"{describe(self._selected_button)} will do {assigned} — press Apply."
+        )
+
     def _editing_profile(self) -> str | None:
         """The profile the panels show and edit."""
         return presentation.editing_profile(self._state, self._editing)
@@ -822,7 +929,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._pending.for_profile(profile).set_binding(index, kind, value)
         self._sync_save_buttons()
         self._status.set_text(
-            f"{describe(index)} pending — press Save to apply."
+            f"{describe(index)} pending — press Apply."
         )
         return True
 
@@ -855,9 +962,20 @@ class MainWindow(Adw.ApplicationWindow):
         self._apply_selection(name)
 
     def _show_view(self, name: str) -> None:
-        """Swap between the home screen and the editor."""
+        """Swap between the home, manage and configuration screens."""
         self._stack.set_visible_child_name(name)
         self._back_button.set_visible(name != "home")
+        if name == "editor":
+            self._show_config_view("assignments")
+
+    def _show_config_view(self, name: str) -> None:
+        """Choose one of the three configuration views."""
+        if hasattr(self, "_config_stack"):
+            self._config_stack.set_visible_child_name(name)
+        if hasattr(self, "_config_rail") and name in (
+            "dpi", "assignments", "lightsync"
+        ):
+            self._config_rail.select(name)
 
     def _open_manage_profiles(self) -> None:
         """Open the manage-profiles canvas.
@@ -1068,13 +1186,13 @@ class MainWindow(Adw.ApplicationWindow):
             transient_for=self,
             heading="Unsaved changes",
             body=(
-                f"Save your changes to {self._editing} before managing "
+                f"Apply your changes to {self._editing} before managing "
                 "profiles?"
             ),
         )
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("discard", "Discard")
-        dialog.add_response("save", "Save")
+        dialog.add_response("save", "Apply")
         dialog.set_response_appearance("discard", Adw.ResponseAppearance.DESTRUCTIVE)
         dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
         dialog.set_default_response("save")
@@ -1154,16 +1272,16 @@ class MainWindow(Adw.ApplicationWindow):
             transient_for=self,
             heading="Unsaved changes",
             body=(
-                f"Save your changes to {self._editing} before "
+                f"Apply your changes to {self._editing} before "
                 f"switching to {name}?"
                 if load
-                else f"Save your changes to {self._editing} before "
+                else f"Apply your changes to {self._editing} before "
                 f"editing {name}?"
             ),
         )
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("discard", "Discard")
-        dialog.add_response("save", "Save")
+        dialog.add_response("save", "Apply")
         dialog.set_response_appearance("discard", Adw.ResponseAppearance.DESTRUCTIVE)
         dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
         dialog.set_default_response("save")

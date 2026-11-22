@@ -79,3 +79,13 @@ def binding_label(bindings: dict, index: int) -> str:
 def binding_labels(bindings: dict, indices) -> dict[int, str]:
     """The "Does" column for every button, keyed by ratbag index."""
     return {index: binding_label(bindings, index) for index in indices}
+
+
+def diagram_binding_label(bindings: dict, index: int) -> str:
+    """A compact, truthful label for a diagram leader line."""
+    kind, _value = bindings.get(index, ("", None))
+    if kind in ("key", "special", "button", "disabled"):
+        label = binding_label(bindings, index)
+        return label if label != "—" else "Nothing"
+    from .buttonmap import describe
+    return describe(index)

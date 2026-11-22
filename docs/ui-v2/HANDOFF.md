@@ -27,11 +27,10 @@ Tests: **893 passed, 1 skipped** (` .venv/bin/python -m pytest tests/`).
 
 ## Not built yet (build order §2.13)
 
-3. **Navigation restructure** — the configuration screen with three views on
-   an icon rail (DPI / Assignments / LIGHTSYNC). This is the window.py
-   rewrite: today's single editor view becomes the Assignments view, the DPI
-   and lighting panels move into the DPI / LIGHTSYNC views. Everything in
-   `_build_editor` moves; keep the pending-edit and write paths intact.
+3. **Navigation restructure** — partially built. The configuration screen now
+   has the DPI / Assignments / LIGHTSYNC icon rail and the Assignments sidebar.
+   Leader lines and labels are present on the diagram. Remaining work:
+   Default/Second mode, preset-colour polish, and the final LIGHTSYNC visual.
 4. **Colour palette + preset numbers** (ADR-0013), self-contained.
 - LIGHTSYNC view, onboard-memory screen (no spec section — see §4 Open),
   DPI legend row, Assignments labels with leader lines, Default/Second-mode

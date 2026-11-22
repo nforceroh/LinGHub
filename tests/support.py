@@ -118,6 +118,11 @@ def make_window(
     window._stack = Gtk.Stack()
     window._stack.add_named(Gtk.Label(label="home"), "home")
     window._stack.add_named(Gtk.Label(label="editor"), "editor")
+    window._config_stack = Gtk.Stack()
+    window._config_stack.add_named(Gtk.Label(label="assignments"), "assignments")
+    window._config_stack.add_named(Gtk.Label(label="dpi"), "dpi")
+    window._config_stack.add_named(Gtk.Label(label="lightsync"), "lightsync")
+    window._config_stack.set_visible_child_name("assignments")
     from linghub.ui.manage_profiles import ManageProfiles
 
     window._manage = ManageProfiles(

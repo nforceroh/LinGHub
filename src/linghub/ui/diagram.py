@@ -40,6 +40,7 @@ class MouseDiagram(Gtk.DrawingArea):
         self._surface, self._surface_data = self._load_surface(image_path)
         self._selected: int | None = None
         self._hovered: int | None = None
+        self._binding_labels: dict[int, str] = {}
 
         # Matches the shipped image's aspect (705x400), so the diagram fills
         # its widget instead of letterboxing inside it.
@@ -61,6 +62,11 @@ class MouseDiagram(Gtk.DrawingArea):
 
     def set_selected(self, index: int | None) -> None:
         self._selected = index
+        self.queue_draw()
+
+    def set_binding_labels(self, labels: dict[int, str]) -> None:
+        """Show a compact binding label beside every hotspot."""
+        self._binding_labels = dict(labels)
         self.queue_draw()
 
     def _layout(self, width: float, height: float) -> tuple[float, float, float, float]:
@@ -151,6 +157,7 @@ class MouseDiagram(Gtk.DrawingArea):
         for spot in BUTTONS:
             cx, cy = self._centre(spot, width, height)
             self._draw_hotspot(cr, cx, cy, spot)
+            self._draw_binding_label(cr, cx, cy, spot)
 
     def _draw_texture(self, cr, x: float, y: float, w: float, h: float) -> None:
         """Paint the image surface scaled into the given rectangle."""
@@ -161,6 +168,45 @@ class MouseDiagram(Gtk.DrawingArea):
         cr.scale(w / self._surface.get_width(), h / self._surface.get_height())
         cr.set_source_surface(self._surface, 0, 0)
         cr.paint()
+        cr.restore()
+
+    def _draw_binding_label(
+        self, cr, cx: float, cy: float, spot: ButtonSpot
+    ) -> None:
+        """Draw a compact label and leader line beside a hotspot."""
+        label = getattr(self, "_binding_labels", {}).get(spot.index)
+        if not label:
+            return
+
+        cr.save()
+        cr.select_font_face("Sans", 0, 0)
+        cr.set_font_size(10)
+        extents = cr.text_extents(label)
+
+        if spot.x < 0.5:
+            end_x = cx + 34
+            text_x = end_x + 8
+            start_x = cx + HOTSPOT_RADIUS
+            anchor_right = False
+        else:
+            end_x = cx - 34
+            text_x = end_x - 8
+            start_x = cx - HOTSPOT_RADIUS
+            anchor_right = True
+
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.72)
+        cr.set_line_width(1.0)
+        cr.move_to(start_x, cy)
+        cr.line_to(end_x, cy)
+        cr.stroke()
+
+        if anchor_right:
+            text_x -= extents.width
+        cr.move_to(
+            text_x - extents.x_bearing,
+            cy - extents.height / 2 - extents.y_bearing,
+        )
+        cr.show_text(label)
         cr.restore()
 
     def _draw_hotspot(self, cr, cx: float, cy: float, spot: ButtonSpot) -> None:

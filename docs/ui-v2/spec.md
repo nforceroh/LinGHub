@@ -560,7 +560,12 @@ For orientation, so this document is not read as a plan for work already done.
 | `DPI preset` in the glossary | built |
 | Home screen with the device card | built |
 | Profile selector dropdown | built |
-| Two-level navigation, home and editor | built (the three-view icon rail is not) |
+| Two-level navigation, home and configuration | built |
+| Configuration icon rail: DPI, Assignments, LIGHTSYNC | built |
+| Assignments searchable command sidebar | built |
+| Assignments labels with diagram leader lines | built |
+| DPI configuration view | built |
+| LIGHTSYNC configuration view | built |
 | Manage-profiles canvas | built |
 | Game display name and config shape | built |
 | Duplicate profile, rename a game | built |
