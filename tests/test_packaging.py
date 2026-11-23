@@ -39,14 +39,26 @@ class SpecTests(unittest.TestCase):
     def test_the_spec_has_no_unsubstituted_version(self):
         self.assertIn("@VERSION@", self.spec, "the build script substitutes this")
 
-    def test_the_gui_dependencies_are_in_the_ui_subpackage_only(self):
-        """A headless machine must be able to install the daemon alone."""
-        base, _, ui = self.spec.partition("%package ui")
-        self.assertNotIn("gtk4", base)
-        self.assertNotIn("python3-gobject", base)
-        self.assertIn("gtk4", ui)
-        self.assertIn("python3-gobject", ui)
-        self.assertIn("libappindicator-gtk3", ui)
+    def test_the_one_package_has_the_gui_dependencies(self):
+        """Every install is a desktop machine; one package needs one dep list.
+
+        An earlier version split python3-linghub and linghub-ui so a headless
+        machine could install the daemon alone; that scenario never arrived
+        and ADR-0011 records the merge. This test inverts the old one: the
+        single package must declare the GUI libraries, not defer them.
+        """
+        self.assertNotIn("%package ui", self.spec)
+        for dep in ("python3-dbus-fast", "python3-gobject", "gtk4",
+                    "libadwaita", "libappindicator-gtk3", "systemd"):
+            pattern = rf"\A Requires:\s+{re.escape(dep)}".replace(" ", "")
+            self.assertIsNotNone(
+                re.search(rf"(?m)^\s*[Rr]equires:\s+{re.escape(dep)}[\s<]", self.spec),
+                f"{dep} declared as a package requirement",
+            )
+
+    def test_the_one_package_has_one_files_list(self):
+        self.assertNotIn("%files -n", self.spec)
+        self.assertRegex(self.spec, r"(?m)^%files\b")
 
 
 class SourceFileTests(unittest.TestCase):
