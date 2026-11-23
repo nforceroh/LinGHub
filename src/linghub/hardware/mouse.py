@@ -229,7 +229,7 @@ class RatbagMouse:
         asks again. Only a mouse that answers with a different slot is a
         refusal, because then the profile is known not to be in use.
         """
-        if self._slots.mouse is None:
+        if not self._slots.can_read:
             return
         try:
             actual = await self._slots.read()

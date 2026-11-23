@@ -132,6 +132,15 @@ class ReaderTests(unittest.TestCase):
         self.believed = 2
         self.assertEqual(self.read(self._reader(mouse=None)), 2)
 
+    def test_can_read_says_whether_there_is_a_mouse_to_ask(self):
+        """A caller deciding whether to ask gets one answer, not the reader's parts.
+
+        `_confirm_active_slot` used to read `.mouse is None` — reaching through
+        the reader's storage (#21). `can_read` is the question it meant.
+        """
+        self.assertTrue(self._reader().can_read)
+        self.assertFalse(self._reader(mouse=None).can_read)
+
 
 
 class MouseForTests(unittest.TestCase):
