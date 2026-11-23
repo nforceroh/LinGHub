@@ -1,0 +1,65 @@
+# Build the RPM for every release tag, and attach it to the release.
+#
+# One job, in a Fedora container: the artifact is an RPM, so the toolchain that
+# builds it is Fedora's own, and the smoke test inside scripts/build-rpm.sh
+# unpacks and imports the package the way dnf would. Nothing else can vouch
+# for the %files list (ADR-0011).
+#
+# The version gate lives in the build script: a tag on a clean tree passes,
+# anything else is refused, so a mis-tagged ref fails here rather than
+# producing a lying package.
+
+name: release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build (e.g. v0.6.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  rpm:
+    name: Build linghub RPM
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:latest
+    steps:
+      - name: Install the build toolchain
+        run: >
+          dnf install -y --setopt=install_weak_deps=False
+          git rpm-build python3-pip
+
+      - name: Check out the tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Build and smoke-test the RPM
+        run: |
+          git config --global --add safe.directory "$PWD"
+          python3 -m venv .venv
+          .venv/bin/pip install -q -e .
+          ./scripts/build-rpm.sh
+
+      - name: Upload the RPM to the release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.rpm
+          overwrite_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Keep the artifact for manual workflow_dispatch runs
+        uses: actions/upload-artifact@v4
+        with:
+          name: linghub-rpm
+          path: dist/*.rpm
