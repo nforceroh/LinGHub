@@ -35,7 +35,7 @@ class ProfileActions:
     """
 
     def __init__(
-        self, parent, client, writes, *, report, editing_profile,
+        self, parent, client, writes, *, report,
         profile_names, desktop_profile, profile_of_game, on_async_error,
     ):
         self._parent = parent
@@ -45,7 +45,6 @@ class ProfileActions:
         self._client = client if callable(client) else (lambda: client)
         self._writes = writes
         self._report = report
-        self._editing_profile = editing_profile
         self._profile_names = profile_names
         self._desktop_profile = desktop_profile
         self._profile_of_game = profile_of_game

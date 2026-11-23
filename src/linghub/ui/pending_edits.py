@@ -105,10 +105,6 @@ class PendingEditsFor:
         return self._edits
 
     @property
-    def current(self) -> PendingEdits | None:
-        return self._edits
-
-    @property
     def dirty(self) -> bool:
         return self._edits is not None and self._edits.dirty
 

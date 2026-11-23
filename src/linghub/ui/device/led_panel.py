@@ -77,9 +77,8 @@ class EffectControl(Gtk.MenuButton):
 class LedPanel(Gtk.Box):
     """Colour, effect, brightness and speed for one profile's lighting."""
 
-    def __init__(self, on_save, on_revert=None):
+    def __init__(self, on_save):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        self._on_revert = on_revert
         self._clean_hint = ""
         self._staged = StagedEdit(
             self._values,
@@ -308,5 +307,3 @@ class LedPanel(Gtk.Box):
         self._speed.set_value(self._duration_to_speed(duration))
         self._color_button.set_rgba(self._rgba(color))
         self._sync_sensitivity()
-        if self._on_revert is not None:
-            self._on_revert()

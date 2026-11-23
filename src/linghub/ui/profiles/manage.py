@@ -68,7 +68,7 @@ class ManageProfiles(Gtk.ScrolledWindow):
 
         self._profile_tiles: dict[str, ProfileTile] = {}
         self._add_game_tile = AddTile("+ ADD GAME")
-        self._add_game_tile.clicked(self._on_add_game)
+        self._add_game_tile.connect("clicked", lambda _b: self._on_add_game())
 
     @staticmethod
     def _heading(text: str) -> Gtk.Label:

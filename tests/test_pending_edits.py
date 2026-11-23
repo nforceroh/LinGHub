@@ -91,7 +91,7 @@ class PerProfileTests(unittest.TestCase):
     def test_edits_are_kept_for_the_profile_they_belong_to(self):
         pending = PendingEditsFor()
         pending.for_profile("desktop").set_binding(2, "key", "KEY_X")
-        self.assertEqual(pending.current.profile, "desktop")
+        self.assertEqual(pending.for_profile("desktop").profile, "desktop")
 
     def test_asking_for_a_different_profile_starts_empty(self):
         """Switching profiles is refused while dirty, so this only happens

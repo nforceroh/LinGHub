@@ -308,21 +308,18 @@ class Mode:
         return self.choices
 
 
-def _keys_choices() -> tuple[tuple[str, str], ...]:
-    """The full curated keyboard, shared by the key and macro modes.
-
-    The sidebar's Keys group offers every basic-keyboard key; the editor's
-    dropdown offers the same list, so a binding staged from the sidebar is
-    always visible and re-selectable in the dialog.
-    """
-    return tuple(_all_keys())
+# The full curated keyboard, shared by the key and macro modes. The sidebar's
+# Keys group offers every basic-keyboard key; the editor's dropdown offers the
+# same list, so a binding staged from the sidebar is always visible and
+# re-selectable in the dialog.
+KEYS_CHOICES: tuple[tuple[str, str], ...] = tuple(_all_keys())
 
 
 MODES: tuple[Mode, ...] = (
-    Mode(MODE_KEY, "A single key", "key", DROPDOWN, _keys_choices()),
+    Mode(MODE_KEY, "A single key", "key", DROPDOWN, KEYS_CHOICES),
     Mode(
         MODE_KEY_MACRO, "A single key, as a macro", "macro",
-        DROPDOWN, _keys_choices(),
+        DROPDOWN, KEYS_CHOICES,
     ),
     Mode(MODE_CHORD, "A modifier chord", "macro", CHORD),
     Mode(MODE_SPECIAL, "A mouse function", "special", DROPDOWN, tuple(SPECIAL_CHOICES)),

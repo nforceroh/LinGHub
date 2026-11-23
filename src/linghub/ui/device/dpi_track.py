@@ -405,13 +405,14 @@ class DpiTrack(Gtk.DrawingArea):
         def apply(*_args) -> None:
             self._slots[index]["dpi"] = int(spin.get_value())
             self._slots[index]["disabled"] = disabled.get_active()
-            if default.get_active():
-                # Only one slot may be the default: ratbagd honours a single
-                # one, so ticking this clears the rest.
-                for position, other in enumerate(self._slots):
-                    other["default"] = position == index
-            else:
-                self._slots[index]["default"] = False
+            # Only one slot may be the default: ratbagd honours a single one,
+            # so ticking this clears the rest. The rule lives in rules.
+            mask = panel_rules.default_mask(
+                [slot["default"] for slot in self._slots],
+                index, on=default.get_active(),
+            )
+            for position, other in enumerate(self._slots):
+                other["default"] = mask[position]
             self.queue_draw()
             self._edited()
 

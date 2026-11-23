@@ -54,9 +54,6 @@ class AddTile(Gtk.Button):
         self.set_size_request(TILE_WIDTH, 120)
         self.set_hexpand(False)
 
-    def clicked(self, on_click) -> None:
-        self.connect("clicked", lambda _b: on_click())
-
 
 class ProfileTile(Gtk.Box):
     """One profile's tile: its name, its summary line, and its actions.

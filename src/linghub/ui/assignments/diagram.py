@@ -44,7 +44,6 @@ class MouseDiagram(Gtk.DrawingArea):
         self._surface, self._surface_data = self._load_surface(image_path)
         self._selected: int | None = None
         self._hovered: int | None = None
-        self._binding_labels: dict[int, str] = {}
 
         # Matches the shipped image's aspect (705x400), so the diagram fills
         # its widget instead of letterboxing inside it. The width is a floor
@@ -76,11 +75,6 @@ class MouseDiagram(Gtk.DrawingArea):
 
     def set_selected(self, index: int | None) -> None:
         self._selected = index
-        self.queue_draw()
-
-    def set_binding_labels(self, labels: dict[int, str]) -> None:
-        """Show a compact binding label beside every hotspot."""
-        self._binding_labels = dict(labels)
         self.queue_draw()
 
     def _layout(self, width: float, height: float) -> tuple[float, float, float, float]:

@@ -9,7 +9,6 @@ goes to the daemon over D-Bus, which is the only writer of the config
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 import gi
 
@@ -20,8 +19,9 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 from .assignments import AssignmentsView
+from .assignments.editor import BindingEditor
 from .asyncbridge import run_and_report
-from .buttonmap import DIAGRAM_IMAGE, describe
+from .buttonmap import describe
 from .client import DaemonClient
 from .daemon_write import DaemonWrite
 from . import edit_apply
@@ -40,9 +40,6 @@ from .device import LedPanel
 
 
 logger = logging.getLogger("linghub.ui.window")
-
-# Shipped inside the package, so a wheel and an RPM find it the same way.
-IMAGE = DIAGRAM_IMAGE
 
 
 class MainWindow(Adw.ApplicationWindow):
@@ -132,7 +129,6 @@ class MainWindow(Adw.ApplicationWindow):
             lambda: self._client,
             self._writes,
             report=self._status.set_text,
-            editing_profile=lambda: self._editing_profile(),
             profile_names=lambda: self._state.profiles,
             desktop_profile=lambda: self._state.desktop_profile,
             profile_of_game=self._profile_of_game,
@@ -268,6 +264,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._assignments = AssignmentsView(
             on_stage=self._on_assignment_staged,
             on_status=self._status.set_text,
+            on_open_editor=self._open_editor,
         )
         return self._assignments
 
@@ -557,6 +554,28 @@ class MainWindow(Adw.ApplicationWindow):
         self._start_binding_write(profile, index, kind, value)
         self._rebuild_bindings()
 
+    def _open_editor(self, index: int, kind: str, value) -> None:
+        """Open the binding editor for one button.
+
+        The view owns the click; the window owns the dialog's parent and what
+        an applied edit is worth. The editor closes on a truthy answer, so
+        staging answers immediately: the edit is recorded, not written.
+        """
+        if not self._state.profiles:
+            self._status.set_text("No profile to edit.")
+            return
+        profile = self._editing_profile()
+        if profile is None:
+            self._status.set_text("Select a profile first.")
+            return
+        BindingEditor(
+            parent=self,
+            button_index=index,
+            kind=kind,
+            value=value,
+            on_apply=lambda i, k, v: self._start_binding_write(profile, i, k, v),
+        ).present()
+
     def _editing_profile(self) -> str | None:
         """The profile the panels show and edit."""
         return presentation.editing_profile(self._state, self._editing)
@@ -701,15 +720,18 @@ class MainWindow(Adw.ApplicationWindow):
         self._rebuild_profiles()
         self._refresh()
 
-    def _confirm_switch_for_canvas(self) -> None:
-        """Ask what to do with unsaved changes before opening the canvas."""
+    def _confirm_unsaved(self, body, *, on_cancel, on_discard, on_save) -> None:
+        """Ask what to do with unsaved changes before a navigation.
+
+        One dialog for every destination — the canvas, another profile,
+        editing without loading. The question and its three answers are
+        always the same; only the body text and what each answer does vary,
+        so those are what a caller supplies.
+        """
         dialog = Adw.MessageDialog(
             transient_for=self,
             heading="Unsaved changes",
-            body=(
-                f"Apply your changes to {self._editing} before managing "
-                "profiles?"
-            ),
+            body=body,
         )
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("discard", "Discard")
@@ -722,19 +744,28 @@ class MainWindow(Adw.ApplicationWindow):
         def on_response(_dialog, response):
             dialog.close()
             if response == "cancel":
-                return
-            if response == "discard":
-                self._pending.clear()
-                self._sync_save_buttons()
-                self._show_canvas()
-                return
-            if response == "save":
-                run_and_report(
-                    self._save_then_open_canvas(), self._on_async_error
-                )
+                on_cancel()
+            elif response == "discard":
+                on_discard()
+            elif response == "save":
+                run_and_report(on_save(), self._on_async_error)
 
         dialog.connect("response", on_response)
         dialog.present()
+
+    def _confirm_switch_for_canvas(self) -> None:
+        """Ask what to do with unsaved changes before opening the canvas."""
+        self._confirm_unsaved(
+            f"Apply your changes to {self._editing} before managing profiles?",
+            on_cancel=lambda: None,
+            on_discard=self._discard_then_open_canvas,
+            on_save=self._save_then_open_canvas,
+        )
+
+    def _discard_then_open_canvas(self) -> None:
+        self._pending.clear()
+        self._sync_save_buttons()
+        self._show_canvas()
 
     async def _save_then_open_canvas(self) -> None:
         """Save the pending edits, then open the canvas only on success."""
@@ -792,45 +823,17 @@ class MainWindow(Adw.ApplicationWindow):
         "editing the profile", not "editing and loading it", so accept paths
         that would put it on the mouse are not offered.
         """
-        dialog = Adw.MessageDialog(
-            transient_for=self,
-            heading="Unsaved changes",
-            body=(
-                f"Apply your changes to {self._editing} before "
-                f"switching to {name}?"
+        destination = f"switching to {name}" if load else f"editing {name}"
+        self._confirm_unsaved(
+            f"Apply your changes to {self._editing} before {destination}?",
+            on_cancel=self._reselect_current,
+            on_discard=(
+                lambda: self._apply_selection(name)
                 if load
-                else f"Apply your changes to {self._editing} before "
-                f"editing {name}?"
+                else lambda: self._edit_without_loading(name)
             ),
+            on_save=lambda: self._save_then_select(name, load=load),
         )
-        dialog.add_response("cancel", "Cancel")
-        dialog.add_response("discard", "Discard")
-        dialog.add_response("save", "Apply")
-        dialog.set_response_appearance("discard", Adw.ResponseAppearance.DESTRUCTIVE)
-        dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
-        dialog.set_default_response("save")
-        dialog.set_close_response("cancel")
-
-        def on_response(_dialog, response):
-            dialog.close()
-            if response == "cancel":
-                # Put the list back on the profile still being edited.
-                self._reselect_current()
-                return
-            if response == "discard":
-                if load:
-                    self._apply_selection(name)
-                else:
-                    self._edit_without_loading(name)
-                return
-            if response == "save":
-                run_and_report(
-                    self._save_then_select(name, load=load),
-                    self._on_async_error,
-                )
-
-        dialog.connect("response", on_response)
-        dialog.present()
 
     async def _save_then_select(self, name: str, *, load: bool = True) -> None:
         """Save the pending edits, then switch only if the save succeeded."""

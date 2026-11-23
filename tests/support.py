@@ -157,7 +157,6 @@ def make_window(
         client=lambda: window._client,
         writes=window._writes,
         report=window._status.set_text,
-        editing_profile=lambda: window._editing_profile(),
         profile_names=lambda: window._state.profiles,
         desktop_profile=lambda: window._state.desktop_profile,
         profile_of_game=lambda executable: None,

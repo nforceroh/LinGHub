@@ -27,9 +27,9 @@ class PackagedAssetTests(unittest.TestCase):
         self.assertEqual(buttonmap.PACKAGED_HOTSPOTS.parent, PACKAGE)
 
     def test_the_window_uses_the_packaged_diagram(self):
-        from linghub.ui import window
+        from linghub.ui.assignments import view
 
-        self.assertEqual(window.IMAGE, buttonmap.DIAGRAM_IMAGE)
+        self.assertEqual(view.IMAGE, buttonmap.DIAGRAM_IMAGE)
 
 
 class HotspotsLocationTests(unittest.TestCase):

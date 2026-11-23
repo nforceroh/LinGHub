@@ -25,7 +25,6 @@ from gi.repository import Gtk
 
 from .. import presentation
 from .sidebar import AssignmentSidebar
-from .editor import BindingEditor
 from .labels import describe_binding
 from ..buttonmap import BUTTONS, DIAGRAM_IMAGE, describe, manual_number
 from .diagram import MouseDiagram
@@ -42,7 +41,7 @@ class AssignmentsView(Gtk.Paned):
     highlight, drop targets — is implementation.
     """
 
-    def __init__(self, on_stage, on_status):
+    def __init__(self, on_stage, on_status, on_open_editor=None):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL)
         self.set_wide_handle(True)
         # 390px: wide enough for the four group tabs and the choice labels
@@ -52,6 +51,7 @@ class AssignmentsView(Gtk.Paned):
 
         self._on_stage = on_stage
         self._on_status = on_status
+        self._on_open_editor = on_open_editor
         self._selected: int | None = None
         self._bindings: dict = {}
         self._pending_bindings: dict = {}
@@ -97,13 +97,6 @@ class AssignmentsView(Gtk.Paned):
                 label.set_text(
                     presentation.binding_label(bindings, index, pending_bindings)
                 )
-        if self._diagram is not None:
-            self._diagram.set_binding_labels(
-                {
-                    index: presentation.diagram_binding_label(bindings, index)
-                    for index in [spot.index for spot in BUTTONS]
-                }
-            )
 
     def set_selected(self, index: int | None) -> None:
         """Pick a button, on the diagram and in the table."""
@@ -116,22 +109,19 @@ class AssignmentsView(Gtk.Paned):
         """The button the user last picked, or None."""
         return self._selected
 
-    def open_editor(self, parent, profile: str, on_apply) -> None:
+    def open_editor(self) -> None:
         """Open the binding editor for the selected button.
 
-        `on_apply(index, kind, value)` answers like _start_binding_write:
-        a truthy result closes the dialog, a string shows it as an error.
+        `on_open(editor)` is supplied at construction; the window answers it
+        with the parent widget and the apply callback, because who applies
+        the edit is the window's business, not the view's.
         """
-        if self._selected is None:
+        if self._selected is None or self._on_open_editor is None:
             return
         kind, value = self._bindings.get(self._selected, ("disabled", None))
-        BindingEditor(
-            parent=parent,
-            button_index=self._selected,
-            kind=kind or "disabled",
-            value=value,
-            on_apply=on_apply,
-        ).present()
+        self._on_open_editor(
+            self._selected, kind or "disabled", value
+        )
 
     # --- construction -----------------------------------------------------
 
@@ -224,10 +214,19 @@ class AssignmentsView(Gtk.Paned):
     # --- events -----------------------------------------------------------
 
     def _on_row_clicked(self, index: int) -> None:
-        self.set_selected(index)
-        self._on_status(f"Selected: {describe(index)}")
+        """A table-row click selects the button and opens the editor.
+
+        The click-to-edit affordance is the table's reason for existing
+        (spec §2.9, Q51): the sidebar stages a known choice, the editor is
+        where a chord or a macro gets built.
+        """
+        self._select(index)
+        self.open_editor()
 
     def _on_button_selected(self, _diagram, index: int) -> None:
+        self._select(index)
+
+    def _select(self, index: int) -> None:
         self.set_selected(index)
         self._on_status(f"Selected: {describe(index)}")
 
