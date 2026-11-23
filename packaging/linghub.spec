@@ -29,6 +29,10 @@ Source4:        linghub.service
 Source5:        linghub-tray.service
 Source6:        config.example.json
 Source7:        LICENSE
+Source8:        linghub-retrigger
+Source9:        linghub-retrigger.service
+Source10:       org.linghub.Retrigger.conf
+Source11:       org.linghub.retrigger-node.policy
 BuildArch:      noarch
 BuildRequires:  python3-rpm-macros
 BuildRequires:  systemd-rpm-macros
@@ -86,6 +90,17 @@ install -m 0644 %{SOURCE3} %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/
 mkdir -p %{buildroot}%{docdir}
 install -m 0644 %{SOURCE6} %{buildroot}%{docdir}/
 
+# The retrigger helper: a root-owned one-method D-Bus service, activated on
+# demand, gated by its own polkit action (#19). Deleted with the package.
+mkdir -p %{buildroot}%{_libexecdir}
+install -m 0755 %{SOURCE8} %{buildroot}%{_libexecdir}/linghub-retrigger
+mkdir -p %{buildroot}%{_unitdir}
+install -m 0644 %{SOURCE9} %{buildroot}%{_unitdir}/linghub-retrigger.service
+mkdir -p %{buildroot}%{_datadir}/dbus-1/system.d
+install -m 0644 %{SOURCE10} %{buildroot}%{_datadir}/dbus-1/system.d/org.linghub.Retrigger.conf
+mkdir -p %{buildroot}%{_datadir}/polkit-1/actions
+install -m 0644 %{SOURCE11} %{buildroot}%{_datadir}/polkit-1/actions/org.linghub.retrigger-node.policy
+
 %files
 %license LICENSE
 %{python3_sitelib}/linghub/
@@ -97,6 +112,10 @@ install -m 0644 %{SOURCE6} %{buildroot}%{docdir}/
 %{_metainfodir}/org.linghub.LinGHub.metainfo.xml
 %{_datadir}/icons/hicolor/scalable/apps/org.linghub.LinGHub.svg
 %{docdir}/config.example.json
+%{_libexecdir}/linghub-retrigger
+%{_unitdir}/linghub-retrigger.service
+%{_datadir}/dbus-1/system.d/org.linghub.Retrigger.conf
+%{_datadir}/polkit-1/actions/org.linghub.retrigger-node.policy
 
 %changelog
 * Thu Nov 19 2026 LinGHub contributors - 0.5.0-1

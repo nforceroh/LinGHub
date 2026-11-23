@@ -123,6 +123,8 @@ class Daemon:
         # The last unexpected error, so a bug that repeats every check is
         # logged with its traceback once, not every two seconds.
         self._last_bug: tuple[str, str] | None = None
+        # Nodes the retrigger helper has already been asked about (#19).
+        self._nudged: set[str] = set()
 
         # The three collaborators the D-Bus adapter calls. They hold the config
         # edits; this class keeps the run loop and the device. Which profile
@@ -286,6 +288,7 @@ class Daemon:
             # Retrying won't help until something changes, but searching is
             # cheap and the condition can go away (one G502 unplugged).
             self._log(self._absence.search_failed(str(exc), level=logging.ERROR))
+            await self._nudge_once(exc)
             return
         except MouseLost as exc:
             # The mouse vanished between being found and being asked for its
@@ -298,6 +301,23 @@ class Daemon:
             self._state.clear_refusal()
 
         self._log(self._absence.found())
+
+    async def _nudge_once(self, exc: MouseMisconfigured) -> None:
+        """Ask the retrigger helper to nudge udev, once per node.
+
+        The helper re-presents the node ratbagd missed, which is the only cure
+        for an enumeration that ran before the mouse finished initializing
+        (#19). Once per node, not once per retry: the check loop runs every
+        few seconds, and a helper that is missing or refused must not become
+        a log every tick. A nudge that worked shows up as a connection on a
+        later check, which is the loop's ordinary path.
+        """
+        if exc.node is None or exc.node in self._nudged:
+            return
+        self._nudged.add(exc.node)
+        from ..hardware.retrigger import nudge
+
+        await nudge(exc.node)
 
     def _lose_mouse(self, message: str) -> None:
         """Drop the mouse and start an absence, if one hasn't started."""

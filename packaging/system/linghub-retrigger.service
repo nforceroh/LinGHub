@@ -1,0 +1,10 @@
+[Unit]
+Description=LinGHub helper: re-present a hidraw node to udev
+Documentation=https://github.com/nforceroh/LinGHub
+# Not enabled and not wanted by anything: D-Bus activation starts it on the
+# first call, and it exits when the bus drops it. A root-owned one-method
+# service is the whole surface; see the file's own docstring.
+[Service]
+Type=dbus
+BusName=org.linghub.Retrigger
+ExecStart=/usr/lib/linghub/linghub-retrigger

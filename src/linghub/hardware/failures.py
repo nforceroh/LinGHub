@@ -32,8 +32,14 @@ class MouseMisconfigured(MouseFailure):
     """Connecting can't work as things stand: two G502s, an unsupported ratbagd.
 
     Retrying won't help until something changes, so the message says what
-    would fix it.
+    would fix it. `node` carries the hidraw node a fix would name, when the
+    fix is one: a ratbagd that missed a connected mouse can be nudged into
+    seeing it (#19), and the daemon hands the node to the retrigger helper.
     """
+
+    def __init__(self, message: str, *, node: str | None = None):
+        super().__init__(message)
+        self.node = node
 
 
 class MouseLost(MouseFailure):

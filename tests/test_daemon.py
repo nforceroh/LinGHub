@@ -8,6 +8,7 @@ write, or report that something else moved the active slot.
 import asyncio
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from linghub import config as config_module
@@ -698,3 +699,27 @@ class StartupTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RetriggerTests(unittest.TestCase):
+    """A ratbagd that missed the mouse gets one nudge per node (#19)."""
+
+    def test_a_misconfigured_node_is_nudged_once(self):
+        h = DaemonHarness(self)
+        h.mouse.error = MouseMisconfigured(
+            "ratbagd missed it", node="hidraw5"
+        )
+        with mock.patch("linghub.hardware.retrigger.nudge", new=mock.AsyncMock()) as nudge:
+            with self.assertLogs("linghub.daemon", "DEBUG"):
+                for _ in range(3):
+                    h.tick()
+        self.assertEqual(nudge.await_count, 1, "once per node, not once per retry")
+        nudge.assert_awaited_with("hidraw5")
+
+    def test_a_misconfiguration_without_a_node_is_not_nudged(self):
+        h = DaemonHarness(self)
+        h.mouse.error = MouseMisconfigured("multiple G502 devices found; unplug one")
+        with mock.patch("linghub.hardware.retrigger.nudge", new=mock.AsyncMock()) as nudge:
+            with self.assertLogs("linghub.daemon", "DEBUG"):
+                h.tick()
+        nudge.assert_not_awaited()

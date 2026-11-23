@@ -1,0 +1,59 @@
+#!/usr/bin/python3
+"""Re-trigger one hidraw node so ratbagd sees a device it missed at startup.
+
+A root-owned D-Bus system service, activated on demand: the unit carries no
+[Install], and the first method call starts it. The interface is one method
+with one argument, and the argument must name a hidraw node — anything else
+is refused before any command runs. The action it performs is exactly
+
+    udevadm trigger --action=add --sysname-match=<node>
+
+which is the fix the daemon's MouseMisconfigured message names. Nothing here
+reads, writes, restarts units, or runs anything else. When ratbagd learns to
+rescan (libratbag#1921), this service and its polkit action are deleted.
+"""
+
+import re
+import subprocess
+
+from dbus_fast import BusType
+from dbus_fast.aio import MessageBus
+from dbus_fast.service import ServiceInterface, method
+
+NODE = re.compile(r"^hidraw\d+$")
+BUS_NAME = "org.linghub.Retrigger"
+OBJECT_PATH = "/org/linghub/Retrigger"
+INTERFACE = "org.linghub.Retrigger"
+
+
+class RetriggerInterface(ServiceInterface):
+    """One method: re-present one hidraw node to udev."""
+
+    def __init__(self):
+        super().__init__(OBJECT_PATH)
+
+    @method()
+    async def Retrigger(self, node: "s") -> "b":
+        if not NODE.match(node):
+            raise ValueError(f"not a hidraw node name: {node!r}")
+        subprocess.run(
+            ["/usr/bin/udevadm", "trigger", "--action=add", f"--sysname-match={node}"],
+            check=True,
+        )
+        return True
+
+
+async def main() -> int:
+    bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+    # The D-Bus policy decides who may own the name (root only); polkit decides
+    # whether a caller may make the call. The service itself trusts neither.
+    bus.export(BUS_NAME, RetriggerInterface())
+    await bus.request_name(BUS_NAME)
+    await bus.wait_for_disconnect()
+    return 0
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    raise SystemExit(asyncio.run(main()))

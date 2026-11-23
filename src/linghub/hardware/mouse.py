@@ -402,7 +402,7 @@ async def connect(
         if not nodes:
             raise
         raise MouseMisconfigured(
-            RATBAGD_MISSED.format(node=nodes[0].name)
+            RATBAGD_MISSED.format(node=nodes[0].name), node=nodes[0].name
         ) from None
     # Before announcing the find: ratbagd can still list a mouse the kernel
     # has removed, and mouse_for raises MouseAbsent for that.

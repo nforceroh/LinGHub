@@ -65,6 +65,10 @@ cp "$REPO_DIR/packaging/units/linghub.service" "$TOP_DIR/SOURCES/"
 cp "$REPO_DIR/packaging/units/linghub-tray.service" "$TOP_DIR/SOURCES/"
 cp "$REPO_DIR/config.example.json" "$TOP_DIR/SOURCES/"
 cp "$REPO_DIR/LICENSE" "$TOP_DIR/SOURCES/"
+cp "$REPO_DIR/packaging/system/linghub-retrigger" "$TOP_DIR/SOURCES/"
+cp "$REPO_DIR/packaging/system/linghub-retrigger.service" "$TOP_DIR/SOURCES/"
+cp "$REPO_DIR/packaging/system/org.linghub.Retrigger.conf" "$TOP_DIR/SOURCES/"
+cp "$REPO_DIR/packaging/system/org.linghub.retrigger-node.policy" "$TOP_DIR/SOURCES/"
 
 sed "s|@VERSION@|$VERSION|" "$REPO_DIR/packaging/linghub.spec" > "$TOP_DIR/SPECS/linghub.spec"
 

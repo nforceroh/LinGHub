@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <action id="org.linghub.retrigger-node">
+    <description>Re-present a hidraw node to udev so ratbagd sees it</description>
+    <description xml:lang="en">Re-present a hidraw node to udev so ratbagd sees it</description>
+    <message>LinGHub wants to nudge udev about a mouse node ratbagd missed</message>
+    <defaults>
+      <!-- The action is harmless (a re-enumeration event) and self-limiting:
+           it only ever re-presents a node the kernel already has. -->
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>yes</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+</policyconfig>
