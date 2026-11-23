@@ -119,7 +119,9 @@ class MainWindow(Adw.ApplicationWindow):
         # above and the About dialog's comments. The module owns the story;
         # the window owns the widgets it speaks through.
         self._feed = DaemonFeed(
-            client=client,
+            # A callable, not the client itself: the module calls it, and the
+            # window's tests swap _client after construction.
+            client=lambda: self._client,
             schedule=schedule,
             report=self._status.set_text,
             wanted_profile=self._editing_profile,
