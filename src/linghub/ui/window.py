@@ -28,6 +28,7 @@ from .pending_edits import PendingEditsFor
 from .profile_actions import ProfileActions
 from .profiles import HomeCard, ManageProfiles, ProfileSelector
 from .config_rail import ConfigRail
+from .daemon_feed import DaemonFeed
 from ..hardware.battery import battery, model_name
 from ..daemon_view import DaemonView, ProfileSummary, ViewState
 from . import presentation
@@ -62,7 +63,6 @@ class MainWindow(Adw.ApplicationWindow):
         self._view: DaemonView | None = None
         self._refresh_task = None
         self._refresh_pending = False
-        self._daemon_version = version.DaemonVersion.not_running()
 
         self.set_default_size(*preferred_size(WANTED_SIZE))
         connect_first_map(self)
@@ -115,6 +115,19 @@ class MainWindow(Adw.ApplicationWindow):
         self._banner = Adw.Banner()
         toolbar.add_top_bar(self._banner)
 
+        # The daemon's version, and the two things that report it: the banner
+        # above and the About dialog's comments. The module owns the story;
+        # the window owns the widgets it speaks through.
+        self._feed = DaemonFeed(
+            client=client,
+            schedule=schedule,
+            report=self._status.set_text,
+            wanted_profile=self._editing_profile,
+            apply_view=self._apply_view,
+            current_version=version.current(),
+            banner=self._banner,
+        )
+
         # The profile management flows: prompts, validation and writes. The
         # window supplies its collaborators; the module owns the shape each
         # flow shares. Built after the status line, which its reports land on.
@@ -147,7 +160,7 @@ class MainWindow(Adw.ApplicationWindow):
         # No poll: the daemon announces every change the window shows, and
         # the client also reports the daemon starting or stopping.
         client.set_change_handler(self._on_daemon_change)
-        self._refresh()
+        self._feed.refresh()
 
     def _build_home(self) -> Gtk.Widget:
         """The home screen: the device card, centred on an empty canvas."""
@@ -229,82 +242,24 @@ class MainWindow(Adw.ApplicationWindow):
 
     def refresh(self) -> None:
         """Read the daemon again, for a caller that knows something changed."""
-        self._refresh()
+        self._feed.refresh()
 
     def _on_daemon_change(self) -> None:
         GLib.idle_add(self._refresh_from_idle)
 
     def _refresh_from_idle(self) -> bool:
-        self._refresh()
+        self._feed.refresh()
         return GLib.SOURCE_REMOVE
 
     def _on_async_error(self, exc: Exception) -> None:
         self._status.set_text(f"Error: {exc}")
 
-    def _refresh(self) -> None:
-        """Read the daemon once, coalescing requests that arrive mid-flight.
-
-        Three triggers call this: opening the window or connecting, the
-        daemon's change signals, and every successful write. A read already in flight means this request
-        collapses into one repeat when it finishes, so a slow read cannot land
-        after a newer one.
-        """
-        if self._refresh_task is not None and not self._refresh_task.done():
-            self._refresh_pending = True
-            return
-        self._refresh_task = self._schedule(
-            self._refresh_loop(), self._on_async_error
-        )
-
     async def _refresh_now(self) -> None:
-        """Refresh and wait for it, for callers whose message must survive.
-
-        A write reports its outcome on the status line, and applying a view
-        overwrites that line. The write path therefore has to let the refresh
-        finish before it reports, or the user never sees the message.
-        """
-        self._refresh()
-        if self._refresh_task is not None:
-            await self._refresh_task
-
-    async def _refresh_loop(self) -> None:
-        while True:
-            await self._read_and_apply()
-            if not self._refresh_pending:
-                return
-            self._refresh_pending = False
-
-    async def _read_and_apply(self) -> None:
-        wanted = self._editing_profile() or ""
-        try:
-            view = await self._client.get_view(wanted)
-        except (RuntimeError, OSError) as exc:
-            self._status.set_text(f"Daemon unavailable: {exc}")
-            self._apply_daemon_version(version.DaemonVersion.not_running())
-            return
-        self._apply_view(view)
-        # The first read has no state yet, so it cannot name a profile and asks
-        # for "". That answer carries the profile list but no profile's
-        # sections, so the panels would stay empty until something else
-        # happened to trigger a read. Now that the state is known, read again
-        # for the profile we should actually be editing.
-        if not wanted and self._editing_profile():
-            self._refresh_pending = True
-        # Read after the view, and on its own: a failure here must not cost
-        # the user the state they came to see.
-        try:
-            daemon_version = await self._client.daemon_version()
-        except (RuntimeError, OSError) as exc:
-            logger.debug("cannot read the daemon's version: %s", exc)
-            daemon_version = version.DaemonVersion.unreadable()
-        self._apply_daemon_version(daemon_version)
+        await self._feed.refresh_now()
 
     def _apply_daemon_version(self, daemon_version) -> None:
         """Remember the daemon's version, and flag it if it differs from ours."""
-        self._daemon_version = daemon_version
-        _line, note = version.describe(version.current(), daemon_version)
-        self._banner.set_title(note or "")
-        self._banner.set_revealed(note is not None)
+        self._feed.apply_daemon_version(daemon_version)
 
     def _build_main_menu(self) -> Gtk.MenuButton:
         """The header bar's menu, which holds About."""
@@ -319,12 +274,11 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _about_dialog(self) -> Adw.AboutDialog:
         """This window's app version, with the daemon's beside it."""
-        line, note = version.describe(version.current(), self._daemon_version)
-        comments = line if note is None else f"{line}\n{note}"
         return Adw.AboutDialog(
             application_name="LinGHub",
             version=version.current(),
-            comments=f"Profile manager for the Logitech G502 family\n\n{comments}",
+            comments=f"Profile manager for the Logitech G502 family\n\n"
+            f"{self._feed.about_comments()}",
         )
 
     def _apply_view(self, view: DaemonView) -> None:
@@ -430,7 +384,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._status.set_text("Discarded unsaved changes.")
         # Reload from the daemon rather than from a remembered snapshot: the
         # config may have changed elsewhere while these edits were pending.
-        self._refresh()
+        self._feed.refresh()
 
     def _stage_led_edit(self, values) -> None:
         """Hold the lighting panel's values until Apply is pressed.
@@ -645,7 +599,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._back_button.set_visible(True)
         self._status.set_text(f"Editing {name} (not loaded).")
         self._rebuild_profiles()
-        self._refresh()
+        self._feed.refresh()
 
     def _confirm_unsaved(self, body, *, on_cancel, on_discard, on_save) -> None:
         """Ask what to do with unsaved changes before a navigation.
@@ -706,7 +660,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._pending.clear()
         self._sync_save_buttons()
         self._status.set_text(f"Loading {name}…")
-        self._refresh()
+        self._feed.refresh()
         # Through the injected scheduler, like the refresh: a test drives its
         # own loop, and the GTK bridge would never run there.
         self._schedule(self._load_profile(name), self._on_async_error)

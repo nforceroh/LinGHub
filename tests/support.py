@@ -150,8 +150,20 @@ def make_window(
     from linghub.ui.daemon_write import DaemonWrite
     from linghub.ui.pending_edits import PendingEditsFor
 
-    window._writes = DaemonWrite(window._refresh_now)
     window._pending = PendingEditsFor()
+    window._writes = DaemonWrite(window._refresh_now)
+    from linghub.ui.daemon_feed import DaemonFeed
+    from linghub import version
+
+    window._feed = DaemonFeed(
+        client=lambda: window._client,
+        schedule=window._schedule,
+        report=window._status.set_text,
+        wanted_profile=window._editing_profile,
+        apply_view=window._apply_view,
+        current_version=version.current(),
+        banner=window._banner,
+    )
     from linghub.ui.profile_actions import ProfileActions
 
     window._actions = ProfileActions(

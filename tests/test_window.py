@@ -391,7 +391,7 @@ class VersionTests(unittest.TestCase):
                 return version.DaemonVersion.known("9.9.9")
 
         self.window._client = FakeClient()
-        asyncio.run(self.window._read_and_apply())
+        asyncio.run(self.window._feed._read_and_apply())
         self.assertTrue(self.window._banner.get_revealed())
 
     def test_a_failed_version_read_does_not_break_the_refresh(self):
@@ -405,7 +405,7 @@ class VersionTests(unittest.TestCase):
                 raise RuntimeError("Get failed")
 
         self.window._client = FakeClient()
-        asyncio.run(self.window._read_and_apply())
+        asyncio.run(self.window._feed._read_and_apply())
         self.assertIn("world-of-tanks", self.window._status.get_text())
         self.assertFalse(self.window._banner.get_revealed())
 
@@ -421,7 +421,7 @@ class VersionTests(unittest.TestCase):
                 raise RuntimeError("Get failed")
 
         self.window._client = FakeClient()
-        asyncio.run(self.window._read_and_apply())
+        asyncio.run(self.window._feed._read_and_apply())
         comments = self.window._about_dialog().get_comments()
         self.assertNotIn("not running", comments)
         self.assertIn("Daemon  unreadable", comments)
@@ -465,12 +465,12 @@ class FirstReadTests(unittest.TestCase):
         window._client = FakeClient()
 
         async def run():
-            await window._read_and_apply()
+            await window._feed._read_and_apply()
 
         asyncio.run(run())
         self.assertEqual(asked, [""])
         self.assertTrue(
-            window._refresh_pending,
+            window._feed._refresh_pending,
             "the window must ask again now that it knows which profile to edit",
         )
 
@@ -493,11 +493,11 @@ class FirstReadTests(unittest.TestCase):
         window._client = FakeClient()
 
         async def run():
-            await window._read_and_apply()
+            await window._feed._read_and_apply()
 
         asyncio.run(run())
         self.assertEqual(asked, ["desktop"])
-        self.assertFalse(window._refresh_pending)
+        self.assertFalse(window._feed._refresh_pending)
 
 
 class SaveAndDiscardTests(unittest.TestCase):
