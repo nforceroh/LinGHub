@@ -1,9 +1,9 @@
 """The staged-edit rule both panels share.
 
 The panels keep their widgets and their own restore bodies; this module owns
-the baseline, the dirty decision, the save guard, and the guard that stops a
-programmatic restore from looking like a user edit. These tests pin that rule
-without a widget, which is the point of extracting it.
+the baseline, the dirty decision, and the guard that stops a programmatic
+restore from looking like a user edit. These tests pin that rule without a
+widget, which is the point of extracting it.
 """
 
 import unittest
@@ -16,12 +16,10 @@ class Panel:
 
     def __init__(self, value=1):
         self.value = value
-        self.saved: list[int] = []
         self.restored: list[int] = []
         self.changed: list[bool] = []
         self.staged = StagedEdit(
             lambda: self.value,
-            on_save=self.saved.append,
             on_restore=self._restore,
             on_changed=self.changed.append,
         )
@@ -55,25 +53,11 @@ class DirtyTests(unittest.TestCase):
         self.assertFalse(panel.staged.dirty)
 
 
-class SaveTests(unittest.TestCase):
-    def test_save_publishes_the_values(self):
-        panel = Panel()
-        panel.staged.mark_saved()
-        panel.value = 2
-        panel.staged.save()
-        self.assertEqual(panel.saved, [2])
-
-    def test_save_does_nothing_when_clean(self):
-        panel = Panel()
-        panel.staged.mark_saved()
-        panel.staged.save()
-        self.assertEqual(panel.saved, [])
-
+class MarkSavedTests(unittest.TestCase):
     def test_mark_saved_accepts_the_current_values(self):
         panel = Panel()
         panel.staged.mark_saved()
         panel.value = 2
-        panel.staged.save()
         panel.staged.mark_saved()
         self.assertFalse(panel.staged.dirty)
 
@@ -127,14 +111,13 @@ class RestoringTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             with panel.staged.restoring():
                 raise ValueError("boom")
-        self.assertFalse(panel.staged.restoring_now)
-
-    def test_restoring_now_reports_the_guard(self):
-        panel = Panel()
-        self.assertFalse(panel.staged.restoring_now)
-        with panel.staged.restoring():
-            self.assertTrue(panel.staged.restoring_now)
-        self.assertFalse(panel.staged.restoring_now)
+        # After the raising body the guard is gone: an edit is honoured again.
+        panel.changed.clear()
+        panel.staged.mark_saved()
+        panel.value = 2
+        panel.staged.edited()
+        self.assertEqual(panel.changed, [False, True],
+                         "the guard survived the raising body")
 
     def test_revert_restores_inside_the_guard(self):
         """The panel's restore body must not be able to mark it dirty."""
@@ -142,7 +125,7 @@ class RestoringTests(unittest.TestCase):
 
         class Watcher(Panel):
             def _restore(self, value):
-                seen.append(self.staged.restoring_now)
+                seen.append(self.staged._restoring)
                 super()._restore(value)
 
         panel = Watcher()

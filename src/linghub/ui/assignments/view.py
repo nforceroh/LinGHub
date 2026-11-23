@@ -29,16 +29,15 @@ from .labels import describe_binding
 from ..buttonmap import BUTTONS, DIAGRAM_IMAGE, describe, manual_number
 from .diagram import MouseDiagram
 
-IMAGE = DIAGRAM_IMAGE
-
 
 class AssignmentsView(Gtk.Paned):
     """Sidebar, diagram and bindings table, with the selection and staging.
 
     The interface is four calls: `refresh` after the daemon or the pending
-    edits change, `set_selected` when a button is picked, `open_editor` for
-    the dialog, and `widget` for placement. Everything else — rows, labels,
-    highlight, drop targets — is implementation.
+    edits change, `set_selected` when a button is picked, `selected` to read
+    the pick back, and `open_editor` for the dialog. Since Gtk.Widget is
+    itself the view, placement needs no `widget` call. Everything else —
+    rows, labels, highlight, drop targets — is implementation.
     """
 
     def __init__(self, on_stage, on_status, on_open_editor=None):
@@ -132,8 +131,8 @@ class AssignmentsView(Gtk.Paned):
         box.set_margin_start(12)
         box.set_margin_end(12)
 
-        if IMAGE.exists():
-            self._diagram: MouseDiagram | None = MouseDiagram(str(IMAGE))
+        if DIAGRAM_IMAGE.exists():
+            self._diagram: MouseDiagram | None = MouseDiagram(str(DIAGRAM_IMAGE))
             self._diagram.connect("button-selected", self._on_button_selected)
             self._diagram.connect("assignment-dropped", self._on_dropped)
             # No Frame: it drew a border and a filled background around the
@@ -146,7 +145,7 @@ class AssignmentsView(Gtk.Paned):
             box.append(self._diagram)
         else:
             self._diagram = None
-            box.append(Gtk.Label(label=f"Diagram not found: {IMAGE}"))
+            box.append(Gtk.Label(label=f"Diagram not found: {DIAGRAM_IMAGE}"))
 
         return box
 

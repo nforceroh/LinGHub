@@ -14,9 +14,8 @@ from __future__ import annotations
 import gi
 
 gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gtk
+from gi.repository import Gtk
 
 from .rules import MODES, controls_for, duration_to_speed, speed_to_duration
 from ..staged_edit import StagedEdit
@@ -26,65 +25,21 @@ DEFAULT_BRIGHTNESS = 255
 DEFAULT_DURATION = 8000
 
 
-class EffectControl(Gtk.MenuButton):
-    """The effect picker as a popover listing the four hardware effects."""
-
-    def __init__(self):
-        super().__init__()
-        self._selected = 1  # Fixed colour, the hardware default.
-        self.set_always_show_arrow(True)
-        self._label = Gtk.Label(label=MODES[self._selected][1], xalign=0)
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        box.append(self._label)
-        self.set_child(box)
-
-        popover = Gtk.Popover()
-        list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        list_box.set_margin_top(8)
-        list_box.set_margin_bottom(8)
-        list_box.set_margin_start(8)
-        list_box.set_margin_end(8)
-
-        heading = Gtk.Label(label="EFFECTS", xalign=0)
-        heading.add_css_class("heading")
-        list_box.append(heading)
-
-        for position, (_name, label) in enumerate(MODES):
-            row = Gtk.Button(label=label)
-            row.add_css_class("flat")
-            row.set_halign(Gtk.Align.FILL)
-            row.connect("clicked", lambda _b, index=position: self._choose(index))
-            list_box.append(row)
-
-        popover.set_child(list_box)
-        self.set_popover(popover)
-
-    def _choose(self, position: int) -> None:
-        self._selected = position
-        self._label.set_text(MODES[position][1])
-        self.emit("notify::selected-item")
-        self.get_popover().popdown()
-
-    def get_selected(self) -> int:
-        return self._selected
-
-    def set_selected(self, position: int) -> None:
-        position = max(0, min(len(MODES) - 1, int(position)))
-        self._selected = position
-        self._label.set_text(MODES[position][1])
-
-
 class LedPanel(Gtk.Box):
     """Colour, effect, brightness and speed for one profile's lighting."""
 
-    def __init__(self, on_save):
+    def __init__(self, on_edited):
+        """`on_edited` is told when the panel's values change.
+
+        The window records the edit in its pending set and enables Apply; the
+        panel itself never writes to the daemon.
+        """
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self._clean_hint = ""
         self._staged = StagedEdit(
             self._values,
-            on_save=lambda values: on_save(*values),
             on_restore=self._restore,
-            on_changed=self._on_changed,
+            on_changed=lambda changed: on_edited(self._values()) if changed else None,
         )
 
         # A compact settings panel mirrors the reference: one choice per row,
@@ -104,10 +59,12 @@ class LedPanel(Gtk.Box):
 
         effect = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         effect.append(self._field_label("Effect"))
-        self._mode = EffectControl()
-        self._mode.connect("notify::selected", self._on_mode_changed)
+        # A DropDown, not a hand-rolled MenuButton: the picker, the label and
+        # the selection signal are one widget, and notify::selected-item is
+        # emitted by GTK rather than by hand.
+        self._mode = Gtk.DropDown.new_from_strings([label for _name, label in MODES])
+        self._mode.connect("notify::selected-item", self._on_mode_changed)
         self._mode.set_hexpand(True)
-        self._mode.set_halign(Gtk.Align.FILL)
         effect.append(self._mode)
         self.append(effect)
 
@@ -178,13 +135,6 @@ class LedPanel(Gtk.Box):
         self._staged.mark_saved()
 
     # --- construction ----------------------------------------------------
-
-    def _labelled(self, text: str, widget: Gtk.Widget) -> Gtk.Widget:
-        row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        label = self._field_label(text)
-        row.append(label)
-        row.append(widget)
-        return row
 
     def _field_label(self, text: str) -> Gtk.Label:
         label = Gtk.Label(label=text, xalign=0)
@@ -284,9 +234,6 @@ class LedPanel(Gtk.Box):
             self._hint.set_text("Unsaved changes — the mouse is unchanged.")
         else:
             self._hint.set_text(self._clean_hint)
-
-    def _save(self) -> None:
-        self._staged.save()
 
     def mark_saved(self) -> None:
         """Accept the current values as the saved state."""

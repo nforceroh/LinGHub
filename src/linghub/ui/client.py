@@ -9,11 +9,12 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from dbus_fast import BusType, Message, MessageType
+from dbus_fast import BusType, Message, MessageType, Variant
 from dbus_fast.aio import MessageBus
 
 
 from .. import dbus_contract as contract
+from .. import version
 from ..daemon_view import (
     DaemonUnavailable,
     DaemonView,
@@ -201,10 +202,6 @@ class DaemonClient:
         the user is told happens here, once, so the CLI, the tray and the
         window cannot each decide it differently.
         """
-        from dbus_fast import Variant
-
-        from .. import version
-
         if self._bus is None:
             return version.DaemonVersion.not_running()
         try:
@@ -231,9 +228,6 @@ class DaemonClient:
 
     async def load_profile(self, name: str) -> bool:
         return bool(await self._invoke(contract.LOAD_PROFILE, name))
-
-    async def reload(self) -> bool:
-        return bool(await self._invoke(contract.RELOAD))
 
     async def set_binding(self, profile: str, index: int, kind: str, value: str | None) -> bool:
         return bool(await self._invoke(contract.SET_BINDING, profile, index, kind, value or ""))

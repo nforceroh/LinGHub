@@ -11,9 +11,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
-gi.require_version("Pango", "1.0")
-
-from gi.repository import Gdk, GdkPixbuf, GObject, Gtk, Pango
+from gi.repository import Gdk, GdkPixbuf, GObject, Gtk
 
 from ..buttonmap import BUTTONS, ButtonSpot
 

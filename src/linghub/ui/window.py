@@ -13,10 +13,9 @@ import logging
 import gi
 
 gi.require_version("Gtk", "4.0")
-gi.require_version("Gdk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk
+from gi.repository import Adw, Gio, GLib, Gtk
 
 from .assignments import AssignmentsView
 from .assignments.editor import BindingEditor
@@ -27,9 +26,7 @@ from .daemon_write import DaemonWrite
 from . import edit_apply
 from .pending_edits import PendingEditsFor
 from .profile_actions import ProfileActions
-from .profiles import ProfileSelector
-from .profiles import HomeCard
-from .profiles import ManageProfiles
+from .profiles import HomeCard, ManageProfiles, ProfileSelector
 from .config_rail import ConfigRail
 from ..hardware.battery import battery, model_name
 from ..daemon_view import DaemonView, ProfileSummary, ViewState
@@ -37,6 +34,7 @@ from . import presentation
 from .. import version
 from .device import DpiPanel
 from .device import LedPanel
+from .window_sizing import WANTED_SIZE, connect_first_map, preferred_size
 
 
 logger = logging.getLogger("linghub.ui.window")
@@ -61,15 +59,13 @@ class MainWindow(Adw.ApplicationWindow):
         # profile is loaded on the mouse: editing must not reconfigure it.
         self._editing: str | None = None
         self._bindings: dict[int, tuple[str, str]] = {}
-        self._led_panel: LedPanel | None = None
-        self._dpi_panel: DpiPanel | None = None
         self._view: DaemonView | None = None
         self._refresh_task = None
         self._refresh_pending = False
         self._daemon_version = version.DaemonVersion.not_running()
 
-        self.set_default_size(*self._preferred_size())
-        self.connect("map", self._on_map)
+        self.set_default_size(*preferred_size(WANTED_SIZE))
+        connect_first_map(self)
 
         toolbar = Adw.ToolbarView()
         header = Adw.HeaderBar()
@@ -153,70 +149,6 @@ class MainWindow(Adw.ApplicationWindow):
         client.set_change_handler(self._on_daemon_change)
         self._refresh()
 
-    # The size the layout is designed for. Anything smaller and the bottom row
-    # starts to scroll; anything larger is wasted space.
-    WANTED_SIZE = (1140, 840)
-
-    @classmethod
-    def _preferred_size(cls) -> tuple[int, int]:
-        """The window size to open at, clamped to the screen it opens on.
-
-        The layout wants 1140x840, but a 1366x768 laptop has about 745 usable
-        pixels of height, and a window taller than the screen hides its own
-        bottom row. Asking for the layout's size and letting the monitor cap it
-        keeps the window fully visible on any screen.
-        """
-        wanted_width, wanted_height = cls.WANTED_SIZE
-        display = Gdk.Display.get_default()
-        if display is None:
-            return wanted_width, wanted_height
-        monitors = display.get_monitors()
-        if monitors.get_n_items() == 0:
-            return wanted_width, wanted_height
-        geometry = monitors.get_item(0).get_geometry()
-        # Leave room for the desktop's own panels and the window's shadow.
-        return (
-            min(wanted_width, int(geometry.width * 0.92)),
-            min(wanted_height, int(geometry.height * 0.88)),
-        )
-
-    def _on_map(self, _window) -> None:
-        """Put the window fully on-screen the first time it is shown.
-
-        The desktop remembers a window position per application id, and a
-        position saved when the window's minimum width exceeded the screen
-        keeps restoring half off-screen. Maximizing overrides it; the user
-        can unmaximize to whatever size they want afterwards.
-        """
-        self._fit_to_screen()
-        if not self.is_maximized():
-            self.maximize()
-
-    def _fit_to_screen(self) -> None:
-        """Shrink a window that is larger than the screen it opened on.
-
-        The desktop remembers a window's size per application id, so a size
-        that was correct for an older, taller layout is restored over the
-        default and can leave the window taller than the screen, hiding its own
-        bottom row. The remembered size is only a starting point: if it does
-        not fit, the screen wins.
-        """
-        surface = self.get_surface()
-        display = Gdk.Display.get_default()
-        if surface is None or display is None:
-            return
-        monitor = display.get_monitor_at_surface(surface)
-        if monitor is None:
-            return
-        geometry = monitor.get_geometry()
-        width, height = self.get_width(), self.get_height()
-        if width <= geometry.width and height <= geometry.height:
-            return
-        self.set_default_size(
-            min(width, int(geometry.width * 0.92)),
-            min(height, int(geometry.height * 0.88)),
-        )
-
     def _build_home(self) -> Gtk.Widget:
         """The home screen: the device card, centred on an empty canvas."""
         self._card = HomeCard()
@@ -268,38 +200,30 @@ class MainWindow(Adw.ApplicationWindow):
         )
         return self._assignments
 
-    def _build_dpi_view(self) -> Gtk.Widget:
-        """The DPI view, moved out of the old full-width device row."""
+    def _build_panel_view(self, title: str, panel: Gtk.Widget) -> Gtk.Widget:
+        """One configuration view: a heading over a panel, on a padded box."""
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         box.set_margin_top(18)
         box.set_margin_bottom(18)
         box.set_margin_start(18)
         box.set_margin_end(18)
-        box.append(self._section_label("Sensitivity (DPI)"))
-        self._dpi_panel = DpiPanel(on_save=self._on_dpi_saved)
-        box.append(self._dpi_panel)
+        label = Gtk.Label(label=title, xalign=0)
+        label.add_css_class("heading")
+        box.append(label)
+        box.append(panel)
         return box
+
+    def _build_dpi_view(self) -> Gtk.Widget:
+        """The DPI view, moved out of the old full-width device row."""
+        self._dpi_panel = DpiPanel(on_edited=self._stage_dpi_edit)
+        return self._build_panel_view("Sensitivity (DPI)", self._dpi_panel)
 
     def _build_lightsync_view(self) -> Gtk.Widget:
         """The lighting view, moved out of the old full-width device row."""
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        box.set_margin_top(18)
-        box.set_margin_bottom(18)
-        box.set_margin_start(18)
-        box.set_margin_end(18)
-        box.append(self._section_label("LIGHTSYNC"))
-        self._led_panel = LedPanel(
-            on_save=self._on_led_saved,
-        )
+        self._led_panel = LedPanel(on_edited=self._stage_led_edit)
         self._led_panel.set_hexpand(False)
         self._led_panel.set_halign(Gtk.Align.START)
-        box.append(self._led_panel)
-        return box
-
-    def _section_label(self, text: str) -> Gtk.Label:
-        label = Gtk.Label(label=text, xalign=0)
-        label.add_css_class("heading")
-        return label
+        return self._build_panel_view("LIGHTSYNC", self._led_panel)
 
     # --- state -----------------------------------------------------------
 
@@ -422,13 +346,12 @@ class MainWindow(Adw.ApplicationWindow):
         self._rebuild_profiles()
         self._rebuild_bindings()
         self._card.show_device(self._device_name(), battery())
-        if self._led_panel is not None:
-            # Never reload the panel over unsaved edits: any change signal
-            # refreshes the view, and would silently discard whatever the user
-            # is in the middle of choosing.
-            if not self._led_panel.dirty:
-                self._led_panel.load(view.profile.leds)
-        if self._dpi_panel is not None and not self._dpi_panel.dirty:
+        # Never reload a panel over unsaved edits: any change signal refreshes
+        # the view, and would silently discard whatever the user is in the
+        # middle of choosing.
+        if not self._led_panel.dirty:
+            self._led_panel.load(view.profile.leds)
+        if not self._dpi_panel.dirty:
             self._dpi_panel.load(
                 view.profile.resolutions,
                 view.profile.report_rates,
@@ -436,14 +359,20 @@ class MainWindow(Adw.ApplicationWindow):
             )
         self._sync_save_buttons()
 
-    def _on_dpi_saved(self, slots: list, rate: int) -> None:
-        """Hold the DPI panel's values until the window's Save is pressed."""
+    def _stage_dpi_edit(self, values) -> None:
+        """Hold the DPI panel's values until the window's Apply is pressed.
+
+        The panel reports dirty through its `on_edited` callback; the window
+        records what the panel shows, so Apply writes what the user sees.
+        """
         profile = self._editing_profile()
         if profile is None:
             return
-        self._pending.for_profile(profile).set_resolutions(slots, rate)
+        slots, rate = values
+        edits = self._pending.for_profile(profile)
+        edits.set_resolutions(slots, rate)
         self._sync_save_buttons()
-        self._status.set_text("DPI changes pending — press Apply.")
+        self._status.set_text("Resolution changes pending — press Apply.")
 
     def _sync_save_buttons(self) -> None:
         """Enable Save and Discard only when something is pending."""
@@ -477,9 +406,9 @@ class MainWindow(Adw.ApplicationWindow):
         def settle() -> None:
             # Only now do the panels accept their values as the baseline, so a
             # failed save leaves the edits intact and still worth retrying.
-            if self._dpi_panel is not None and edits.has_resolutions:
+            if edits.has_resolutions:
                 self._dpi_panel.mark_saved()
-            if self._led_panel is not None and edits.has_leds:
+            if edits.has_leds:
                 self._led_panel.mark_saved()
             self._pending.clear()
             self._sync_save_buttons()
@@ -495,22 +424,24 @@ class MainWindow(Adw.ApplicationWindow):
     def _discard_changes(self) -> None:
         """Throw away every pending edit and show the config as it is."""
         self._pending.clear()
-        if self._dpi_panel is not None:
-            self._dpi_panel.revert()
-        if self._led_panel is not None:
-            self._led_panel.revert()
+        self._dpi_panel.revert()
+        self._led_panel.revert()
         self._sync_save_buttons()
         self._status.set_text("Discarded unsaved changes.")
         # Reload from the daemon rather than from a remembered snapshot: the
         # config may have changed elsewhere while these edits were pending.
         self._refresh()
 
-    def _on_led_saved(self, mode: str, brightness: int, duration: int, color) -> None:
-        """Hold the lighting panel's values until the window's Save is pressed."""
+    def _stage_led_edit(self, values) -> None:
+        """Hold the lighting panel's values until Apply is pressed.
+
+        The shape of a LED row (mode, brightness, duration, color) belongs to
+        the panel; the window only forwards it, so the unpack happens there.
+        """
         profile = self._editing_profile()
         if profile is None:
             return
-        self._pending.for_profile(profile).set_leds(mode, brightness, duration, color)
+        self._pending.for_profile(profile).set_leds(*values)
         self._sync_save_buttons()
         self._status.set_text("Lighting changes pending — press Apply.")
 
@@ -611,7 +542,7 @@ class MainWindow(Adw.ApplicationWindow):
         if name == self._editing:
             return
         if self._pending.dirty:
-            self._confirm_switch(name)
+            self._confirm_switch(name, proceed=self._apply_selection)
             return
         self._apply_selection(name)
 
@@ -624,12 +555,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _show_config_view(self, name: str) -> None:
         """Choose one of the three configuration views."""
-        if hasattr(self, "_config_stack"):
-            self._config_stack.set_visible_child_name(name)
-        if hasattr(self, "_config_rail") and name in (
-            "dpi", "assignments", "lightsync"
-        ):
-            self._config_rail.select(name)
+        self._config_stack.set_visible_child_name(name)
+        self._config_rail.select(name)
 
     def _open_manage_profiles(self) -> None:
         """Open the manage-profiles canvas.
@@ -706,7 +633,7 @@ class MainWindow(Adw.ApplicationWindow):
         taking over the mouse is the selector's job (spec §2.7).
         """
         if self._pending.dirty:
-            self._confirm_switch(name, load=False)
+            self._confirm_switch(name, proceed=self._edit_without_loading)
             return
         self._edit_without_loading(name)
 
@@ -728,55 +655,23 @@ class MainWindow(Adw.ApplicationWindow):
         always the same; only the body text and what each answer does vary,
         so those are what a caller supplies.
         """
-        dialog = Adw.MessageDialog(
-            transient_for=self,
-            heading="Unsaved changes",
-            body=body,
+        present_unsaved_dialog(
+            self,
+            body,
+            on_cancel=on_cancel,
+            on_discard=on_discard,
+            on_save=on_save,
+            report_error=self._on_async_error,
         )
-        dialog.add_response("cancel", "Cancel")
-        dialog.add_response("discard", "Discard")
-        dialog.add_response("save", "Apply")
-        dialog.set_response_appearance("discard", Adw.ResponseAppearance.DESTRUCTIVE)
-        dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
-        dialog.set_default_response("save")
-        dialog.set_close_response("cancel")
-
-        def on_response(_dialog, response):
-            dialog.close()
-            if response == "cancel":
-                on_cancel()
-            elif response == "discard":
-                on_discard()
-            elif response == "save":
-                run_and_report(on_save(), self._on_async_error)
-
-        dialog.connect("response", on_response)
-        dialog.present()
 
     def _confirm_switch_for_canvas(self) -> None:
         """Ask what to do with unsaved changes before opening the canvas."""
         self._confirm_unsaved(
             f"Apply your changes to {self._editing} before managing profiles?",
             on_cancel=lambda: None,
-            on_discard=self._discard_then_open_canvas,
-            on_save=self._save_then_open_canvas,
+            on_discard=self._show_canvas,
+            on_save=lambda: self._save_then(self._show_canvas),
         )
-
-    def _discard_then_open_canvas(self) -> None:
-        self._pending.clear()
-        self._sync_save_buttons()
-        self._show_canvas()
-
-    async def _save_then_open_canvas(self) -> None:
-        """Save the pending edits, then open the canvas only on success."""
-        profile = self._editing_profile()
-        if profile is None:
-            return
-        await self._do_save(profile)
-        if self._pending.dirty:
-            # The save was refused; the edits stay where they are.
-            return
-        self._show_canvas()
 
     def _show_canvas(self) -> None:
         if self._view is None:
@@ -816,27 +711,22 @@ class MainWindow(Adw.ApplicationWindow):
         # own loop, and the GTK bridge would never run there.
         self._schedule(self._load_profile(name), self._on_async_error)
 
-    def _confirm_switch(self, name: str, *, load: bool = True) -> None:
+    def _confirm_switch(self, name: str, *, proceed) -> None:
         """Ask what to do with unsaved changes before switching profiles.
 
-        `load=False` is the canvas's DETAILS action: the destination is
-        "editing the profile", not "editing and loading it", so accept paths
-        that would put it on the mouse are not offered.
+        `proceed` is the destination action itself — load the profile, or
+        edit it without loading — so the prompt has no flag to branch on and
+        every answer does what its caller came to do.
         """
-        destination = f"switching to {name}" if load else f"editing {name}"
-        if load:
-            on_discard = lambda: self._apply_selection(name)
-        else:
-            on_discard = lambda: self._edit_without_loading(name)
         self._confirm_unsaved(
-            f"Apply your changes to {self._editing} before {destination}?",
+            f"Apply your changes to {self._editing} before switching to {name}?",
             on_cancel=self._reselect_current,
-            on_discard=on_discard,
-            on_save=lambda: self._save_then_select(name, load=load),
+            on_discard=lambda: proceed(name),
+            on_save=lambda: self._save_then(lambda: proceed(name)),
         )
 
-    async def _save_then_select(self, name: str, *, load: bool = True) -> None:
-        """Save the pending edits, then switch only if the save succeeded."""
+    async def _save_then(self, proceed) -> None:
+        """Save the pending edits, then `proceed` only if the save succeeded."""
         profile = self._editing_profile()
         if profile is None:
             return
@@ -845,10 +735,7 @@ class MainWindow(Adw.ApplicationWindow):
             # The save was refused; stay where the edits are.
             self._reselect_current()
             return
-        if load:
-            self._apply_selection(name)
-        else:
-            self._edit_without_loading(name)
+        proceed()
 
     def _reselect_current(self) -> None:
         """Put the selector back on the profile still being edited.
@@ -870,3 +757,37 @@ class MainWindow(Adw.ApplicationWindow):
             rejected=f"The daemon refused to load {name}.",
             success=f"Loaded {name}.",
         )
+
+
+
+def present_unsaved_dialog(parent, body, *, on_cancel, on_discard, on_save, report_error):
+    """Ask what to do with unsaved changes: Cancel, Discard, or Apply.
+
+    The dialog knows nothing about profiles or the daemon; the answers are
+    whatever the caller decided each one should do, and the Apply answer may
+    be a coroutine, which is reported through `report_error`.
+    """
+    dialog = Adw.MessageDialog(
+        transient_for=parent,
+        heading="Unsaved changes",
+        body=body,
+    )
+    dialog.add_response("cancel", "Cancel")
+    dialog.add_response("discard", "Discard")
+    dialog.add_response("save", "Apply")
+    dialog.set_response_appearance("discard", Adw.ResponseAppearance.DESTRUCTIVE)
+    dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
+    dialog.set_default_response("save")
+    dialog.set_close_response("cancel")
+
+    def on_response(_dialog, response):
+        dialog.close()
+        if response == "cancel":
+            on_cancel()
+        elif response == "discard":
+            on_discard()
+        elif response == "save":
+            run_and_report(on_save(), report_error)
+
+    dialog.connect("response", on_response)
+    dialog.present()

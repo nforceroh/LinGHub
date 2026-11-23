@@ -1,10 +1,11 @@
 """One rule for every write the window makes to the daemon.
 
-The window has seven write sites: DPI, lighting, create, rename, delete,
-binding, and load. Each runs a coroutine against the daemon, reports the
-outcome, and refreshes the view on success. That rule used to be two
-near-identical helpers on the window, differing only in where the failure
-text went, with each call site setting its own status string afterwards.
+Six call sites write through here: the window's binding and load, and
+DPI, lighting, create, rename and delete from the action module. Each
+runs a coroutine against the daemon, reports the outcome, and refreshes
+the view on success. That rule used to be two near-identical helpers on
+the window, differing only in where the failure text went, with each call
+site setting its own status string afterwards.
 
 This module owns the rule. A call site states what it changes, how to report
 a failure, and what to say on success; it does not restate the ordering of

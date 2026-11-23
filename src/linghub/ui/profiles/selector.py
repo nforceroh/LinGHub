@@ -19,9 +19,8 @@ from __future__ import annotations
 import gi
 
 gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gtk
+from gi.repository import Gtk
 
 # Below this many profiles the search field is hidden.
 SEARCH_THRESHOLD = 8

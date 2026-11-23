@@ -88,13 +88,13 @@ class CanvasFillTests(unittest.TestCase):
             summary_line(name="wot", games=(("WorldOfTanks.exe", "World of Tanks"),)),
         )))
         tile = window._manage._profile_tiles["wot"]
-        self.assertEqual(tile.game_name, "World of Tanks")
+        self.assertEqual(tile._game_label.get_text(), "World of Tanks")
 
     def test_a_gameless_profile_shows_no_game(self):
         window = self._window()
         window._fill_canvas(view(summaries=(summary_line(name="desktop"),)))
         tile = window._manage._profile_tiles["desktop"]
-        self.assertIsNone(tile.game_name)
+        self.assertFalse(hasattr(tile, "_game_label"))
 
     def test_there_is_no_separate_games_row(self):
         window = self._window()

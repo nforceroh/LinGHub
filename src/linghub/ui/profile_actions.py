@@ -39,10 +39,9 @@ class ProfileActions:
         profile_names, desktop_profile, profile_of_game, on_async_error,
     ):
         self._parent = parent
-        # The client arrives as a zero-argument callable when it can be
-        # swapped after construction — the window's tests replace it — and
-        # as the client itself otherwise. One attribute, two adapters.
-        self._client = client if callable(client) else (lambda: client)
+        # The client arrives as a zero-argument callable, so a test can swap
+        # the window's client after this module was constructed.
+        self._client = client
         self._writes = writes
         self._report = report
         self._profile_names = profile_names

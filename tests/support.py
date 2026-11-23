@@ -82,12 +82,9 @@ def make_window(
     active: str = "desktop",
     profiles: tuple[str, ...] = ("desktop", "world-of-tanks", "star-citizen"),
     editing: str | None = None,
-    panels: bool = False,
 ):
     """A MainWindow with the fields its methods read, and nothing else.
 
-    `panels` builds the LED and DPI panels, which the tests that exercise
-    dirty-state need and the rest do not.
     """
     from gi.repository import Adw, Gtk
 
@@ -123,6 +120,11 @@ def make_window(
     window._config_stack.add_named(Gtk.Label(label="dpi"), "dpi")
     window._config_stack.add_named(Gtk.Label(label="lightsync"), "lightsync")
     window._config_stack.set_visible_child_name("assignments")
+    from linghub.ui.config_rail import ConfigRail
+
+    window._config_rail = ConfigRail(
+        on_view=lambda name: None, on_manage=lambda: None
+    )
     from linghub.ui.profiles.manage import ManageProfiles
 
     window._manage = ManageProfiles(
@@ -166,17 +168,10 @@ def make_window(
     window._discard_button = Gtk.Button()
     window._editing = editing
 
-    if panels:
-        from linghub.ui.device.dpi_panel import DpiPanel
-        from linghub.ui.device.led_panel import LedPanel
-
-        window._led_panel = LedPanel(
-            on_save=lambda *a: None,
-        )
-        window._dpi_panel = DpiPanel(on_save=lambda *a: None)
-    else:
-        window._led_panel = None
-        window._dpi_panel = None
+    # Build through the window so the panels are wired to its seam —
+    # a panel replaced here would be mute to the pending-edit recorders.
+    window._build_dpi_view()
+    window._build_lightsync_view()
 
     window._apply_view(view(active=active, profiles=profiles))
     return window

@@ -80,7 +80,6 @@ class ProfileTile(Gtk.Box):
         to click.
         """
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        self._games = summary.games
 
         self.set_size_request(TILE_WIDTH, 120)
 
@@ -93,7 +92,8 @@ class ProfileTile(Gtk.Box):
         if summary.games:
             executable, game_name = summary.games[0]
             game = Gtk.Button()
-            game.set_child(Gtk.Label(label=game_name or executable, wrap=True))
+            self._game_label = Gtk.Label(label=game_name or executable, wrap=True)
+            game.set_child(self._game_label)
             game.set_tooltip_text(f"{executable} — click to rename")
             game.add_css_class("flat")
             game.add_css_class("caption")
@@ -131,11 +131,3 @@ class ProfileTile(Gtk.Box):
             delete.connect("clicked", lambda _b: self.emit("delete"))
             actions.append(delete)
         self.append(actions)
-
-    @property
-    def game_name(self) -> str | None:
-        """The display name of the game this profile is tied to, or None."""
-        if not self._games:
-            return None
-        executable, display = self._games[0]
-        return display or executable

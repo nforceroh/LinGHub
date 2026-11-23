@@ -29,7 +29,7 @@ class PackagedAssetTests(unittest.TestCase):
     def test_the_window_uses_the_packaged_diagram(self):
         from linghub.ui.assignments import view
 
-        self.assertEqual(view.IMAGE, buttonmap.DIAGRAM_IMAGE)
+        self.assertEqual(view.DIAGRAM_IMAGE, buttonmap.DIAGRAM_IMAGE)
 
 
 class HotspotsLocationTests(unittest.TestCase):

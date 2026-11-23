@@ -19,7 +19,6 @@ from gi.repository import Gdk, Gtk, Pango
 
 from .catalogue import (
     GROUPS,
-    AssignmentChoice,
     assignment_choices,
     choices_in_group,
     filter_assignment_choices,

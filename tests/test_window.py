@@ -82,7 +82,7 @@ class LedSaveModelTests(unittest.TestCase):
     """Editing must not write, and a poll must not clobber unsaved edits."""
 
     def _window(self):
-        return make_window(profiles=("desktop",), panels=True)
+        return make_window(profiles=("desktop",))
 
     def test_editing_does_not_call_the_client(self):
         calls = []
@@ -522,6 +522,53 @@ class SaveAndDiscardTests(unittest.TestCase):
         self.assertTrue(window._save_button.get_sensitive())
         self.assertTrue(window._discard_button.get_sensitive())
 
+    def test_a_panel_edit_enables_apply(self):
+        """The seam the module split severed: a panel's edit must reach Apply.
+
+        The panels report dirty through their on_edited callback; the window
+        records the edit in its pending set. When this chain broke, the DPI
+        and lighting panels said "unsaved changes" while Apply stayed grey.
+        """
+        window = self._window()
+        window._dpi_panel._track.set_slots(
+            [{"dpi": 800, "default": True, "disabled": False}]
+        )
+        window._dpi_panel._track._edited()
+        self.assertTrue(window._pending.dirty, "the panel edit never reached Apply")
+        self.assertTrue(window._save_button.get_sensitive())
+
+        window._led_panel._brightness.set_value(200)
+        self.assertTrue(window._pending.dirty)
+
+    def test_a_panel_edit_is_written_on_save(self):
+        """Apply writes what the panel shows, not what the config holds."""
+        import asyncio
+
+        window = self._window()
+        calls = []
+
+        class FakeClient:
+            async def set_resolution(self, profile, index, dpi, **kw):
+                calls.append(("resolution", index, dpi))
+                return True
+
+            async def get_view(self, _profile):
+                return view(profiles=("desktop", "world-of-tanks"))
+
+            async def daemon_version(self):
+                from linghub import version
+
+                return version.DaemonVersion.known(version.current())
+
+        window._client = FakeClient()
+        window._dpi_panel._track.set_slots(
+            [{"dpi": 1200, "default": True, "disabled": False}]
+        )
+        window._dpi_panel._track._edited()
+
+        asyncio.run(window._do_save("desktop"))
+        self.assertIn(("resolution", 0, 1200), calls)
+
     def test_a_pending_binding_is_not_written_immediately(self):
         """The whole point: nothing reaches the daemon until Save."""
         window = self._window()
@@ -745,4 +792,23 @@ class HomeScreenTests(unittest.TestCase):
         self.assertEqual(
             window._card._battery_icon.get_icon_name(),
             "battery-full-charging-symbolic",
+        )
+
+
+class ConstructorSanityTests(unittest.TestCase):
+    """The real constructor must survive the module split that moved sizing out.
+
+    `WANTED_SIZE` now belongs to `window_sizing`; if a caller ever reads it
+    off the window class again, the next adjustment silently becomes a
+    constructor-time AttributeError instead of a new default size.
+    """
+
+    def test_the_sizing_module_owns_the_wanted_size(self):
+        import linghub.ui.window as window_module
+        from linghub.ui import window_sizing
+
+        self.assertIs(window_module.WANTED_SIZE, window_sizing.WANTED_SIZE)
+        self.assertFalse(
+            hasattr(window_module.MainWindow, "WANTED_SIZE"),
+            "the class attribute came back; the sizing module owns it now",
         )

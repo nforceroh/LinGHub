@@ -1,18 +1,20 @@
-"""An edit held until Save, so nothing reaches the mouse while it is adjusted.
+"""An edit held until the window's Apply, so nothing reaches the mouse while
+it is adjusted.
 
 Both panels stage their edits: a slider fires on every pixel, so writing as
 you drag meant one config write and two hardware commits per pixel. Each panel
-therefore keeps a baseline, reports whether it is dirty, and offers Save and
-Revert. That lifecycle was implemented twice, and the copies had already
-drifted — one reported its hint through a label, the other through a status
-line, and their `revert` bodies differ because they restore different widgets.
+therefore keeps a baseline, reports whether it is dirty, and offers Revert.
+That lifecycle was implemented twice, and the copies had already drifted — one
+reported its hint through a label, the other through a status line, and their
+`revert` bodies differ because they restore different widgets.
 
 So this module owns the part that is genuinely shared: the baseline, the dirty
-decision, the save guard, and the guard that stops a programmatic restore from
-marking the panel dirty again. Each panel keeps its widgets, its `values()`,
-and its own `restore()` body — which is why this is a held object rather than
-a base class. A base class would invite a `revert` implementation that only
-fits one panel.
+decision, and the guard that stops a programmatic restore from marking the
+panel dirty again. Each panel keeps its widgets, its `values()`, and its own
+`restore()` body — which is why this is a held object rather than a base
+class. A base class would invite a `revert` implementation that only fits one
+panel. Publishing a staged edit is the window's job: the panel reports dirty
+through `on_changed`, and the window decides what the edit is worth.
 
 The `restoring()` context manager is the piece worth owning here: forgetting
 the `finally` leaves the panel permanently unable to notice edits, and both
@@ -29,35 +31,23 @@ class StagedEdit:
     """The baseline and the save/revert rule for one panel's staged values.
 
     `values` returns everything the panel edits, as one comparable value.
-    `on_save` receives those values when Save is pressed. `on_restore`
-    receives the baseline when Revert is pressed, and is where the panel puts
-    them back into its widgets. `on_changed` is told whether the panel is
-    dirty, so it can enable its buttons and set its hint.
+    `on_restore` receives the baseline when Revert is pressed, and is where
+    the panel puts them back into its widgets. `on_changed` is told whether
+    the panel is dirty, so the window can enable Apply and record the edit.
     """
 
     def __init__(
         self,
         values: Callable[[], object],
         *,
-        on_save: Callable[[object], None],
         on_restore: Callable[[object], None],
         on_changed: Callable[[bool], None],
     ):
         self._values = values
-        self._on_save = on_save
         self._on_restore = on_restore
         self._on_changed = on_changed
         self._baseline: object | None = None
         self._restoring = False
-
-    @property
-    def restoring_now(self) -> bool:
-        """True while the panel is putting values back into its widgets.
-
-        A panel that reacts to a widget signal by changing other widgets needs
-        to know, so it does not treat its own restore as a user edit.
-        """
-        return self._restoring
 
     @property
     def dirty(self) -> bool:
@@ -73,12 +63,6 @@ class StagedEdit:
         if self._restoring:
             return
         self._on_changed(self.dirty)
-
-    def save(self) -> None:
-        """Hand the staged values to the panel, unless nothing changed."""
-        if not self.dirty:
-            return
-        self._on_save(self._values())
 
     def mark_saved(self) -> None:
         """Accept the current values as the saved state."""

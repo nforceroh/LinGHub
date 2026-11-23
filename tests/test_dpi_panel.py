@@ -5,12 +5,13 @@ Same rule as the lighting panel: edits must not reach the mouse until Save.
 
 import unittest
 
-from linghub.ui.device.dpi_panel import MAX_DPI, MIN_DPI, DpiPanel
+from linghub.ui.device.dpi_panel import DpiPanel
+from linghub.ui.device.dpi_track import MAX_DPI, MIN_DPI
 
 
 def _panel(saved=None):
     calls = []
-    panel = DpiPanel(on_save=lambda *a: calls.append(a))
+    panel = DpiPanel(on_edited=lambda values: calls.append(values))
     panel._calls = calls
     panel.load(
         saved or [
@@ -55,16 +56,11 @@ class StagingTests(unittest.TestCase):
         panel._rate.set_selected(1)  # 250 Hz
         self.assertTrue(panel.dirty)
 
-    def test_edits_are_not_published_before_save(self):
+    def test_an_edit_reports_the_panel_values(self):
+        """The window records what the panel shows, so Apply writes that."""
         panel = _panel()
         _move(panel, 0, 1200)
-        self.assertEqual(panel._calls, [])
-
-    def test_save_publishes_the_values(self):
-        panel = _panel()
-        _move(panel, 0, 1200)
-        panel._save()
-        slots, rate = panel._calls[0]
+        slots, rate = panel._calls[-1]
         self.assertEqual(slots[0][0], 1200)
         self.assertEqual(rate, 1000)
 
@@ -105,7 +101,7 @@ class LoadTests(unittest.TestCase):
         self.assertEqual(panel._rates[panel._rate.get_selected()], 1000)
 
     def test_unknown_report_rate_leaves_the_selection_alone(self):
-        panel = DpiPanel(on_save=lambda *a: None)
+        panel = DpiPanel(on_edited=lambda values: None)
         panel.load([{"dpi": 800}], (125, 250), 1337)
         self.assertFalse(panel.dirty)
 

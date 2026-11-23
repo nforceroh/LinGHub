@@ -10,13 +10,10 @@ from __future__ import annotations
 import gi
 
 gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gtk
+from gi.repository import Gtk
 
-from . import rules as panel_rules
 from .dpi_track import (
-    MAX_DPI,
     MIN_DPI,
     DpiTrack,
     preset_color,
@@ -28,14 +25,18 @@ from ..staged_edit import StagedEdit
 class DpiPanel(Gtk.Box):
     """Editable DPI slots plus the report rate for one profile."""
 
-    def __init__(self, on_save):
+    def __init__(self, on_edited):
+        """`on_edited` is told when the panel's values change.
+
+        The window records the edit in its pending set and enables Apply; the
+        panel itself never writes to the daemon.
+        """
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self._rates: tuple[int, ...] = ()
         self._staged = StagedEdit(
             self._values,
-            on_save=lambda values: on_save(*values),
             on_restore=self._restore,
-            on_changed=self._on_changed,
+            on_changed=lambda changed: on_edited(self._values()) if changed else None,
         )
 
         hint = Gtk.Label(xalign=0, wrap=True)
@@ -150,9 +151,6 @@ class DpiPanel(Gtk.Box):
         self._status.set_text(
             "Unsaved changes — the mouse is unchanged." if changed else ""
         )
-
-    def _save(self) -> None:
-        self._staged.save()
 
     def mark_saved(self) -> None:
         self._staged.mark_saved()

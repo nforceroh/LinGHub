@@ -21,7 +21,7 @@ class DirtyStateTests(unittest.TestCase):
     def _panel(self):
         from linghub.ui.device.led_panel import LedPanel
 
-        panel = LedPanel(on_save=lambda *a: None)
+        panel = LedPanel(on_edited=lambda values: None)
         panel.load({
             0: {"mode": "on", "color": (255, 0, 0), "brightness": 100, "duration": 0},
             1: {"mode": "on", "color": (255, 0, 0), "brightness": 100, "duration": 0},
@@ -61,24 +61,37 @@ class DirtyStateTests(unittest.TestCase):
         panel._brightness.set_value(150)
         self.assertTrue(panel.dirty)
 
-    def test_edits_are_not_published_before_save(self):
-        """The whole point: dragging must not write to the daemon."""
-        calls = []
+    def test_edits_are_not_written_to_the_daemon(self):
+        """The whole point: dragging must not write to the daemon.
+
+        The panel reports its values through on_edited; the window decides
+        what an edit is worth. The panel itself never touches the client.
+        """
         from linghub.ui.device.led_panel import LedPanel
 
-        panel = LedPanel(on_save=lambda *a: calls.append(a))
+        writes = []
+
+        class Client:
+            def __getattr__(self, name):
+                def write(*a):
+                    writes.append((name, a))
+                    return True
+
+                return write
+
+        panel = LedPanel(on_edited=lambda values: None)
+        panel._client = Client()
         panel.load({
             0: {"mode": "on", "color": (255, 0, 0), "brightness": 100, "duration": 0},
         })
-        calls.clear()
         for value in range(100, 121):
             panel._brightness.set_value(value)
-        self.assertEqual(calls, [])
+        self.assertEqual(writes, [])
 
 
 class EffectControlTests(unittest.TestCase):
     def test_four_effect_options_are_available(self):
-        panel = LedPanel(on_save=lambda *a: None)
+        panel = LedPanel(on_edited=lambda values: None)
         self.assertEqual(
             [label for _name, label in MODES],
             ["Off", "Fixed colour", "Cycle colours", "Breathing"],
@@ -86,12 +99,13 @@ class EffectControlTests(unittest.TestCase):
         self.assertEqual(panel._mode.get_selected(), 1)
 
     def test_selecting_cycle_updates_the_panel_mode(self):
-        panel = LedPanel(on_save=lambda *a: None)
+        """Through the DropDown's real signal, not a hand-emitted one."""
+        panel = LedPanel(on_edited=lambda values: None)
         panel._mode.set_selected(2)
         self.assertEqual(panel.mode, "cycle")
 
     def test_rate_and_brightness_values_update_as_labels(self):
-        panel = LedPanel(on_save=lambda *a: None)
+        panel = LedPanel(on_edited=lambda values: None)
         panel.load({
             0: {
                 "mode": "on",

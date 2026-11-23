@@ -85,11 +85,6 @@ class ManageProfiles(Gtk.ScrolledWindow):
         selected game is navigation the reference shows, but with a handful of
         profiles it hides profiles the user came to find.
         """
-        self._fill_profiles(summaries, desktop_profile)
-
-    def _fill_profiles(
-        self, summaries: tuple[ProfileSummary, ...], desktop_profile: str
-    ) -> None:
         while True:
             child = self._profiles_row.get_first_child()
             if child is None:
