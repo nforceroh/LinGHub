@@ -121,7 +121,6 @@ class AssignmentSidebar(Gtk.Box):
             drag.set_actions(Gdk.DragAction.COPY)
             drag.connect("prepare", self._on_drag_prepare)
             row.add_controller(drag)
-            row._drag = drag
             self._list.append(row)
 
     def _on_drag_prepare(self, source, _x: float, _y: float):
