@@ -37,7 +37,7 @@ BuildArch:      noarch
 BuildRequires:  python3-rpm-macros
 BuildRequires:  systemd-rpm-macros
 BuildRequires:  unzip
-Requires:       python3-dbus-fast >= 5.2
+Requires:       python3-dbus-fast >= 5.0
 Requires:       python3-gobject
 Requires:       gtk4
 Requires:       libadwaita
