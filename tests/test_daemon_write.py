@@ -91,18 +91,10 @@ class AcceptedTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(order, ["settle", "refresh"])
 
-    async def test_a_constructor_on_success_is_the_default(self):
-        writes = DaemonWrite(self.recorder.refresh, on_success=self.recorder.settle)
+    async def test_no_on_success_means_no_settle(self):
+        writes = DaemonWrite(self.recorder.refresh)
         await writes.run(
             accepted(), report=self.recorder.report, failure="Could not do it"
-        )
-        self.assertEqual(self.recorder.settled, 1)
-
-    async def test_a_per_call_on_success_wins(self):
-        writes = DaemonWrite(self.recorder.refresh, on_success=self.recorder.settle)
-        await writes.run(
-            accepted(), report=self.recorder.report,
-            failure="Could not do it", on_success=lambda: None,
         )
         self.assertEqual(self.recorder.settled, 0)
 

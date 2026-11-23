@@ -200,6 +200,37 @@ class CanvasDetailsTests(unittest.TestCase):
         # No answer to the prompt yet: nothing has changed.
         self.assertEqual(window._editing_profile(), "desktop")
 
+    def test_details_discard_edits_without_loading(self):
+        """Discard on the DETAILS prompt edits the chosen profile.
+
+        The discard callback once collapsed into a lambda that returned
+        another lambda, so Discard did nothing and the user stayed put.
+        This test captures what _confirm_switch actually passes and calls it.
+        """
+        window = self._window()
+        window._open_manage_profiles()
+        window._start_binding_write("desktop", 2, "key", "KEY_X")
+
+        captured: dict[str, object] = {}
+
+        def capture(body, *, on_cancel, on_discard, on_save):
+            captured["discard"] = on_discard
+            captured["save"] = on_save
+
+        window._confirm_unsaved = capture
+        window._canvas_details("wot")
+
+        # _edit_without_loading ends in a refresh, which needs a loop.
+        import asyncio
+
+        async def run():
+            captured["discard"]()
+
+        asyncio.run(run())
+        self.assertEqual(window._editing_profile(), "wot")
+        self.assertEqual(window._stack.get_visible_child_name(), "editor")
+        self.assertFalse(window._pending.dirty)
+
 
 @unittest.skipUnless(has_cairo(), "needs pycairo and Gtk 4")
 class CanvasWriteTests(unittest.TestCase):

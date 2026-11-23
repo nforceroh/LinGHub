@@ -824,14 +824,14 @@ class MainWindow(Adw.ApplicationWindow):
         that would put it on the mouse are not offered.
         """
         destination = f"switching to {name}" if load else f"editing {name}"
+        if load:
+            on_discard = lambda: self._apply_selection(name)
+        else:
+            on_discard = lambda: self._edit_without_loading(name)
         self._confirm_unsaved(
             f"Apply your changes to {self._editing} before {destination}?",
             on_cancel=self._reselect_current,
-            on_discard=(
-                lambda: self._apply_selection(name)
-                if load
-                else lambda: self._edit_without_loading(name)
-            ),
+            on_discard=on_discard,
             on_save=lambda: self._save_then_select(name, load=load),
         )
 

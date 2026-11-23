@@ -14,8 +14,10 @@ button that already has one moves it, so you can redo individual buttons
 rather than all eleven. Points are highlighted as selected, hovered, or
 already placed.
 
-Right-click a marker to remove it. Ctrl+S saves; the output is
-src/linghub/ui/hotspots.json by default.
+Right-click a marker to remove it. Ctrl+S saves; the output is the user's
+hotspots file (~/.local/share/linghub/hotspots.json) by default, never the
+packaged copy: the package directory is read-only once installed, and placed
+positions are data, not settings (ADR-0011).
 """
 
 from __future__ import annotations

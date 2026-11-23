@@ -38,7 +38,6 @@ class AssignmentSidebar(Gtk.Box):
         self.set_margin_end(12)
         self._on_chosen = on_chosen
         self._choices = assignment_choices()
-        self._rows: dict[str, Gtk.ListBoxRow] = {}
         # Commands is the active group from the start, so the first fill is
         # already filtered and the rows never show their group captions.
         self._group: str | None = "Commands"
@@ -92,7 +91,6 @@ class AssignmentSidebar(Gtk.Box):
             if child is None:
                 break
             self._list.remove(child)
-        self._rows.clear()
 
         pool = self._choices
         if self._group is not None:
@@ -125,8 +123,6 @@ class AssignmentSidebar(Gtk.Box):
             row.add_controller(drag)
             row._drag = drag
             self._list.append(row)
-            key = f"{choice.group}:{choice.kind}:{choice.label}"
-            self._rows[key] = row
 
     def _on_drag_prepare(self, source, _x: float, _y: float):
         """The dragged row's choice as the drag payload.

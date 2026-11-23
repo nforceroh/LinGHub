@@ -41,20 +41,9 @@ class DaemonWrite:
     need to know how the window schedules its reads.
     """
 
-    def __init__(
-        self,
-        refresh: Callable[[], Awaitable[None]],
-        *,
-        on_success: Callable[[], None] | None = None,
-    ):
-        """`refresh` is awaited after a write the daemon accepted.
-
-        `on_success` runs before the refresh, for a caller that has state to
-        settle first — a panel accepting its staged values as the new
-        baseline, for instance.
-        """
+    def __init__(self, refresh: Callable[[], Awaitable[None]]):
+        """`refresh` is awaited after a write the daemon accepted."""
         self._refresh = refresh
-        self._on_success = on_success
 
     async def run(
         self,
@@ -73,7 +62,9 @@ class DaemonWrite:
         the caller has something more specific than `failure` to say; without
         it a refusal is silent, because the change itself already reported a
         reason. `success` is shown on the status line only when the caller
-        passes a reporter that writes there.
+        passes a reporter that writes there. `on_success` runs before the
+        refresh, for a caller that has state to settle first — a panel
+        accepting its staged values as the new baseline, for instance.
         """
         try:
             ok = await change()
@@ -86,9 +77,8 @@ class DaemonWrite:
                 report(rejected)
             return False
 
-        settle = on_success if on_success is not None else self._on_success
-        if settle is not None:
-            settle()
+        if on_success is not None:
+            on_success()
         await self._refresh()
         if success is not None:
             report(success)

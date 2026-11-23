@@ -80,7 +80,6 @@ class ProfileTile(Gtk.Box):
         to click.
         """
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        self._name = summary.name
         self._games = summary.games
 
         self.set_size_request(TILE_WIDTH, 120)
@@ -132,10 +131,6 @@ class ProfileTile(Gtk.Box):
             delete.connect("clicked", lambda _b: self.emit("delete"))
             actions.append(delete)
         self.append(actions)
-
-    @property
-    def name(self) -> str:
-        return self._name
 
     @property
     def game_name(self) -> str | None:
