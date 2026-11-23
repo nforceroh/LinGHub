@@ -35,16 +35,14 @@ Download the two RPMs from the [latest release](https://github.com/nforceroh/Lin
 then:
 
 ```bash
-sudo dnf install ./python3-linghub-0.5.0-1.fc45.noarch.rpm \
-                 ./linghub-ui-0.5.0-1.fc45.noarch.rpm
-systemctl --user enable --now linghub.service
+sudo dnf install ./linghub-0.6.0-1.fc45.noarch.rpm
+systemctl --user enable --now linghub.service linghub-tray.service
 ```
 
-`python3-linghub` is the daemon and the CLI and needs no graphical toolkit;
-`linghub-ui` adds the window and the tray. The package installs the units but
-cannot enable them — there is no user session at install time — so the
-`systemctl` line is yours to run. The unit writes the factory default config
-on first start if there is none.
+One package: the daemon, the CLI, the window and the tray. It installs the
+units but cannot enable them — there is no user session at install time —
+so the `systemctl` line is yours to run. The unit writes the factory default
+config on first start if there is none.
 
 To build the package from a clone:
 

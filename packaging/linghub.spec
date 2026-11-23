@@ -2,6 +2,11 @@
 # source tree: the wheel is the artifact that is tested, and installing its
 # .dist-info is what lets a packaged install report its app version
 # (ADR-0009, ADR-0011).
+#
+# One package. The old python3-linghub / linghub-ui split served a headless
+# install that no user of this project ever had; every install is a desktop
+# machine with the mouse plugged in, and CLI and GUI share one source tree
+# and one version (ADR-0011 records the reversal).
 %global debug_package %{nil}
 %global docdir %{_datadir}/doc/%{name}
 %global _description %{expand:
@@ -28,34 +33,15 @@ BuildArch:      noarch
 BuildRequires:  python3-rpm-macros
 BuildRequires:  systemd-rpm-macros
 BuildRequires:  unzip
-
-%description
-%{_description}
-
-%package -n python3-linghub
-Summary:        %{summary}
 Requires:       python3-dbus-fast >= 5.2
-Requires:       systemd
-%{?python_provide:%python_provide python3-linghub}
-
-%description -n python3-linghub
-%{_description}
-
-This package is the daemon and the command-line interface. It needs no
-graphical toolkit, so it can be installed on a headless machine.
-
-%package ui
-Summary:        Graphical interface and tray icon for LinGHub
-Requires:       python3-linghub = %{version}-%{release}
 Requires:       python3-gobject
 Requires:       gtk4
 Requires:       libadwaita
 Requires:       libappindicator-gtk3
+Requires:       systemd
 
-%description ui
-The GTK4 window for editing profiles and the GTK3 tray icon for switching
-them. The tray is a separate process because GTK3 and GTK4 cannot be loaded
-into one process.
+%description
+%{_description}
 
 %prep
 # The wheel is the source: unpack it rather than a tarball.
@@ -100,19 +86,17 @@ install -m 0644 %{SOURCE3} %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/
 mkdir -p %{buildroot}%{docdir}
 install -m 0644 %{SOURCE6} %{buildroot}%{docdir}/
 
-%files -n python3-linghub
+%files
 %license LICENSE
 %{python3_sitelib}/linghub/
 %{python3_sitelib}/linghub-%{version}.dist-info/
 %{_bindir}/linghub
 %{_userunitdir}/linghub.service
-%{docdir}/config.example.json
-
-%files ui
 %{_userunitdir}/linghub-tray.service
 %{_datadir}/applications/org.linghub.LinGHub.desktop
 %{_metainfodir}/org.linghub.LinGHub.metainfo.xml
 %{_datadir}/icons/hicolor/scalable/apps/org.linghub.LinGHub.svg
+%{docdir}/config.example.json
 
 %changelog
 * Thu Nov 19 2026 LinGHub contributors - 0.5.0-1

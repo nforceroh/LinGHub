@@ -8,12 +8,22 @@ no way to install LinGHub on a machine that did not have the source.
 ## Decision
 
 The wheel is the artifact. `scripts/build-rpm.sh` builds it, and
-`packaging/linghub.spec` wraps it into two RPM subpackages: `python3-linghub`
-(the daemon and CLI, needing only `python3-dbus-fast`) and `linghub-ui` (the
-GTK4 window and GTK3 tray, requiring the base package). The RPM installs the
+`packaging/linghub.spec` wraps it into one RPM: `linghub`, holding the daemon,
+the CLI, the window and the tray. The RPM installs the
 wheel's `.dist-info` alongside the code, so a packaged install reports its
 build-time version through `importlib.metadata` — the fallback ADR-0009
 already described.
+
+An earlier version of this decision split the RPM into `python3-linghub` (daemon
+and CLI, GTK-free) and `linghub-ui` (the window and tray), so a headless machine
+could run the daemon without a desktop stack. No such install ever happened,
+and no user of this project has a mouse plugged into a machine without a
+desktop; the split paid two install commands, two names and two upgrade
+invocations for a scenario that never arrived. One package needs the GUI
+libraries unconditionally, which is what every real install wanted anyway,
+and the CLI stays GTK-free in code (the `ui` and `tray` subcommands import
+`gi` lazily), so a future split could be recovered from the same wheel if a
+headless consumer ever shows up.
 
 A clone install and a packaged install coexist. The clone's unit is
 `linghub-dev.service`; the packaged one owns `linghub.service` in
@@ -37,8 +47,9 @@ system directory, so the two names must differ or the clone silently wins.
 - **A wheel into a fixed-path virtualenv** — no root, but the venv must be
   created with `--system-site-packages` to see `gi`, and it is a mutable
   directory with no upgrade or uninstall path.
-- **One package with hard GUI dependencies** — simpler, but drags a desktop
-  stack onto a headless machine that only wants the daemon.
+- **Two subpackages (`python3-linghub` + `linghub-ui`)** — tried first, and it
+  works, but it serves a headless install that nobody has. Reverted in favour
+  of one package whose GUI libraries are ordinary requirements.
 
 ## Consequences
 

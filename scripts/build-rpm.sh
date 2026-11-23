@@ -71,9 +71,7 @@ sed "s|@VERSION@|$VERSION|" "$REPO_DIR/packaging/linghub.spec" > "$TOP_DIR/SPECS
 echo "Running rpmbuild"
 rpmbuild --define "_topdir $TOP_DIR" -bb "$TOP_DIR/SPECS/linghub.spec"
 
-# The subpackages are named python3-linghub and linghub-ui, so match on the
-# version rather than on a single package name.
-BUILT="$(find "$TOP_DIR/RPMS" -name "*-$VERSION-*.noarch.rpm")"
+BUILT="$(find "$TOP_DIR/RPMS" -name "linghub-$VERSION-*.noarch.rpm")"
 if [ -z "$BUILT" ]; then
     echo "Error: rpmbuild produced no RPMs" >&2
     exit 1
@@ -96,9 +94,9 @@ ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 
 echo "Smoke-testing in $ROOT"
-BASE_RPM="$(find "$DIST_DIR" -name "python3-linghub-$VERSION-*.noarch.rpm" -print -quit)"
+BASE_RPM="$(find "$DIST_DIR" -name "linghub-$VERSION-*.noarch.rpm" -print -quit)"
 if [ -z "$BASE_RPM" ]; then
-    echo "Error: no python3-linghub RPM in $DIST_DIR" >&2
+    echo "Error: no linghub RPM in $DIST_DIR" >&2
     exit 1
 fi
 # rpm2cpio exits 141 (SIGPIPE) once cpio has what it needs, which pipefail
