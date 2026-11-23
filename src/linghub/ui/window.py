@@ -188,17 +188,20 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _build_editor(self) -> Gtk.Widget:
         """The configuration screen: one rail and three configuration views."""
-        self._config_rail = ConfigRail(
-            on_view=self._show_config_view,
-            on_manage=self._open_manage_profiles,
-        )
-
+        # The stack before the rail: the rail selects a view as it is built,
+        # and that selection lands in _show_config_view, which needs the
+        # stack to exist.
         self._config_stack = Gtk.Stack()
         self._config_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
         self._config_stack.add_named(self._build_assignments_view(), "assignments")
         self._config_stack.add_named(self._build_dpi_view(), "dpi")
         self._config_stack.add_named(self._build_lightsync_view(), "lightsync")
         self._config_stack.set_visible_child_name("assignments")
+
+        self._config_rail = ConfigRail(
+            on_view=self._show_config_view,
+            on_manage=self._open_manage_profiles,
+        )
 
         content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         content.append(self._config_rail)
@@ -512,7 +515,11 @@ class MainWindow(Adw.ApplicationWindow):
     def _show_config_view(self, name: str) -> None:
         """Choose one of the three configuration views."""
         self._config_stack.set_visible_child_name(name)
-        self._config_rail.select(name)
+        # The rail is built after the stack, and its initial select() lands
+        # here while its own attribute is still unassigned.
+        rail = getattr(self, "_config_rail", None)
+        if rail is not None:
+            rail.select(name)
 
     def _open_manage_profiles(self) -> None:
         """Open the manage-profiles canvas.
