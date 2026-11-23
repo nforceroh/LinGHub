@@ -33,7 +33,7 @@ jobs:
       - name: Install the build toolchain
         run: >
           dnf install -y --setopt=install_weak_deps=False
-          git rpm-build python3-pip
+          git rpm-build python3-pip python3-rpm-macros systemd-rpm-macros
 
       - name: Check out the tag
         uses: actions/checkout@v4
