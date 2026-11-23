@@ -31,18 +31,21 @@ Two kinds of install are supported, and they can coexist on one machine.
 
 ### Packaged install
 
-Download the two RPMs from the [latest release](https://github.com/nforceroh/LinGHub/releases/latest),
+Download the RPM from the [latest release](https://github.com/nforceroh/LinGHub/releases/latest),
 then:
 
 ```bash
-sudo dnf install ./linghub-0.6.0-1.fc45.noarch.rpm
+sudo dnf install ./linghub-<version>-1.fc45.noarch.rpm
 systemctl --user enable --now linghub.service linghub-tray.service
 ```
 
-One package: the daemon, the CLI, the window and the tray. It installs the
-units but cannot enable them — there is no user session at install time —
-so the `systemctl` line is yours to run. The unit writes the factory default
-config on first start if there is none.
+One package: the daemon, the CLI, the window and the tray. Its dependencies
+come from Fedora's own repositories — `python3-dbus-fast`, `python3-gobject`,
+`gtk4`, `libadwaita`, `libappindicator-gtk3` — and dnf resolves them during
+the install, so nothing needs to be installed by hand first. The package
+installs the units but cannot enable them — there is no user session at
+install time — so the `systemctl` line is yours to run. The unit writes the
+factory default config on first start if there is none.
 
 To build the package from a clone:
 

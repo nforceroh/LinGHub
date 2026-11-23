@@ -49,6 +49,27 @@ jobs:
           .venv/bin/pip install -q -e .
           ./scripts/build-rpm.sh
 
+      - name: Check every dependency is satisfiable in Fedora
+        run: |
+          # The install must resolve on the target release, not just here: a pin
+          # like ">= 5.2" once shipped when Fedora had 5.0, and the user found
+          # it on their machine. Fail here instead. rpmlib(...) entries are
+          # rpm's own internals, not repo packages; file deps (/usr/bin/python3)
+          # are provided by the python3 package and resolve like the rest.
+          set -euo pipefail
+          RPM="$(ls dist/linghub-*.noarch.rpm)"
+          MISSING=0
+          while IFS= read -r req; do
+            case "$req" in
+              rpmlib*|*/*) continue ;;   # rpm internals and file paths inside packages
+            esac
+            if ! dnf -q repoquery --whatprovides "$req" | grep -q .; then
+              echo "NOT SATISFIABLE in Fedora: $req" >&2
+              MISSING=1
+            fi
+          done < <(rpm -qp --requires "$RPM")
+          exit "$MISSING"
+
       - name: Upload the RPM to the release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
